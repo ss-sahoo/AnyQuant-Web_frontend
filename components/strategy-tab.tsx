@@ -41,7 +41,7 @@ export function StrategyTab({ selectedStrategy, setSelectedStrategy, uploadedFil
         </div>
       </div>
 
-      <FileUploader onFileUpload={onFileUpload} />
+      {/* <FileUploader onFileUpload={onFileUpload} /> */}
 
       {uploadedFiles.length > 0 && (
         <div className="mt-6">

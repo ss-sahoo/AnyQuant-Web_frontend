@@ -201,3 +201,24 @@ export const sendOtp = async (email) => {
     throw error
   }
 }
+
+
+// src/api/runBacktest.js or .ts
+
+export const runBacktest = async ({ statement, file }) => {
+  const formData = new FormData()
+  formData.append("statement", JSON.stringify(statement))
+  formData.append("file", file)
+
+  const response = await Fetch("/api/run-backtest/", {
+    method: "POST",
+    body: formData,
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error?.error || "Failed to start backtest")
+  }
+
+  return response.json()
+}
