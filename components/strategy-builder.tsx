@@ -26,6 +26,7 @@ interface IndicatorParams {
   [key: string]: any
 }
 
+// Update the IndicatorInput interface to support CUSTOM_I type
 interface IndicatorInput {
   type: string
   name: string
@@ -33,11 +34,16 @@ interface IndicatorInput {
   input_params: IndicatorParams
 }
 
+// Update the StrategyCondition interface to support inp2 and more complex structures
 interface StrategyCondition {
   statement: string
   index?: number
   inp1?: IndicatorInput
   operator_name?: string
+  inp2?: {
+    type: string
+    value: number
+  }
 }
 
 interface EquityRule {
@@ -138,8 +144,13 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     { id: "atr", label: "ATR" },
   ]
 
-  const extraIndicators = [{ id: "ma", label: "MA" }]
+  // Update the extraIndicators array to include Volume_MA
+  const extraIndicators = [
+    { id: "ma", label: "MA" },
+    { id: "volume-ma", label: "Volume_MA" },
+  ]
 
+  // Update the behaviours array to include crossabove and crossbelow
   const behaviours = [
     { id: "crossing-up", label: "Crossing up" },
     { id: "crossing-down", label: "Crossing down" },
@@ -148,6 +159,8 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     { id: "inside-channel", label: "Inside Channel" },
     { id: "moving-up", label: "Moving up" },
     { id: "moving-down", label: "Moving down" },
+    { id: "crossabove", label: "Cross Above" },
+    { id: "crossbelow", label: "Cross Below" },
   ]
 
   const actions = [
@@ -186,10 +199,10 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     return component.toLowerCase()
   }
 
-  // Function to map behavior labels to operator names
+  // Update the getOperatorName function to support new operators
   const getOperatorName = (behavior: string) => {
-    if (behavior.toLowerCase() === "crossing up") return "crossing_up"
-    if (behavior.toLowerCase() === "crossing down") return "crossing_down"
+    if (behavior.toLowerCase() === "crossing up") return "crossabove"
+    if (behavior.toLowerCase() === "crossing down") return "crossbelow"
     if (behavior.toLowerCase() === "moving up") return "moving_up"
     if (behavior.toLowerCase() === "moving down") return "moving_down"
     if (behavior.toLowerCase() === "greater than") return "greater_than"
@@ -198,7 +211,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     return behavior.toLowerCase()
   }
 
-  // Handle adding components to the strategy
+  // Update the handleAddComponent function to support more complex conditions
   const handleAddComponent = (statementIndex: number, component: string) => {
     const newStatements = [...statements]
     const currentStatement = newStatements[statementIndex]
@@ -215,12 +228,12 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
       if (currentStatement.strategy.length === 0 && statementType === "if") {
         currentStatement.strategy.push({
           statement: "if",
-          index: -1,
         })
       } else if (statementType === "and" && currentStatement.strategy.length > 0) {
         // Add "and" statement
         currentStatement.strategy.push({
           statement: "and",
+          index: -1, // Add index for "and" statements
         })
       }
     } else if (
@@ -231,14 +244,18 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
       if (currentStatement.strategy.length > 0) {
         const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
+        // Determine if it's a custom indicator
+        const isCustom = component.includes("MA") || component.includes("Volume_MA")
+
         // Add the indicator to the last condition
         lastCondition.inp1 = {
-          type: "I",
-          name: component.toUpperCase(),
+          type: isCustom ? "CUSTOM_I" : "I",
+          name: component.includes("_") ? component : component.toUpperCase(),
           timeframe: selectedTimeframe,
-          input_params: {
-            timeperiod: 14, // Default value
-          },
+          input_params: component.includes("MA")
+            ? { ma_length: 20 }
+            : // For MA indicators
+              { timeperiod: 14 }, // For other indicators
         }
 
         // Show the appropriate settings modal
@@ -263,6 +280,14 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
 
         // Add the behavior to the last condition
         lastCondition.operator_name = getOperatorName(component)
+
+        // For crossabove and crossbelow, add inp2 with a default value
+        if (lastCondition.operator_name === "crossabove" || lastCondition.operator_name === "crossbelow") {
+          lastCondition.inp2 = {
+            type: "value",
+            value: lastCondition.operator_name === "crossabove" ? 60 : 50,
+          }
+        }
 
         // Show the appropriate settings modal
         if (component === "Crossing up") {
@@ -315,20 +340,33 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     setShowSideDropdown(false)
   }
 
+  // Add the handleContinue function to generate and log the JSON structure
   const handleContinue = () => {
+    // Generate the JSON structure
+    const currentStatement = statements[activeStatementIndex]
+    console.log(JSON.stringify(currentStatement, null, 2))
+
+    // You can also save this to localStorage or send to an API
+    localStorage.setItem("savedStrategy", JSON.stringify(currentStatement))
+
+    // Navigate to testing page
     router.push("/strategy-testing")
   }
 
-  // Function to render the strategy conditions
+  // Update the renderStrategyConditions function to display inp2 values
   const renderStrategyConditions = (statement: StrategyStatement) => {
     return statement.strategy.map((condition, index) => {
       let display = condition.statement.toUpperCase()
 
       if (condition.inp1) {
-        display += ` ${condition.inp1.name}`
+        display += ` ${condition.inp1.name}(${condition.inp1.timeframe})`
 
         if (condition.operator_name) {
           display += ` ${condition.operator_name.replace("_", " ")}`
+
+          if (condition.inp2) {
+            display += ` ${condition.inp2.value}`
+          }
         }
       }
 

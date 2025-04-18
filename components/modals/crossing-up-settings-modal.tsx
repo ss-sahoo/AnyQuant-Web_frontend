@@ -10,7 +10,7 @@ interface CrossingUpSettingsModalProps {
 
 export function CrossingUpSettingsModal({ onClose, onSave }: CrossingUpSettingsModalProps) {
   const [valueType, setValueType] = useState("value")
-  const [customValue, setCustomValue] = useState("")
+  const [customValue, setCustomValue] = useState("60")
   const [indicatorType, setIndicatorType] = useState("")
   const [timeframe, setTimeframe] = useState("")
   const [showIndicatorDropdown, setShowIndicatorDropdown] = useState(false)
@@ -65,7 +65,7 @@ export function CrossingUpSettingsModal({ onClose, onSave }: CrossingUpSettingsM
   const handleSave = () => {
     onSave({
       valueType,
-      customValue,
+      customValue: Number.parseInt(customValue),
       indicatorType,
       timeframe,
       upperBound,
@@ -79,6 +79,7 @@ export function CrossingUpSettingsModal({ onClose, onSave }: CrossingUpSettingsM
     "1 minute",
     "5 minute",
     "15 minute",
+    "20min",
     "30 minute",
     "45 minute",
     "1 hour",
@@ -207,7 +208,7 @@ export function CrossingUpSettingsModal({ onClose, onSave }: CrossingUpSettingsM
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div ref={modalRef} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md">
         <div className="flex justify-between items-center p-6">
-          <h2 className="text-2xl font-bold text-black">Crossing Up Settings</h2>
+          <h2 className="text-2xl font-bold text-black">Cross Above/Below Settings</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
             <X className="w-6 h-6" />
           </button>

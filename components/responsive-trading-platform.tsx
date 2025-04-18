@@ -6,10 +6,13 @@ import { MobileSidebar } from "@/components/mobile-sidebar"
 import { AlgorithmTable } from "@/components/algorithm-table"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
+
+import { useRouter } from "next/navigation"
 import { mockAlgorithms, mockShortlistedAlgorithms } from "@/lib/mock-data"
 import type { Algorithm } from "@/lib/types"
 
 export function ResponsiveTradingPlatform() {
+  const router = useRouter()
   const [algorithms, setAlgorithms] = useState(mockAlgorithms)
   const [shortlistedAlgorithms, setShortlistedAlgorithms] = useState(mockShortlistedAlgorithms)
 
@@ -40,6 +43,9 @@ export function ResponsiveTradingPlatform() {
       setAlgorithms(algorithms.map((algo) => (algo.id === updatedAlgorithm.id ? updatedAlgorithm : algo)))
     }
   }
+  const handleCreateAlgorithm = () => {
+    router.push("/strategy-builder")
+  }
 
   return (
     <div className="flex min-h-screen bg-[#121420] text-white">
@@ -64,7 +70,7 @@ export function ResponsiveTradingPlatform() {
                   View Dashboard
                 </Button>
               </Link>
-              <Button className="bg-[#6BCAE2] hover:bg-[#5AB9D1] text-black rounded-full px-4 md:px-6 w-full sm:w-auto">
+              <Button   onClick={handleCreateAlgorithm} className="bg-[#6BCAE2] hover:bg-[#5AB9D1] text-black rounded-full px-4 md:px-6 w-full sm:w-auto">
                 Create Algorithm
               </Button>
             </div>
