@@ -1,5 +1,5 @@
 export const Fetch = async (endPoint, config, headerKey) => {
-  const baseUrl = "http://127.0.0.1:8000"
+  const baseUrl = "https://anyquant.co.uk"
   const url = `${baseUrl}${endPoint.startsWith("/") ? endPoint : `/${endPoint}`}`
 
   const headers = new Headers(config.headers || {})

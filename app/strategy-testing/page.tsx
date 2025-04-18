@@ -47,12 +47,9 @@ export default function StrategyTestingPage() {
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
-    if (file) {
-      setInputFile(file)
-      handleFileUpload(file.name) // ✅ show success modal
-    }
+    if (file) setInputFile(file)
   }
-    
+
   const handleRunBacktest = async () => {
     const statementJSON = localStorage.getItem("savedStrategy")
     if (!statementJSON || !inputFile) {
@@ -87,33 +84,13 @@ export default function StrategyTestingPage() {
 
       <main className="flex-1 flex flex-col">
 
-      <div className="w-full">
-  {!showIframe && (
-    <div className="flex items-center justify-center w-full h-[440px] bg-gray-900 border border-gray-700 rounded">
-      <img
-        src="https://www.forextime.com/s3-static/2022-04/display-candlestick-chart-desk.png"
-        alt="Loading Chart..."
-        // className="h-24 w-24"
-      />
-      {/* <p className="text-gray-400 ml-4">Generating interactive chart…</p> */}
-    </div>
-  )}
-
-  {plotHtml && (
-    <iframe
-      title="Plotly Chart"
-      style={{
-        width: "100%",
-        height: "440px",
-        border: "1px solid black",
-        display: showIframe ? "block" : "none",
-      }}
-      srcDoc={plotHtml}
-      onLoad={() => setShowIframe(true)}
-    />
-  )}
-</div>
-
+      {plotHtml && (
+              <iframe
+                title="Plotly Chart"
+                style={{ width: "100%", height: "440px", border: "1px solid black" }}
+                srcDoc={plotHtml}
+              />
+            )}
 
         
         {/* -- Chart area skipped for brevity -- */}
