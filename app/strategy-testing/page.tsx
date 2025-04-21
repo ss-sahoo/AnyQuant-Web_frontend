@@ -23,6 +23,14 @@ export default function StrategyTestingPage() {
 
   const [isDragging, setIsDragging] = useState(false)
 
+  // Add a state for tracking if the chart is expanded
+  const [isChartExpanded, setIsChartExpanded] = useState(false)
+
+  // Add this function to handle expanding/collapsing the chart
+  const toggleChartExpansion = () => {
+    setIsChartExpanded(!isChartExpanded)
+  }
+
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     setIsDragging(true)
@@ -118,14 +126,52 @@ export default function StrategyTestingPage() {
       <main className="flex-1 flex flex-col relative">
         {/* Reduced height of chart area from 440px to 300px */}
         {plotHtml && (
-          <iframe
-            title="Plotly Chart"
-            style={{ width: "100%", height: "300px", border: "1px solid black" }}
-            srcDoc={plotHtml}
-          />
+          <div className="relative">
+            <div
+              className={`transition-all duration-500 ease-in-out ${isChartExpanded ? "fixed inset-0 z-50 bg-black" : "relative"}`}
+            >
+              <iframe
+                title="Plotly Chart"
+                style={{
+                  width: "100%",
+                  height: isChartExpanded ? "100vh" : "300px",
+                  border: "1px solid black",
+                  transition: "height 0.5s ease-in-out",
+                }}
+                srcDoc={plotHtml}
+              />
+              <button
+                onClick={toggleChartExpansion}
+                className={`absolute ${isChartExpanded ? "top-4 right-4" : "top-2 right-2"} bg-[#1E2132] hover:bg-[#2B2E38] text-white p-2 rounded-full transition-all duration-300`}
+                aria-label={isChartExpanded ? "Minimize chart" : "Expand chart"}
+              >
+                {isChartExpanded ? (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path
+                      d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                ) : (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path
+                      d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                )}
+              </button>
+            </div>
+          </div>
         )}
 
-        {!plotHtml && <div className="w-full h-[300px] bg-[#f1f1f1]">{/* Chart area placeholder */}</div>}
+        {!plotHtml && <div className="w-full h-[300px] bg-[#f1f1f1] relative">{/* Chart area placeholder */}</div>}
 
         {/* Tabs */}
         <div className="flex w-full">
@@ -349,6 +395,7 @@ export default function StrategyTestingPage() {
           </div>
         </div>
       )}
+      {isChartExpanded && <div className="fixed inset-0 bg-black bg-opacity-50 z-40" onClick={toggleChartExpansion} />}
     </div>
   )
 }
