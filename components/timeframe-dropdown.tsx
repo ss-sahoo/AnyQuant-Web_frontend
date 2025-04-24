@@ -24,18 +24,17 @@ export function TimeframeDropdown({ onSelect, onClose }: TimeframeDropdownProps)
   }, [onClose])
 
   const timeframes = [
-    "1 minute",
-    "5 minute",
-    "15 minute",
+    "1min",
+    "5min",
+    "15min",
     "20min",
-    "30 minute",
-    "45 minute",
+    "30min",
+    "45min",
     "1h",
     "3h",
-    "4 hour",
+    "4h",
     "1 day",
   ]
-
   return (
     <div ref={dropdownRef} className="absolute z-50 mt-1 w-48 bg-white rounded-md shadow-lg overflow-hidden">
       <div className="max-h-60 overflow-auto">
