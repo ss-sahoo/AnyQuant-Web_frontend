@@ -35,7 +35,6 @@ export function TimeframeDropdown({ onSelect, onClose }: TimeframeDropdownProps)
     "4h",
     "1 day",
   ]
-
   return (
     <div ref={dropdownRef} className="absolute z-50 mt-1 w-48 bg-white rounded-md shadow-lg overflow-hidden">
       <div className="max-h-60 overflow-auto">
