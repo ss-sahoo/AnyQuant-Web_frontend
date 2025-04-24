@@ -204,14 +204,13 @@ export const sendOtp = async (email) => {
 
 // src/api/runBacktest.js or .ts
 
-export const runBacktest = async ({ statement, file }) => {
-  const formData = new FormData()
-  formData.append("statement", JSON.stringify(statement))
-  formData.append("file", file)
-
+export const runBacktest = async ({ statement }) => {
   const response = await Fetch("/api/run-backtest/", {
     method: "POST",
-    body: formData,
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ statement: JSON.stringify(statement) }),
   })
 
   if (!response.ok) {
@@ -221,3 +220,4 @@ export const runBacktest = async ({ statement, file }) => {
 
   return response.json()
 }
+
