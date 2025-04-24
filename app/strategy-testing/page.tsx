@@ -84,22 +84,27 @@ export default function StrategyTestingPage() {
 
   const handleRunBacktest = async () => {
     const statementJSON = localStorage.getItem("savedStrategy")
-    if (!statementJSON || !inputFile) {
-      alert("Statement or file is missing!")
+    if (!statementJSON) {
+      alert("Strategy statement is missing!")
       return
     }
-
+  
     try {
       setIsLoading(true)
       const statement = JSON.parse(statementJSON)
-      const result = await runBacktest({ statement, file: inputFile })
-      setPlotHtml(result.plot_html)
-      setIsLoading(false)
-      console.log("Response:", result)
+  
+      const result = await runBacktest({ statement })
+  
+      if (result?.plot_html) {
+        setPlotHtml(result.plot_html)
+      } else {
+        alert("Backtest failed or no chart returned")
+      }
     } catch (error: any) {
+      alert("Backtest Error: " + (error.message || "Unknown error"))
+      console.error("Backtest API error:", error)
+    } finally {
       setIsLoading(false)
-      alert("Error: " + error.message)
-      console.error("Backtest Error:", error)
     }
   }
 
