@@ -173,7 +173,7 @@ export const updateUserProfile = async (userId, updatedData) => {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`, // Include token if your API is protected
+      Authorization: `Bearer ${token}`, 
     },
     body: JSON.stringify(updatedData),
   })
@@ -221,3 +221,134 @@ export const runBacktest = async ({ statement }) => {
   return response.json()
 }
 
+// AllApiCalls.ts
+export const createStatement = async ({ account, statement }) => {
+  const response = await Fetch("/api/strategies/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      account,
+      side: statement.side,
+      saveresult: statement.saveresult,
+      strategy: statement.strategy,  // this is the nested JSON payload
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error?.error || "Failed to create statement");
+  }
+
+  return response.json();
+};
+
+
+export const fetchStatement = async () => {
+ 
+  const accountId = localStorage.getItem("account_id");  // Assuming the account ID is stored in localStorage
+
+  if (!accountId) {
+    throw new Error("Account ID not found");
+  }
+
+  const response = await fetch(`/api/strategies/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch strategy");
+  }
+
+  const data = await response.json();
+  
+  const filteredData = data.filter((strategy) => strategy.account === accountId);
+
+  return filteredData;
+};
+
+export const fetchStatementDetail = async (statement_id) => {
+  const response = await Fetch(`/api/strategies/${statement_id}/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error?.detail || "Failed to fetch statement detail");
+  }
+
+  return response.json();
+};
+
+
+// API functions for strategy testing
+
+/**
+ * Update strategy with new parameters
+ * @param {number} strategyId - The ID of the strategy to update
+ * @param {number} accountId - The account ID
+ * @param {string} side - The trading side (buy/sell)
+ * @param {string} saveResult - Whether to save the result
+ * @param {string} strID - Strategy ID
+ * @param {number} nTradeMax - Maximum number of trades
+ * @param {number} margin - Margin value
+ * @param {string} lot - Lot size
+ * @param {number} cash - Account deposit amount
+ * @returns {Promise} - Promise with the API response
+ */
+export const updateStrategy = async (
+  strategyId,
+  accountId,
+  side,
+  saveResult,
+  strID,
+  nTradeMax = 1,
+  margin = 0.02,
+  lot = "mini",
+  cash = 10000,
+) => {
+  try {
+    // Parse the strategy JSON if it's a string
+    let strategyData = typeof strID === "string" ? JSON.parse(strID) : strID
+
+    // Add TradingType to the strategy data
+    strategyData = {
+      ...strategyData,
+      TradingType: {
+        nTrade_max: nTradeMax,
+        margin: margin,
+        lot: lot,
+        cash: cash,
+      },
+    }
+
+    const response = await fetch(`http://127.0.0.1:8000/api/strategies/${strategyId}/edit/`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        account: accountId,
+        side: side,
+        saveresult: saveResult,
+        strategy: strategyData,
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error("Error updating strategy:", error)
+    throw error
+  }
+}

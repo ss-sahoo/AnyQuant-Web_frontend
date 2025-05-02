@@ -14,6 +14,7 @@ import { RsiSettingsModal } from "@/components/modals/rsi-settings-modal"
 import { ChannelSettingsModal } from "@/components/modals/channel-settings-modal"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
+import { createStatement } from "@/app/AllApiCalls"
 
 interface StrategyBuilderProps {
   initialName: string
@@ -26,12 +27,13 @@ interface IndicatorParams {
   [key: string]: any
 }
 
-// Update the IndicatorInput interface to support CUSTOM_I type
+// Update the IndicatorInput interface to match the required JSON structure
 interface IndicatorInput {
   type: string
-  name: string
+  input?: string
+  name?: string
   timeframe: string
-  input_params: IndicatorParams
+  input_params?: IndicatorParams
 }
 
 // Update the StrategyCondition interface to support inp2 and more complex structures
@@ -44,6 +46,7 @@ interface StrategyCondition {
     type: string
     value: number
   }
+  timeframe?: string // Added timeframe property to StrategyCondition
 }
 
 interface EquityRule {
@@ -56,6 +59,14 @@ interface StrategyStatement {
   saveresult: string
   strategy: StrategyCondition[]
   Equity: EquityRule[]
+  TradingType?: {
+    NewTrade?: string
+    commission?: number
+    margin?: number
+    asset_type?: string
+    lot?: string
+    cash?: number
+  }
 }
 
 export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuilderProps) {
@@ -69,21 +80,27 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
   const [showMacdModal, setShowMacdModal] = useState(false)
   const [showRsiModal, setShowRsiModal] = useState(false)
   const [showChannelModal, setShowChannelModal] = useState(false)
-  const [showSideDropdown, setShowSideDropdown] = useState(false)
 
-  // Initialize with a sample statement structure
+  // Initialize with a statement structure that includes "if" and a timeframe
   const [statements, setStatements] = useState<StrategyStatement[]>([
     {
       side: "S",
-      saveresult: "Statement_1",
-      strategy: [],
-      Equity: [],
+      saveresult: "Statement 1",
+      strategy: [
+        {
+          statement: "if",
+          timeframe: "3h", // Initial timeframe for new statements
+        },
+      ],
     },
   ])
 
   const [activeStatementIndex, setActiveStatementIndex] = useState(0)
   const [selectedTimeframe, setSelectedTimeframe] = useState("3h")
   const [showTimeframeDropdown, setShowTimeframeDropdown] = useState(false)
+
+  // Track which condition we're setting the timeframe for
+  const [activeConditionIndex, setActiveConditionIndex] = useState<number | null>(null)
 
   // Search functionality
   const [searchTerm, setSearchTerm] = useState("")
@@ -137,6 +154,10 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
   const indicators = [
     { id: "rsi", label: "RSI" },
     { id: "volume", label: "Volume" },
+    { id: "high", label: "High" },
+    { id: "low", label: "Low" },
+    { id: "open", label: "Open" },
+    { id: "close", label: "Close" },
     { id: "macd", label: "MACD" },
     { id: "bollinger", label: "Bollinger" },
     { id: "price", label: "Price" },
@@ -144,10 +165,11 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     { id: "atr", label: "ATR" },
   ]
 
-  // Update the extraIndicators array to include Volume_MA
+  // Update the extraIndicators array to include Volume_MA and RSI_MA
   const extraIndicators = [
     { id: "ma", label: "MA" },
     { id: "volume-ma", label: "Volume_MA" },
+    { id: "rsi-ma", label: "RSI_MA" },
   ]
 
   // Update the behaviours array to include crossabove and crossbelow
@@ -161,6 +183,8 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     { id: "moving-down", label: "Moving down" },
     { id: "crossabove", label: "Cross Above" },
     { id: "crossbelow", label: "Cross Below" },
+    { id: "above", label: "Above" },
+    { id: "below", label: "Below" },
   ]
 
   const actions = [
@@ -182,9 +206,15 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
   const addStatement = () => {
     const newStatements = [...statements]
     newStatements.push({
-      side: "S",
-      saveresult: `Statement_${statements.length + 1}`,
-      strategy: [],
+      side: "s",
+      saveresult: `Statement ${statements.length + 1}`,
+      strategy: [
+        {
+          statement: "if",
+          
+          timeframe: "3h", // Initial timeframe for new statements
+        },
+      ],
       Equity: [],
     })
     setStatements(newStatements)
@@ -208,16 +238,41 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     if (behavior.toLowerCase() === "greater than") return "greater_than"
     if (behavior.toLowerCase() === "less than") return "less_than"
     if (behavior.toLowerCase() === "inside channel") return "inside_channel"
+    if (behavior.toLocaleLowerCase() === "abovee") return "above"
     return behavior.toLowerCase()
   }
 
-  // Update the handleAddComponent function to support more complex conditions
+  // Update the handleAddComponent function to move the timeframe into inp1 and remove it from the condition
   const handleAddComponent = (statementIndex: number, component: string) => {
     const newStatements = [...statements]
     const currentStatement = newStatements[statementIndex]
 
     // Determine what type of component is being added
-    if (
+    if (component.toLowerCase() === "timeframe") {
+      // Add a new timeframe component to the statement
+      if (currentStatement.strategy.length === 0) {
+        // If there are no conditions yet, create an "if" with a timeframe
+        currentStatement.strategy.push({
+    
+          statement: "if",
+          timeframe: selectedTimeframe,
+        })
+      } else {
+        // Add a new timeframe to an existing condition or as a new condition
+        const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+        // If the last condition already has an indicator, add a new "and" condition with timeframe
+        if (lastCondition.inp1) {
+          currentStatement.strategy.push({
+            statement: "and",
+            timeframe: selectedTimeframe,
+          })
+        } else {
+          // Otherwise, add timeframe to the last condition
+          lastCondition.timeframe = selectedTimeframe
+        }
+      }
+    } else if (
       basicComponents.some((c) => c.label.toLowerCase() === component.toLowerCase()) ||
       extraBasicComponents.some((c) => c.label.toLowerCase() === component.toLowerCase())
     ) {
@@ -228,12 +283,13 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
       if (currentStatement.strategy.length === 0 && statementType === "if") {
         currentStatement.strategy.push({
           statement: "if",
+          timeframe: selectedTimeframe, // Add default timeframe
         })
       } else if (statementType === "and" && currentStatement.strategy.length > 0) {
         // Add "and" statement
         currentStatement.strategy.push({
           statement: "and",
-          index: -1, // Add index for "and" statements
+          timeframe: selectedTimeframe, // Add default timeframe
         })
       }
     } else if (
@@ -244,28 +300,78 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
       if (currentStatement.strategy.length > 0) {
         const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
-        // Determine if it's a custom indicator
-        const isCustom = component.includes("MA") || component.includes("Volume_MA")
+        // Get the timeframe from the condition or use the selected timeframe
+        const timeframe = lastCondition.timeframe || selectedTimeframe
 
-        // Add the indicator to the last condition
-        lastCondition.inp1 = {
-          type: isCustom ? "CUSTOM_I" : "I",
-          name: component.includes("_") ? component : component.toUpperCase(),
-          timeframe: selectedTimeframe,
-          input_params: component.includes("MA")
-            ? { ma_length: 20 }
-            : // For MA indicators
-              { timeperiod: 14 }, // For other indicators
+        // Special case for RSI indicator
+        if (component.toLowerCase() === "rsi") {
+          lastCondition.inp1 = {
+            type: "I",
+            name: "RSI", // Uppercase name
+            timeframe: timeframe,
+            input_params: {
+              timeperiod: 14, // Numeric value, not string
+            },
+          }
+        } else if (component.toLowerCase() === "volume") {
+          lastCondition.inp1 = {
+            type: "C",
+            input: "volume",
+            timeframe: timeframe,
+          }
+        } else if (component.toLowerCase() === "rsi_ma" || component.toLowerCase() === "rsi-ma") {
+          // Special handling for RSI_MA
+          lastCondition.inp1 = {
+            type: "CUSTOM_I",
+            name: "RSI_MA",
+            timeframe: timeframe,
+            input_params: {
+              rsi_length: 14,
+              ma_length: 14,
+            },
+          }
+        } else if (component.includes("MA") || component.includes("_MA")) {
+          // Format for custom indicators like Volume_MA
+          lastCondition.inp1 = {
+            type: "CUSTOM_I",
+            name: component.toUpperCase().replace("-", "_"),
+            timeframe: timeframe,
+            input_params: { ma_length: 20 },
+          }
+        } else {
+          // Format for regular indicators
+          // Special handling for OHLC indicators
+          if (["high", "low", "open", "close"].includes(component.toLowerCase())) {
+            lastCondition.inp1 = {
+              type: "C",
+              input: component.toLowerCase(),
+              timeframe: timeframe,
+            }
+          } else {
+            // Other indicators
+            lastCondition.inp1 = {
+              type: "C",
+              input: component.toLowerCase(),
+              timeframe: timeframe,
+            }
+          }
         }
 
+        // Remove the timeframe from the condition since it's now in inp1
+        delete lastCondition.timeframe
+
         // Show the appropriate settings modal
-        if (component === "RSI") {
+        if (
+          component.toLowerCase() === "rsi" ||
+          component.toLowerCase() === "rsi_ma" ||
+          component.toLowerCase() === "rsi-ma"
+        ) {
           setShowRsiModal(true)
         } else if (component === "Stochastic") {
           setShowStochasticModal(true)
         } else if (component === "Bollinger") {
           setShowBollingerModal(true)
-        } else if (component === "Volume") {
+        } else if (component.toLowerCase() === "volume") {
           setShowVolumeModal(true)
         } else if (component === "ATR") {
           setShowAtrModal(true)
@@ -281,25 +387,37 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
         // Add the behavior to the last condition
         lastCondition.operator_name = getOperatorName(component)
 
-        // For crossabove and crossbelow, add inp2 with a default value
-        if (lastCondition.operator_name === "crossabove" || lastCondition.operator_name === "crossbelow") {
+        // Add default inp2 value for behaviors except moving_up and moving_down
+        if (lastCondition.operator_name !== "moving_up" && lastCondition.operator_name !== "moving_down") {
           lastCondition.inp2 = {
             type: "value",
-            value: lastCondition.operator_name === "crossabove" ? 60 : 50,
+            value:
+              lastCondition.operator_name === "crossabove"
+                ? 60
+                : lastCondition.operator_name === "crossbelow"
+                  ? 40
+                  : 50,
           }
         }
 
         // Show the appropriate settings modal
-        if (component === "Crossing up") {
+        if (component === "Crossing up" || component === "Crossing down") {
           setShowCrossingUpModal(true)
         } else if (component === "Inside Channel") {
           setShowChannelModal(true)
         }
       }
+    } else if (component.toLowerCase() === "long" || component.toLowerCase() === "short") {
+      // Set the side based on Long/Short selection
+      currentStatement.side = component.toLowerCase() === "long" ? "B" : "S"
     } else if (component.toLowerCase() === "sl" || component.toLowerCase() === "tp") {
       // Adding equity rules
       const equityType = component.toUpperCase()
       const multiplier = equityType === "SL" ? 1.02 : 0.96
+
+      if (!currentStatement.Equity) {
+        currentStatement.Equity = []
+      }
 
       currentStatement.Equity.push({
         statement: "and",
@@ -316,66 +434,162 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     searchInputRefs.current[statementIndex]?.focus()
   }
 
+  // Update the handleTimeframeSelect function to update the timeframe in inp1 if it exists
   const handleTimeframeSelect = (timeframe: string) => {
     setSelectedTimeframe(timeframe)
-    setShowTimeframeDropdown(false)
 
-    // Update timeframe for the current statement's indicators
-    const newStatements = [...statements]
-    const currentStatement = newStatements[activeStatementIndex]
+    // If we have an active condition, update its timeframe
+    if (activeConditionIndex !== null) {
+      const newStatements = [...statements]
+      const currentStatement = newStatements[activeStatementIndex]
+      const condition = currentStatement.strategy[activeConditionIndex]
 
-    currentStatement.strategy.forEach((condition) => {
-      if (condition.inp1) {
-        condition.inp1.timeframe = timeframe
-      }
-    })
-
-    setStatements(newStatements)
-  }
-
-  const handleSideChange = (side: string) => {
-    const newStatements = [...statements]
-    newStatements[activeStatementIndex].side = side
-    setStatements(newStatements)
-    setShowSideDropdown(false)
-  }
-
-  // Add the handleContinue function to generate and log the JSON structure
-  const handleContinue = () => {
-    // Generate the JSON structure
-    const currentStatement = statements[activeStatementIndex]
-    console.log(JSON.stringify(currentStatement, null, 2))
-
-    // You can also save this to localStorage or send to an API
-    localStorage.setItem("savedStrategy", JSON.stringify(currentStatement))
-
-    // Navigate to testing page
-    router.push("/strategy-testing")
-  }
-
-  // Update the renderStrategyConditions function to display inp2 values
-  const renderStrategyConditions = (statement: StrategyStatement) => {
-    return statement.strategy.map((condition, index) => {
-      let display = condition.statement.toUpperCase()
-
-      if (condition.inp1) {
-        display += ` ${condition.inp1.name}(${condition.inp1.timeframe})`
-
-        if (condition.operator_name) {
-          display += ` ${condition.operator_name.replace("_", " ")}`
-
-          if (condition.inp2) {
-            display += ` ${condition.inp2.value}`
-          }
+      if (condition) {
+        // If the condition has an indicator, update its timeframe
+        if (condition.inp1) {
+          condition.inp1.timeframe = timeframe
+        } else {
+          // Otherwise, update the condition's timeframe
+          condition.timeframe = timeframe
         }
+
+        setStatements(newStatements)
+      }
+    }
+
+    setShowTimeframeDropdown(false)
+  }
+
+  // New function to open timeframe dropdown for a specific condition
+  const openTimeframeDropdown = (statementIndex: number, conditionIndex: number) => {
+    setActiveStatementIndex(statementIndex)
+    setActiveConditionIndex(conditionIndex)
+    setShowTimeframeDropdown(true)
+  }
+
+  // Remove the handleSideChange function
+  // Remove this function entirely
+
+  const handleContinue = async () => {
+    try {
+      const currentStatement = statements[activeStatementIndex]
+
+      // Create a new object with only the required properties
+      const formattedStatement = {
+        side: currentStatement.side,
+        saveresult: currentStatement.saveresult || "Statement 1",
+        strategy: currentStatement.strategy,
       }
 
-      return (
-        <div key={index} className="bg-white text-black px-3 py-1 rounded-md">
-          {display}
-        </div>
-      )
+      // Only add Equity if it's not empty
+      if (currentStatement.Equity && currentStatement.Equity.length > 0) {
+        formattedStatement.Equity = currentStatement.Equity
+      }
+
+      // Only add TradingType if it has properties
+      if (currentStatement.TradingType && Object.keys(currentStatement.TradingType).length > 0) {
+        formattedStatement.TradingType = currentStatement.TradingType
+      }
+
+      const account = localStorage.getItem("user_id")
+      localStorage.setItem("savedStrategy", JSON.stringify(formattedStatement))
+
+      if (!account) {
+        throw new Error("No account found in localStorage")
+      }
+
+      console.log("Formatted statement:", formattedStatement)
+
+      // Call the API with the correct structure
+      const result = await createStatement({
+        account,
+        statement: formattedStatement,
+      })
+
+      console.log("Statement created successfully:", result)
+
+      // Store the strategy ID in localStorage if it exists in the response
+      if (result && result.id) {
+        localStorage.setItem("strategy_id", result.id)
+      }
+
+      router.push("/strategy-testing")
+    } catch (error) {
+      console.error("Error creating statement:", error)
+    }
+  }
+
+  // Update the renderStrategyConditions function to handle the new structure
+  const renderStrategyConditions = (statement: StrategyStatement) => {
+    const components: JSX.Element[] = []
+
+    // Add each condition with appropriate background
+    statement.strategy.forEach((condition, index) => {
+      if (condition.statement) {
+        // Basic components (if, and, etc.) with dark background
+        components.push(
+          <div key={`statement-${index}`} className="bg-[#1A1D2D] text-white px-3 py-1 rounded-md mr-2 mb-2">
+            {condition.statement.toUpperCase()}
+          </div>,
+        )
+      }
+
+      // Add timeframe component if it exists and there's no inp1
+      // Or get timeframe from inp1 if it exists
+      const timeframeValue = condition.inp1 ? condition.inp1.timeframe : condition.timeframe
+
+      if (timeframeValue) {
+        components.push(
+          <div key={`timeframe-${index}`} className="flex flex-col mr-2 mb-2">
+            <div className="text-xs text-gray-400 mb-1">Timeframe</div>
+            <div className="relative">
+              <button
+                onClick={() => openTimeframeDropdown(activeStatementIndex, index)}
+                className="bg-[#1A1D2D] text-white px-3 py-1 rounded-md flex items-center justify-between min-w-[80px]"
+              >
+                {timeframeValue} <ChevronDown className="ml-1 w-4 h-4" />
+              </button>
+            </div>
+          </div>,
+        )
+      }
+
+      if (condition.inp1) {
+        // Indicators with white background
+        const displayName = condition.inp1.name || condition.inp1.input?.toUpperCase() || ""
+        components.push(
+          <div key={`inp1-${index}`} className="bg-white text-black px-3 py-1 rounded-md mr-2 mb-2">
+            {displayName}
+          </div>,
+        )
+      }
+
+      if (condition.operator_name) {
+        // Behaviors with white background
+        components.push(
+          <div key={`operator-${index}`} className="bg-white text-black px-3 py-1 rounded-md mr-2 mb-2">
+            {condition.operator_name.replace("_", " ")}
+          </div>,
+        )
+      }
+
+      // Show inp2 value for all behaviors
+      if (condition.inp2) {
+        // Values with white background
+        components.push(
+          <div key={`inp2-${index}`} className="bg-white text-black px-3 py-1 rounded-md mr-2 mb-2">
+            {condition.inp2.value}
+          </div>,
+        )
+      }
     })
+
+    return components
+  }
+
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false)
+  const toggleDropdown = () => {
+    setIsDropdownOpen(!isDropdownOpen)
   }
 
   // Function to render equity rules
@@ -421,6 +635,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
               </button>
             </div>
             <div className="flex gap-3">
+              {/* Buy/Sell selector */}
               <button className="px-4 py-2 bg-[#1E2132] rounded-full text-white hover:bg-gray-700">Add Setup</button>
               <button
                 className="px-4 py-2 bg-[#1E2132] rounded-full text-white hover:bg-gray-700"
@@ -436,119 +651,58 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
             {statements.map((statement, index) => (
               <div key={index} className="bg-[#1E2132] rounded-lg p-4">
                 <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-medium">{statement.saveresult}</h2>
-                  <div className="flex items-center gap-4">
-                    <div className="relative">
-                      <button
-                        onClick={() => {
-                          setActiveStatementIndex(index)
-                          setShowSideDropdown(!showSideDropdown && activeStatementIndex === index)
-                        }}
-                        className="bg-[#2B2E38] px-3 py-1 rounded-md flex items-center"
-                      >
-                        Side: {statement.side === "S" ? "Sell" : "Buy"} <ChevronDown className="ml-1 w-4 h-4" />
-                      </button>
-
-                      {showSideDropdown && activeStatementIndex === index && (
-                        <div className="absolute z-10 mt-1 w-full bg-[#2B2E38] border border-gray-700 rounded-md shadow-lg">
-                          <button
-                            className="w-full text-left px-4 py-2 hover:bg-[#3A3D47] text-white"
-                            onClick={() => handleSideChange("B")}
-                          >
-                            Buy
-                          </button>
-                          <button
-                            className="w-full text-left px-4 py-2 hover:bg-[#3A3D47] text-white"
-                            onClick={() => handleSideChange("S")}
-                          >
-                            Sell
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                    <button className="p-1 hover:bg-gray-700 rounded-full">
+                  <div className="flex items-center">
+                    <h2 className="text-xl font-medium">{statement.saveresult}</h2>
+                    <span className="ml-3 px-3 py-1 bg-[#2A2D42] rounded-full text-sm">
+                      {statement.side === "B" ? "Long " : "Short"}
+                    </span>
+                  </div>
+                  <div className="relative flex items-center gap-4">
+                    <button onClick={toggleDropdown} className="p-1 hover:bg-gray-700 rounded-full">
                       <MoreVertical className="w-5 h-5" />
                     </button>
+                    {isDropdownOpen && (
+                      <div className="absolute right-0 top-3 bg-[#2A2D42] rounded-lg shadow-md p-2 mt-4">
+                        <button className="w-full text-white p-2 hover:bg-red-600 rounded-lg">Delete</button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 {/* Strategy section */}
                 <div className="bg-[#1A1D2D] p-4 rounded-lg mb-4">
-                  <h3 className="text-sm font-medium mb-2">Strategy</h3>
-                  <div className="flex flex-col space-y-4">
-                    <div className="flex items-center flex-wrap gap-2">
-                      <div className="text-xs text-gray-400 mr-2">Timeframe</div>
-                      <div className="relative">
-                        <button
-                          onClick={() => {
-                            setActiveStatementIndex(index)
-                            setShowTimeframeDropdown(!showTimeframeDropdown)
-                          }}
-                          className="bg-[#2B2E38] px-3 py-1 rounded-md flex items-center"
-                        >
-                          {selectedTimeframe} <ChevronDown className="ml-1 w-4 h-4" />
-                        </button>
+                  {/* Replace the existing flex flex-col space-y-4 div with this: */}
+                  <div className="flex items-center flex-wrap gap-2">
+                    {renderStrategyConditions(statement)}
 
-                        {showTimeframeDropdown && activeStatementIndex === index && (
-                          <TimeframeDropdown
-                            onSelect={handleTimeframeSelect}
-                            onClose={() => setShowTimeframeDropdown(false)}
-                          />
-                        )}
-                      </div>
+                    <div className="relative flex-1 min-w-[200px]">
+                      <input
+                        ref={(el) => (searchInputRefs.current[index] = el)}
+                        type="text"
+                        placeholder="Start typing a component name..."
+                        className="w-full bg-transparent border-none outline-none"
+                        value={activeStatementIndex === index ? searchTerm : ""}
+                        onChange={(e) => handleSearchInput(index, e.target.value)}
+                        onClick={() => setActiveStatementIndex(index)}
+                      />
 
-                      {renderStrategyConditions(statement)}
-
-                      <div className="relative flex-1 min-w-[200px]">
-                        <input
-                          ref={(el) => (searchInputRefs.current[index] = el)}
-                          type="text"
-                          placeholder="Start typing a component name..."
-                          className="w-full bg-transparent border-none outline-none"
-                          value={activeStatementIndex === index ? searchTerm : ""}
-                          onChange={(e) => handleSearchInput(index, e.target.value)}
-                          onClick={() => setActiveStatementIndex(index)}
-                        />
-
-                        {/* Search results dropdown */}
-                        {activeStatementIndex === index && searchResults.length > 0 && (
-                          <div className="absolute z-10 mt-1 w-full bg-[#2B2E38] border border-gray-700 rounded-md shadow-lg max-h-60 overflow-auto">
-                            {searchResults.map((result, idx) => (
-                              <button
-                                key={idx}
-                                className="w-full text-left px-4 py-2 hover:bg-[#3A3D47] text-white"
-                                onClick={() => {
-                                  handleAddComponent(index, result)
-                                }}
-                              >
-                                {result}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                      {/* Search results dropdown */}
+                      {activeStatementIndex === index && searchResults.length > 0 && (
+                        <div className="absolute z-10 mt-1 w-full bg-[#2B2E38] border border-gray-700 rounded-md shadow-lg max-h-60 overflow-auto">
+                          {searchResults.map((result, idx) => (
+                            <button
+                              key={idx}
+                              className="w-full text-left px-4 py-2 hover:bg-[#3A3D47] text-white"
+                              onClick={() => {
+                                handleAddComponent(index, result)
+                              }}
+                            >
+                              {result}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                </div>
-
-                {/* Equity section */}
-                <div className="bg-[#1A1D2D] p-4 rounded-lg">
-                  <h3 className="text-sm font-medium mb-2">Equity Management</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {renderEquityRules(statement)}
-
-                    <button
-                      className="bg-[#2B2E38] px-3 py-1 rounded-md text-sm"
-                      onClick={() => handleAddComponent(index, "SL")}
-                    >
-                      Add SL
-                    </button>
-                    <button
-                      className="bg-[#2B2E38] px-3 py-1 rounded-md text-sm"
-                      onClick={() => handleAddComponent(index, "TP")}
-                    >
-                      Add TP
-                    </button>
                   </div>
                 </div>
               </div>
@@ -585,6 +739,11 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
         <ComponentsSidebar onComponentSelect={(component) => handleAddComponent(activeStatementIndex, component)} />
       </div>
 
+      {/* Timeframe dropdown */}
+      {showTimeframeDropdown && (
+        <TimeframeDropdown onSelect={handleTimeframeSelect} onClose={() => setShowTimeframeDropdown(false)} />
+      )}
+
       {/* Modals */}
       {showStochasticModal && (
         <StochasticSettingsModal
@@ -600,7 +759,28 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
         <CrossingUpSettingsModal
           onClose={() => setShowCrossingUpModal(false)}
           onSave={(settings) => {
-            // Update crossing up settings
+            // Update crossing up settings with the custom value
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+            if (lastCondition.operator_name === "crossabove" || lastCondition.operator_name === "crossbelow") {
+              // Update the inp2 value with the settings from the modal
+              if (settings.valueType === "value" && settings.customValue) {
+                lastCondition.inp2 = {
+                  type: "value",
+                  value: Number(settings.customValue),
+                }
+              } else if (settings.indicatorType) {
+                // Handle indicator type if needed
+                lastCondition.inp2 = {
+                  type: "indicator",
+                  value: 0, // This would be replaced with the actual indicator reference
+                }
+              }
+            }
+
+            setStatements(newStatements)
             setShowCrossingUpModal(false)
           }}
         />
@@ -615,8 +795,29 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
             const currentStatement = newStatements[activeStatementIndex]
             const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
-            if (lastCondition.inp1 && lastCondition.inp1.name === "RSI") {
-              lastCondition.inp1.input_params.timeperiod = settings.rsiLength
+            if (lastCondition.inp1) {
+              if (settings.indicatorType === "rsi-ma") {
+                // Update to RSI_MA
+                lastCondition.inp1 = {
+                  type: "CUSTOM_I",
+                  name: "RSI_MA",
+                  timeframe: lastCondition.inp1.timeframe,
+                  input_params: {
+                    rsi_length: Number(settings.rsiLength),
+                    ma_length: Number(settings.maLength),
+                  },
+                }
+              } else {
+                // Regular RSI
+                lastCondition.inp1 = {
+                  type: "I",
+                  name: "RSI",
+                  timeframe: lastCondition.inp1.timeframe,
+                  input_params: {
+                    timeperiod: Number(settings.rsiLength),
+                  },
+                }
+              }
             }
 
             setStatements(newStatements)
@@ -628,24 +829,131 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
       {showBollingerModal && (
         <BollingerBandsSettingsModal
           onClose={() => setShowBollingerModal(false)}
-          onSave={() => setShowBollingerModal(false)}
+          onSave={(settings) => {
+            // Update Bollinger settings
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+            if (lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
+              // Update with settings from modal
+              lastCondition.inp1.input_params = {
+                ...lastCondition.inp1.input_params,
+                ...settings,
+              }
+            }
+
+            setStatements(newStatements)
+            setShowBollingerModal(false)
+          }}
         />
       )}
 
       {showVolumeModal && (
-        <VolumeSettingsModal onClose={() => setShowVolumeModal(false)} onSave={() => setShowVolumeModal(false)} />
+        <VolumeSettingsModal
+          onClose={() => setShowVolumeModal(false)}
+          onSave={(settings) => {
+            // Update Volume settings
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+            if (lastCondition.inp1) {
+              if (settings.indicatorType === "volume-ma") {
+                // Update to Volume_MA
+                lastCondition.inp1 = {
+                  type: "CUSTOM_I",
+                  name: "VOLUME_MA",
+                  timeframe: lastCondition.inp1.timeframe,
+                  input_params: {
+                    ma_length: Number(settings.maLength),
+                  },
+                }
+              } else {
+                // Regular Volume
+                lastCondition.inp1 = {
+                  type: "C",
+                  input: "volume",
+                  timeframe: lastCondition.inp1.timeframe,
+                }
+              }
+            }
+
+            setStatements(newStatements)
+            setShowVolumeModal(false)
+          }}
+        />
       )}
 
       {showAtrModal && (
-        <AtrSettingsModal onClose={() => setShowAtrModal(false)} onSave={() => setShowAtrModal(false)} />
+        <AtrSettingsModal
+          onClose={() => setShowAtrModal(false)}
+          onSave={(settings) => {
+            // Update ATR settings
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+            if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
+              // Update with settings from modal
+              lastCondition.inp1.input_params = {
+                ...lastCondition.inp1.input_params,
+                ...settings,
+              }
+            }
+
+            setStatements(newStatements)
+            setShowAtrModal(false)
+          }}
+        />
       )}
 
       {showMacdModal && (
-        <MacdSettingsModal onClose={() => setShowMacdModal(false)} onSave={() => setShowMacdModal(false)} />
+        <MacdSettingsModal
+          onClose={() => setShowMacdModal(false)}
+          onSave={(settings) => {
+            // Update MACD settings
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+            if (lastCondition.inp1 && lastCondition.inp1.name === "MACD") {
+              // Update with settings from modal
+              lastCondition.inp1.input_params = {
+                ...lastCondition.inp1.input_params,
+                ...settings,
+              }
+            }
+
+            setStatements(newStatements)
+            setShowMacdModal(false)
+          }}
+        />
       )}
 
       {showChannelModal && (
-        <ChannelSettingsModal onClose={() => setShowChannelModal(false)} onSave={() => setShowChannelModal(false)} />
+        <ChannelSettingsModal
+          onClose={() => setShowChannelModal(false)}
+          onSave={(settings) => {
+            // Update Channel settings
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+            if (lastCondition.operator_name === "inside_channel") {
+              // Update with settings from modal
+              if (settings) {
+                lastCondition.inp2 = {
+                  type: "channel",
+                  value: settings.value || 0,
+                }
+              }
+            }
+
+            setStatements(newStatements)
+            setShowChannelModal(false)
+          }}
+        />
       )}
     </div>
   )
