@@ -589,7 +589,10 @@ export default function StrategyTestingPage() {
 
   const [isDragging, setIsDragging] = useState(false)
 
-  const strID = localStorage.getItem("savedStrategy")
+  // Move localStorage access to useEffect
+  const [strID, setStrID] = useState<string | null>(null)
+  const [strategy, setStrategy] = useState<string | null>(null)
+  const [strategy_id, setStrategyId] = useState<string | null>(null)
 
   // API call related states
   const [accountId, setAccountId] = useState(45)
@@ -598,18 +601,22 @@ export default function StrategyTestingPage() {
   const [nTradeMax, setNTradeMax] = useState(2)
   const [assetType, setAssetType] = useState("currency")
   const [lot, setLot] = useState("mini")
-  const [strategy, setStrategy] = useState(strID)
-  // Get strategy_id from localStorage
-  const [strategy_id, setStrategyId] = useState<string | null>(null)
 
-  useEffect(() => {
-    const id = localStorage.getItem("strategy_id")
-    setStrategyId(id)
-    console.log("this is the strategy_id", id)
-  }, [])
-  console.log(strID, "hello ")
   // Add a state for tracking if the chart is expanded
   const [isChartExpanded, setIsChartExpanded] = useState(false)
+
+  // Initialize localStorage values safely
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedStrategy = localStorage.getItem("savedStrategy")
+      setStrID(savedStrategy)
+      setStrategy(savedStrategy)
+
+      const id = localStorage.getItem("strategy_id")
+      setStrategyId(id)
+      console.log("this is the strategy_id", id)
+    }
+  }, [])
 
   // Add this function to handle expanding/collapsing the chart
   const toggleChartExpansion = () => {
@@ -668,6 +675,9 @@ export default function StrategyTestingPage() {
   }
 
   const handleRunBacktest = async () => {
+    // Safely access localStorage
+    if (typeof window === "undefined") return
+
     const statementJSON = localStorage.getItem("savedStrategy")
     if (!statementJSON) {
       alert("Strategy statement is missing!")
