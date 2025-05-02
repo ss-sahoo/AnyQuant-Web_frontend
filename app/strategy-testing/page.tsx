@@ -24,7 +24,6 @@
 //   const [isDragging, setIsDragging] = useState(false)
 
 
-//   const strategy_id = localStorage.getItem('strategy_id');
 //   console.log("this is the strategy_id",strategy_id);
 
 //   // Add a state for tracking if the chart is expanded
@@ -87,7 +86,6 @@
 //   }
 
 //   const handleRunBacktest = async () => {
-//     const statementJSON = localStorage.getItem("savedStrategy")
 //     if (!statementJSON) {
 //       alert("Strategy statement is missing!")
 //       return
@@ -589,7 +587,6 @@ export default function StrategyTestingPage() {
 
   const [isDragging, setIsDragging] = useState(false)
 
-  // Move localStorage access to useEffect
   const [strID, setStrID] = useState<string | null>(null)
   const [strategy, setStrategy] = useState<string | null>(null)
   const [strategy_id, setStrategyId] = useState<string | null>(null)
@@ -601,22 +598,32 @@ export default function StrategyTestingPage() {
   const [nTradeMax, setNTradeMax] = useState(2)
   const [assetType, setAssetType] = useState("currency")
   const [lot, setLot] = useState("mini")
+  const [parsedStatement, setParsedStatement] = useState<any>(null)
+
 
   // Add a state for tracking if the chart is expanded
   const [isChartExpanded, setIsChartExpanded] = useState(false)
 
-  // Initialize localStorage values safely
   useEffect(() => {
     if (typeof window !== "undefined") {
       const savedStrategy = localStorage.getItem("savedStrategy")
       setStrID(savedStrategy)
       setStrategy(savedStrategy)
-
+  
       const id = localStorage.getItem("strategy_id")
       setStrategyId(id)
-      console.log("this is the strategy_id", id)
+  
+      if (savedStrategy) {
+        try {
+          const parsed = JSON.parse(savedStrategy)
+          setParsedStatement(parsed)
+        } catch (err) {
+          console.error("Error parsing saved strategy:", err)
+        }
+      }
     }
   }, [])
+  
 
   // Add this function to handle expanding/collapsing the chart
   const toggleChartExpansion = () => {
@@ -673,23 +680,18 @@ export default function StrategyTestingPage() {
       handleFile(file)
     }
   }
+  const statementJSON = localStorage.getItem("savedStrategy")
 
   const handleRunBacktest = async () => {
-    // Safely access localStorage
-    if (typeof window === "undefined") return
-
-    const statementJSON = localStorage.getItem("savedStrategy")
-    if (!statementJSON) {
-      alert("Strategy statement is missing!")
+    if (!parsedStatement) {
+      alert("Strategy statement is missing or not parsed!")
       return
     }
-
+  
     try {
       setIsLoading(true)
-      const statement = JSON.parse(statementJSON)
-
-      const result = await runBacktest({ statement })
-
+      const result = await runBacktest({ statement: parsedStatement })
+  
       if (result?.plot_html) {
         setPlotHtml(result.plot_html)
       } else {
@@ -702,6 +704,7 @@ export default function StrategyTestingPage() {
       setIsLoading(false)
     }
   }
+  
 
   const handleClick = () => {
     fileInputRef.current?.click()
