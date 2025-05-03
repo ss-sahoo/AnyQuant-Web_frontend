@@ -10,11 +10,11 @@ interface BollingerBandsSettingsModalProps {
 
 export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsSettingsModalProps) {
   const [level, setLevel] = useState("lower")
-  const [length, setLength] = useState("20")
-  const [maType, setMaType] = useState("SMA")
-  const [source, setSource] = useState("close")
-  const [stdDev, setStdDev] = useState("2")
-  const [offset, setOffset] = useState("2")
+  const [length, setLength] = useState("17")
+  // const [maType, setMaType] = useState("SMA")
+  // const [source, setSource] = useState("close")
+  // const [stdDev, setStdDev] = useState("2")
+  // const [offset, setOffset] = useState("2")
   const [showMaTypeDropdown, setShowMaTypeDropdown] = useState(false)
   const [showSourceDropdown, setShowSourceDropdown] = useState(false)
 
@@ -63,12 +63,7 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
 
   const handleSave = () => {
     onSave({
-      level,
-      length,
-      maType,
-      source,
-      stdDev,
-      offset,
+      timeperiod: Number.parseInt(length, 10) || 17,
     })
   }
 
@@ -123,7 +118,7 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
 
             <div className="space-y-4">
               <div>
-                <label className="block text-base font-medium text-gray-700 mb-2">Length</label>
+                <label className="block text-base font-medium text-gray-700 mb-2">Time Period</label>
                 <input
                   type="text"
                   value={length}
@@ -132,7 +127,7 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
                 />
               </div>
 
-              <div>
+              {/* <div>
                 <label className="block text-base font-medium text-gray-700 mb-2">Basis MA Type</label>
                 <div className="relative" ref={maTypeDropdownRef}>
                   <button
@@ -160,14 +155,14 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
                     </div>
                   )}
                 </div>
-              </div>
+              </div> */}
 
-              <div>
+              {/* <div>
                 <label className="block text-base font-medium text-gray-700 mb-2">Source</label>
                 <div className="relative" ref={sourceDropdownRef}>
                   <button
                     className="w-full p-3 border border-gray-300 rounded text-gray-700 bg-white flex justify-between items-center"
-                    onClick={() => setShowSourceDropdown(!showSourceDropdown)}
+                    onClick={()={() => setShowSourceDropdown(!showSourceDropdown)}
                   >
                     {source}
                     <span className="ml-2">▼</span>
@@ -190,9 +185,9 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
                     </div>
                   )}
                 </div>
-              </div>
+              </div> */}
 
-              <div>
+              {/* <div>
                 <label className="block text-base font-medium text-gray-700 mb-2">Std Dev</label>
                 <input
                   type="text"
@@ -210,7 +205,7 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
                   onChange={(e) => setOffset(e.target.value)}
                   className="w-full p-3 border border-gray-300 rounded text-gray-700"
                 />
-              </div>
+              </div> */}
             </div>
           </div>
 
@@ -227,6 +222,7 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    
   )
 }
