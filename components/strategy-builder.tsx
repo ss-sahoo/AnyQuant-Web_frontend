@@ -211,7 +211,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
       strategy: [
         {
           statement: "if",
-          
+
           timeframe: "3h", // Initial timeframe for new statements
         },
       ],
@@ -253,7 +253,6 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
       if (currentStatement.strategy.length === 0) {
         // If there are no conditions yet, create an "if" with a timeframe
         currentStatement.strategy.push({
-    
           statement: "if",
           timeframe: selectedTimeframe,
         })
@@ -341,14 +340,25 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
         } else {
           // Format for regular indicators
           // Special handling for OHLC indicators
-          if (["high", "low", "open", "close"].includes(component.toLowerCase())) {
+          if (component === "Bollinger") {
+            lastCondition.inp1 = {
+              type: "I",
+              name: "BBANDS",
+              timeframe: timeframe,
+              input: "upperband",
+              input_params: {
+                timeperiod: 17,
+              },
+            }
+          } else if (["high", "low", "open", "close"].includes(component.toLowerCase())) {
+            // Keep the existing OHLC handling
             lastCondition.inp1 = {
               type: "C",
               input: component.toLowerCase(),
               timeframe: timeframe,
             }
           } else {
-            // Other indicators
+            // Keep the existing handling for other indicators
             lastCondition.inp1 = {
               type: "C",
               input: component.toLowerCase(),
@@ -836,10 +846,9 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
             const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
             if (lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
-              // Update with settings from modal
+              // Only update the timeperiod parameter
               lastCondition.inp1.input_params = {
-                ...lastCondition.inp1.input_params,
-                ...settings,
+                timeperiod: settings.timeperiod,
               }
             }
 
