@@ -34,6 +34,7 @@ interface IndicatorInput {
   name?: string
   timeframe: string
   input_params?: IndicatorParams
+  wait?: string
 }
 
 // Update the StrategyCondition interface to support inp2 and more complex structures
@@ -45,6 +46,7 @@ interface StrategyCondition {
   inp2?: {
     type: string
     value: number
+    wait?: string
   }
   timeframe?: string // Added timeframe property to StrategyCondition
 }
@@ -420,6 +422,20 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     } else if (component.toLowerCase() === "long" || component.toLowerCase() === "short") {
       // Set the side based on Long/Short selection
       currentStatement.side = component.toLowerCase() === "long" ? "B" : "S"
+    } else if (component.toLowerCase() === "wait") {
+      // Adding wait parameter to the last condition
+      if (currentStatement.strategy.length > 0) {
+        const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+        // Add wait parameter to inp1 if it exists
+        if (lastCondition.inp1) {
+          lastCondition.inp1.wait = "yes"
+        }
+        // Or add wait parameter to inp2 if it exists and is not a simple value
+        else if (lastCondition.inp2 && lastCondition.inp2.type !== "value") {
+          lastCondition.inp2.wait = "yes"
+        }
+      }
     } else if (component.toLowerCase() === "sl" || component.toLowerCase() === "tp") {
       // Adding equity rules
       const equityType = component.toUpperCase()
@@ -529,6 +545,23 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     }
   }
 
+  // Add a new function to handle the wait parameter toggle for indicators:
+  function toggleWaitParameter(statementIndex: number, conditionIndex: number) {
+    const newStatements = [...statements]
+    const currentStatement = newStatements[statementIndex]
+    const condition = currentStatement.strategy[conditionIndex]
+
+    if (condition.inp1) {
+      // Toggle the wait parameter
+      condition.inp1.wait = condition.inp1.wait === "yes" ? undefined : "yes"
+      setStatements(newStatements)
+    } else if (condition.inp2 && typeof condition.inp2 !== "string" && "type" in condition.inp2) {
+      // Toggle wait for inp2 if it's an object with a type property
+      condition.inp2.wait = condition.inp2.wait === "yes" ? undefined : "yes"
+      setStatements(newStatements)
+    }
+  }
+
   // Update the renderStrategyConditions function to handle the new structure
   const renderStrategyConditions = (statement: StrategyStatement) => {
     const components: JSX.Element[] = []
@@ -568,8 +601,11 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
         // Indicators with white background
         const displayName = condition.inp1.name || condition.inp1.input?.toUpperCase() || ""
         components.push(
-          <div key={`inp1-${index}`} className="bg-white text-black px-3 py-1 rounded-md mr-2 mb-2">
-            {displayName}
+          <div key={`inp1-${index}`} className="flex items-center">
+            <div className="bg-white text-black px-3 py-1 rounded-md mr-2 mb-2">{displayName}</div>
+            {condition.inp1.wait === "yes" && (
+              <div className="ml-1 px-2 py-1 rounded-md text-xs text-white">Wait: Yes</div>
+            )}
           </div>,
         )
       }
@@ -587,8 +623,11 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
       if (condition.inp2) {
         // Values with white background
         components.push(
-          <div key={`inp2-${index}`} className="bg-white text-black px-3 py-1 rounded-md mr-2 mb-2">
-            {condition.inp2.value}
+          <div key={`inp2-${index}`} className="flex items-center">
+            <div className="bg-white text-black px-3 py-1 rounded-md mr-2 mb-2">{condition.inp2.value}</div>
+            {condition.inp2.wait === "yes" && (
+              <div className="ml-1 px-2 py-1 rounded-md text-xs bg-green-500 text-white">Wait: Yes</div>
+            )}
           </div>,
         )
       }
