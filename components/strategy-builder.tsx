@@ -12,9 +12,11 @@ import { AtrSettingsModal } from "@/components/modals/atr-settings-modal"
 import { MacdSettingsModal } from "@/components/modals/macd-settings-modal"
 import { RsiSettingsModal } from "@/components/modals/rsi-settings-modal"
 import { ChannelSettingsModal } from "@/components/modals/channel-settings-modal"
+import { SLTPSettingsModal, type SLTPSettings } from "@/components/modals/sl-tp-settings-modal"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { createStatement } from "@/app/AllApiCalls"
+import type { JSX } from "react/jsx-runtime"
 
 interface StrategyBuilderProps {
   initialName: string
@@ -34,24 +36,31 @@ interface IndicatorInput {
   name?: string
   timeframe: string
   input_params?: IndicatorParams
+  wait?: string
 }
 
 // Update the StrategyCondition interface to support inp2 and more complex structures
 interface StrategyCondition {
   statement: string
   index?: number
-  inp1?: IndicatorInput
+  inp1?: IndicatorInput | { name: string }
   operator_name?: string
-  inp2?: {
-    type: string
-    value: number
-  }
+  inp2?:
+    | {
+        type: string
+        value: number
+        wait?: string
+      }
+    | { name: string }
   timeframe?: string // Added timeframe property to StrategyCondition
+  operator?: string
 }
 
 interface EquityRule {
   statement: string
   operator: string
+  inp1?: { name: string }
+  inp2?: { name: string }
 }
 
 interface StrategyStatement {
@@ -80,6 +89,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
   const [showMacdModal, setShowMacdModal] = useState(false)
   const [showRsiModal, setShowRsiModal] = useState(false)
   const [showChannelModal, setShowChannelModal] = useState(false)
+  const [showSLTPModal, setShowSLTPModal] = useState<{ show: boolean; type: "SL" | "TP" }>({ show: false, type: "SL" })
 
   // Initialize with a statement structure that includes "if" and a timeframe
   const [statements, setStatements] = useState<StrategyStatement[]>([
@@ -92,6 +102,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           timeframe: "3h", // Initial timeframe for new statements
         },
       ],
+      Equity: [],
     },
   ])
 
@@ -191,6 +202,8 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     { id: "long", label: "Long" },
     { id: "short", label: "Short" },
     { id: "wait", label: "Wait" },
+    { id: "sl", label: "SL" },
+    { id: "tp", label: "TP" },
   ]
 
   const tradeManagement = [
@@ -238,8 +251,48 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     if (behavior.toLowerCase() === "greater than") return "greater_than"
     if (behavior.toLowerCase() === "less than") return "less_than"
     if (behavior.toLowerCase() === "inside channel") return "inside_channel"
-    if (behavior.toLocaleLowerCase() === "abovee") return "above"
+    if (behavior.toLowerCase() === "above") return "above"
     return behavior.toLowerCase()
+  }
+
+  // Handle SLTP settings
+  const handleSLTPSettings = (settings: SLTPSettings) => {
+    const newStatements = [...statements]
+    const currentStatement = newStatements[activeStatementIndex]
+
+    // Make sure Equity array exists
+    if (!currentStatement.Equity) {
+      currentStatement.Equity = []
+    }
+
+    if (settings.useAdvanced) {
+      // Advanced format with inp1 and inp2
+      currentStatement.Equity.push({
+        statement: "and",
+        operator: `inp1 = inp2 ${settings.direction} ${settings.value}pips`,
+        inp1: { name: settings.type },
+        inp2: { name: settings.inp2 || "Entry_Price" },
+      })
+    } else {
+      // Simple format
+      if (settings.valueType === "pips") {
+        currentStatement.Equity.push({
+          statement: "and",
+          operator: `${settings.type} = Entry_Price ${settings.direction} ${settings.value}pips`,
+        })
+      } else if (settings.valueType === "percentage") {
+        // For percentage, we use multiplication
+        const actualMultiplier =
+          settings.type === "SL" ? 1 - Number(settings.value) / 100 : 1 + Number(settings.value) / 100
+
+        currentStatement.Equity.push({
+          statement: "and",
+          operator: `${settings.type} = Entry_Price * ${actualMultiplier}`,
+        })
+      }
+    }
+
+    setStatements(newStatements)
   }
 
   // Update the handleAddComponent function to move the timeframe into inp1 and remove it from the condition
@@ -420,19 +473,26 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     } else if (component.toLowerCase() === "long" || component.toLowerCase() === "short") {
       // Set the side based on Long/Short selection
       currentStatement.side = component.toLowerCase() === "long" ? "B" : "S"
-    } else if (component.toLowerCase() === "sl" || component.toLowerCase() === "tp") {
-      // Adding equity rules
-      const equityType = component.toUpperCase()
-      const multiplier = equityType === "SL" ? 1.02 : 0.96
+    } else if (component.toLowerCase() === "wait") {
+      // Adding wait parameter to the last condition
+      if (currentStatement.strategy.length > 0) {
+        const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
-      if (!currentStatement.Equity) {
-        currentStatement.Equity = []
+        // Add wait parameter to inp1 if it exists
+        if (lastCondition.inp1 && "wait" in lastCondition.inp1) {
+          lastCondition.inp1.wait = lastCondition.inp1.wait === "yes" ? undefined : "yes"
+        }
+        // Or add wait parameter to inp2 if it exists and is not a simple value
+        else if (lastCondition.inp2 && typeof lastCondition.inp2 !== "string" && "type" in lastCondition.inp2) {
+          lastCondition.inp2.wait = lastCondition.inp2.wait === "yes" ? undefined : "yes"
+        }
       }
-
-      currentStatement.Equity.push({
-        statement: "and",
-        operator: `${equityType} = Close * ${multiplier}`,
-      })
+    } else if (component.toLowerCase() === "sl") {
+      // Show SL settings modal
+      setShowSLTPModal({ show: true, type: "SL" })
+    } else if (component.toLowerCase() === "tp") {
+      // Show TP settings modal
+      setShowSLTPModal({ show: true, type: "TP" })
     }
 
     setStatements(newStatements)
@@ -456,7 +516,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
 
       if (condition) {
         // If the condition has an indicator, update its timeframe
-        if (condition.inp1) {
+        if (condition.inp1 && "timeframe" in condition.inp1) {
           condition.inp1.timeframe = timeframe
         } else {
           // Otherwise, update the condition's timeframe
@@ -477,43 +537,61 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     setShowTimeframeDropdown(true)
   }
 
-  // Remove the handleSideChange function
-  // Remove this function entirely
-
+  // Replace the handleContinue function with this updated version
   const handleContinue = async () => {
     try {
       const currentStatement = statements[activeStatementIndex]
 
-      // Create a new object with only the required properties
-      const formattedStatement = {
-        side: currentStatement.side,
-        saveresult: currentStatement.saveresult || "Statement 1",
-        strategy: currentStatement.strategy,
+      // Create a deep copy of the strategy array
+      const strategyWithEquity = JSON.parse(JSON.stringify(currentStatement.strategy))
+
+      // If there are equity rules, add them to the strategy array
+      if (currentStatement.Equity && currentStatement.Equity.length > 0) {
+        // Add equity rules to the strategy array
+        currentStatement.Equity.forEach((rule) => {
+          strategyWithEquity.push({
+            ...rule,
+            // Mark this as an equity rule so we can identify it later if needed
+            isEquityRule: true,
+          })
+        })
       }
 
-      // Only add Equity if it's not empty
-      if (currentStatement.Equity && currentStatement.Equity.length > 0) {
-        formattedStatement.Equity = currentStatement.Equity
+      // Create the statement object to send to the API
+      const apiStatement = {
+        side: currentStatement.side,
+        saveresult: currentStatement.saveresult || "Statement 1",
+        strategy: strategyWithEquity,
       }
 
       // Only add TradingType if it has properties
       if (currentStatement.TradingType && Object.keys(currentStatement.TradingType).length > 0) {
-        formattedStatement.TradingType = currentStatement.TradingType
+        apiStatement.TradingType = currentStatement.TradingType
       }
 
       const account = localStorage.getItem("user_id")
-      localStorage.setItem("savedStrategy", JSON.stringify(formattedStatement))
+
+      // Save the complete statement (including separate Equity array) for local use
+      localStorage.setItem(
+        "savedStrategy",
+        JSON.stringify({
+          side: currentStatement.side,
+          saveresult: currentStatement.saveresult,
+          strategy: currentStatement.strategy,
+          Equity: currentStatement.Equity,
+        }),
+      )
 
       if (!account) {
         throw new Error("No account found in localStorage")
       }
 
-      console.log("Formatted statement:", formattedStatement)
+      console.log("Sending to API:", apiStatement)
 
-      // Call the API with the correct structure
+      // Call the API with the modified structure
       const result = await createStatement({
         account,
-        statement: formattedStatement,
+        statement: apiStatement,
       })
 
       console.log("Statement created successfully:", result)
@@ -526,6 +604,23 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
       router.push("/strategy-testing")
     } catch (error) {
       console.error("Error creating statement:", error)
+    }
+  }
+
+  // Add a new function to handle the wait parameter toggle for indicators:
+  function toggleWaitParameter(statementIndex: number, conditionIndex: number) {
+    const newStatements = [...statements]
+    const currentStatement = newStatements[statementIndex]
+    const condition = currentStatement.strategy[conditionIndex]
+
+    if (condition.inp1 && "wait" in condition.inp1) {
+      // Toggle the wait parameter
+      condition.inp1.wait = condition.inp1.wait === "yes" ? undefined : "yes"
+      setStatements(newStatements)
+    } else if (condition.inp2 && typeof condition.inp2 !== "string" && "type" in condition.inp2) {
+      // Toggle wait for inp2 if it's an object with a type property
+      condition.inp2.wait = condition.inp2.wait === "yes" ? undefined : "yes"
+      setStatements(newStatements)
     }
   }
 
@@ -546,7 +641,8 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
 
       // Add timeframe component if it exists and there's no inp1
       // Or get timeframe from inp1 if it exists
-      const timeframeValue = condition.inp1 ? condition.inp1.timeframe : condition.timeframe
+      const timeframeValue =
+        condition.inp1 && "timeframe" in condition.inp1 ? condition.inp1.timeframe : condition.timeframe
 
       if (timeframeValue) {
         components.push(
@@ -566,10 +662,17 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
 
       if (condition.inp1) {
         // Indicators with white background
-        const displayName = condition.inp1.name || condition.inp1.input?.toUpperCase() || ""
+        const displayName =
+          "name" in condition.inp1
+            ? condition.inp1.name
+            : condition.inp1.name || condition.inp1.input?.toUpperCase() || ""
+
         components.push(
-          <div key={`inp1-${index}`} className="bg-white text-black px-3 py-1 rounded-md mr-2 mb-2">
-            {displayName}
+          <div key={`inp1-${index}`} className="flex items-center">
+            <div className="bg-white text-black px-3 py-1 rounded-md mr-2 mb-2">{displayName}</div>
+            {"wait" in condition.inp1 && condition.inp1.wait === "yes" && (
+              <div className="ml-1 px-2 py-1 rounded-md text-xs bg-green-500 text-white">Wait: Yes</div>
+            )}
           </div>,
         )
       }
@@ -586,29 +689,51 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
       // Show inp2 value for all behaviors
       if (condition.inp2) {
         // Values with white background
-        components.push(
-          <div key={`inp2-${index}`} className="bg-white text-black px-3 py-1 rounded-md mr-2 mb-2">
-            {condition.inp2.value}
-          </div>,
-        )
+        if ("type" in condition.inp2 && condition.inp2.type === "value") {
+          components.push(
+            <div key={`inp2-${index}`} className="flex items-center">
+              <div className="bg-white text-black px-3 py-1 rounded-md mr-2 mb-2">{condition.inp2.value}</div>
+              {condition.inp2.wait === "yes" && (
+                <div className="ml-1 px-2 py-1 rounded-md text-xs bg-green-500 text-white">Wait: Yes</div>
+              )}
+            </div>,
+          )
+        } else if ("name" in condition.inp2) {
+          components.push(
+            <div key={`inp2-${index}`} className="flex items-center">
+              <div className="bg-white text-black px-3 py-1 rounded-md mr-2 mb-2">{condition.inp2.name}</div>
+            </div>,
+          )
+        }
       }
     })
 
     return components
   }
 
+  // Function to render equity rules
+  const renderEquityRules = (statement: StrategyStatement) => {
+    if (!statement.Equity || statement.Equity.length === 0) {
+      return null
+    }
+
+    return (
+      <div className="mt-4">
+        <h4 className="text-sm font-medium mb-2">Equity Rules</h4>
+        <div className="flex flex-wrap gap-2">
+          {statement.Equity.map((rule, index) => (
+            <div key={index} className="bg-[#2A2D42] text-white px-3 py-1 rounded-md">
+              {rule.operator}
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const toggleDropdown = () => {
     setIsDropdownOpen(!isDropdownOpen)
-  }
-
-  // Function to render equity rules
-  const renderEquityRules = (statement: StrategyStatement) => {
-    return statement.Equity.map((rule, index) => (
-      <div key={index} className="bg-white text-black px-3 py-1 rounded-md">
-        {rule.operator}
-      </div>
-    ))
   }
 
   return (
@@ -714,6 +839,9 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
                       )}
                     </div>
                   </div>
+
+                  {/* Render equity rules if they exist */}
+                  {renderEquityRules(statement)}
                 </div>
               </div>
             ))}
@@ -805,7 +933,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
             const currentStatement = newStatements[activeStatementIndex]
             const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
-            if (lastCondition.inp1) {
+            if (lastCondition.inp1 && "timeframe" in lastCondition.inp1) {
               if (settings.indicatorType === "rsi-ma") {
                 // Update to RSI_MA
                 lastCondition.inp1 = {
@@ -845,7 +973,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
             const currentStatement = newStatements[activeStatementIndex]
             const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
-            if (lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
+            if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
               // Only update the timeperiod parameter
               lastCondition.inp1.input_params = {
                 timeperiod: settings.timeperiod,
@@ -867,7 +995,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
             const currentStatement = newStatements[activeStatementIndex]
             const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
-            if (lastCondition.inp1) {
+            if (lastCondition.inp1 && "timeframe" in lastCondition.inp1) {
               if (settings.indicatorType === "volume-ma") {
                 // Update to Volume_MA
                 lastCondition.inp1 = {
@@ -903,7 +1031,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
             const currentStatement = newStatements[activeStatementIndex]
             const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
-            if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
+            if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
               // Update with settings from modal
               lastCondition.inp1.input_params = {
                 ...lastCondition.inp1.input_params,
@@ -926,7 +1054,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
             const currentStatement = newStatements[activeStatementIndex]
             const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
-            if (lastCondition.inp1 && lastCondition.inp1.name === "MACD") {
+            if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "MACD") {
               // Update with settings from modal
               lastCondition.inp1.input_params = {
                 ...lastCondition.inp1.input_params,
@@ -961,6 +1089,18 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
 
             setStatements(newStatements)
             setShowChannelModal(false)
+          }}
+        />
+      )}
+
+      {/* SL/TP Settings Modal */}
+      {showSLTPModal.show && (
+        <SLTPSettingsModal
+          type={showSLTPModal.type}
+          onClose={() => setShowSLTPModal({ show: false, type: "SL" })}
+          onSave={(settings) => {
+            handleSLTPSettings(settings)
+            setShowSLTPModal({ show: false, type: "SL" })
           }}
         />
       )}

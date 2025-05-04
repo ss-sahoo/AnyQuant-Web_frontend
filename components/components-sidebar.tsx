@@ -37,10 +37,12 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
   const indicators = [
     { id: "rsi", label: "RSI" },
     { id: "volume", label: "Volume" },
-    {id:"high", label:"High"},
-    {id:"low", label:"Low"},
-    {id:"open", label:"Open"},
-    {id:"close", label:"close"},
+    { id: "high", label: "High" },
+    { id: "low", label: "Low" },
+    { id: "open", label: "Open" },
+    { id: "above", label: "Above" },
+    { id: "below", label: "Below" },
+    { id: "close", label: "close" },
     { id: "macd", label: "MACD" },
     { id: "bollinger", label: "Bollinger" },
     { id: "price", label: "Price" },
@@ -55,17 +57,18 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
     { id: "crossing-down", label: "Crossing down" },
     { id: "moving-up", label: "Moving up" },
     { id: "moving-down", label: "Moving down" },
-    {id:"above", label:"Above"},
+    { id: "above", label: "Above" },
     { id: "greater-than", label: "Greater than" },
     { id: "less-than", label: "Less than" },
     { id: "inside-channel", label: "Inside Channel" },
-
   ]
 
   const actions = [
     { id: "long", label: "Long" },
     { id: "short", label: "Short" },
     { id: "wait", label: "Wait" },
+    { id: "sl", label: "SL" },
+    { id: "tp", label: "TP" },
   ]
 
   const tradeManagement = [
