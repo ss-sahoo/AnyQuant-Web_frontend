@@ -479,12 +479,33 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
         const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
         // Add wait parameter to inp1 if it exists
-        if (lastCondition.inp1 && "wait" in lastCondition.inp1) {
-          lastCondition.inp1.wait = lastCondition.inp1.wait === "yes" ? undefined : "yes"
+        if (lastCondition.inp1) {
+          // Add wait parameter to inp1 regardless of whether it already has one or not
+          if ("wait" in lastCondition.inp1) {
+            // Toggle if it already exists
+            lastCondition.inp1.wait =
+              lastCondition.inp1.wait === "yes"
+                ? undefined
+                : "yes"
+          } else {
+            // Add it if it doesn't exist
+            if (typeof lastCondition.inp1 === "object") {
+              lastCondition.inp1.wait = "yes"
+            }
+          }
         }
         // Or add wait parameter to inp2 if it exists and is not a simple value
         else if (lastCondition.inp2 && typeof lastCondition.inp2 !== "string" && "type" in lastCondition.inp2) {
-          lastCondition.inp2.wait = lastCondition.inp2.wait === "yes" ? undefined : "yes"
+          if ("wait" in lastCondition.inp2) {
+            // Toggle if it already exists
+            lastCondition.inp2.wait =
+              lastCondition.inp2.wait === "yes"
+                ? undefined
+                : "yes"
+          } else {
+            // Add it if it doesn't exist
+            lastCondition.inp2.wait = "yes"
+          }
         }
       }
     } else if (component.toLowerCase() === "sl") {
@@ -542,26 +563,12 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     try {
       const currentStatement = statements[activeStatementIndex]
 
-      // Create a deep copy of the strategy array
-      const strategyWithEquity = JSON.parse(JSON.stringify(currentStatement.strategy))
-
-      // If there are equity rules, add them to the strategy array
-      if (currentStatement.Equity && currentStatement.Equity.length > 0) {
-        // Add equity rules to the strategy array
-        currentStatement.Equity.forEach((rule) => {
-          strategyWithEquity.push({
-            ...rule,
-            // Mark this as an equity rule so we can identify it later if needed
-            isEquityRule: true,
-          })
-        })
-      }
-
-      // Create the statement object to send to the API
+      // Create the statement object to send to the API with the structure you want
       const apiStatement = {
         side: currentStatement.side,
         saveresult: currentStatement.saveresult || "Statement 1",
-        strategy: strategyWithEquity,
+        strategy: currentStatement.strategy,
+        Equity: currentStatement.Equity || [],
       }
 
       // Only add TradingType if it has properties
@@ -571,16 +578,8 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
 
       const account = localStorage.getItem("user_id")
 
-      // Save the complete statement (including separate Equity array) for local use
-      localStorage.setItem(
-        "savedStrategy",
-        JSON.stringify({
-          side: currentStatement.side,
-          saveresult: currentStatement.saveresult,
-          strategy: currentStatement.strategy,
-          Equity: currentStatement.Equity,
-        }),
-      )
+      // Save the complete statement for local use
+      localStorage.setItem("savedStrategy", JSON.stringify(apiStatement))
 
       if (!account) {
         throw new Error("No account found in localStorage")
@@ -588,7 +587,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
 
       console.log("Sending to API:", apiStatement)
 
-      // Call the API with the modified structure
+      // Call the API with the structured data
       const result = await createStatement({
         account,
         statement: apiStatement,
@@ -607,19 +606,35 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     }
   }
 
-  // Add a new function to handle the wait parameter toggle for indicators:
+  // Update the toggleWaitParameter function to handle adding wait parameter if it doesn't exist
   function toggleWaitParameter(statementIndex: number, conditionIndex: number) {
     const newStatements = [...statements]
     const currentStatement = newStatements[statementIndex]
     const condition = currentStatement.strategy[conditionIndex]
 
-    if (condition.inp1 && "wait" in condition.inp1) {
-      // Toggle the wait parameter
-      condition.inp1.wait = condition.inp1.wait === "yes" ? undefined : "yes"
+    if (condition.inp1) {
+      // Add or toggle wait parameter for inp1
+      if ("wait" in condition.inp1) {
+        // Toggle if it already exists
+        condition.inp1.wait =
+          condition.inp1.wait === "yes" ? undefined : "yes"
+      } else {
+        // Add it if it doesn't exist
+        if (typeof condition.inp1 === "object") {
+          condition.inp1.wait = "yes"
+        }
+      }
       setStatements(newStatements)
     } else if (condition.inp2 && typeof condition.inp2 !== "string" && "type" in condition.inp2) {
-      // Toggle wait for inp2 if it's an object with a type property
-      condition.inp2.wait = condition.inp2.wait === "yes" ? undefined : "yes"
+      // Add or toggle wait for inp2
+      if ("wait" in condition.inp2) {
+        // Toggle if it already exists
+        condition.inp2.wait =
+          condition.inp2.wait === "yes" ? undefined : "yes"
+      } else {
+        // Add it if it doesn't exist
+        condition.inp2.wait = "yes"
+      }
       setStatements(newStatements)
     }
   }
@@ -670,8 +685,8 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
         components.push(
           <div key={`inp1-${index}`} className="flex items-center">
             <div className="bg-white text-black px-3 py-1 rounded-md mr-2 mb-2">{displayName}</div>
-            {"wait" in condition.inp1 && condition.inp1.wait === "yes" && (
-              <div className="ml-1 px-2 py-1 rounded-md text-xs bg-green-500 text-white">Wait: Yes</div>
+            {"wait" in condition.inp1 && condition.inp1.wait && (
+              <div className="ml-1 px-2 py-1 rounded-md text-xs  text-white">Wait: Yes</div>
             )}
           </div>,
         )
@@ -693,8 +708,8 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           components.push(
             <div key={`inp2-${index}`} className="flex items-center">
               <div className="bg-white text-black px-3 py-1 rounded-md mr-2 mb-2">{condition.inp2.value}</div>
-              {condition.inp2.wait === "yes" && (
-                <div className="ml-1 px-2 py-1 rounded-md text-xs bg-green-500 text-white">Wait: Yes</div>
+              {condition.inp2.wait && (
+                <div className="ml-1 px-2 py-1 rounded-md text-xs text-white">Wait: Yes</div>
               )}
             </div>,
           )
@@ -1000,7 +1015,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
                 // Update to Volume_MA
                 lastCondition.inp1 = {
                   type: "CUSTOM_I",
-                  name: "VOLUME_MA",
+                  name: "Volume_MA",
                   timeframe: lastCondition.inp1.timeframe,
                   input_params: {
                     ma_length: Number(settings.maLength),
