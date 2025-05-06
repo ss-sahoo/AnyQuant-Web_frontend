@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Search } from "lucide-react"
 import { Input } from "@/components/ui/input"
@@ -9,6 +10,155 @@ interface ComponentsSidebarProps {
 }
 
 export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps) {
+  const [showAllBasic, setShowAllBasic] = useState(false)
+  const [showAllIndicators, setShowAllIndicators] = useState(false)
+  const [showAllBehaviors, setShowAllBehaviors] = useState(false)
+  const [showAllActions, setShowAllActions] = useState(false)
+  const [showAllTradeManagement, setShowAllTradeManagement] = useState(false)
+
+  const [indicatorSearch, setIndicatorSearch] = useState("")
+  const [behaviorSearch, setBehaviorSearch] = useState("")
+
+  // Complete list of basic components
+  const allBasicComponents = [
+    "If",
+    "Unless",
+    "Then",
+    "Timeframe",
+    "Duration",
+    "When",
+    "At Candle",
+    "Is not",
+    "And",
+    "At Least",
+    "At Most",
+    "Or",
+    "Not",
+    "Else",
+    "For Each",
+    "While",
+    "Until",
+    "After",
+    "Before",
+    "Between",
+    "Outside",
+  ]
+
+  // Complete list of indicators
+  const allIndicators = [
+    "RSI",
+    "Volume",
+    "MACD",
+    "Bollinger",
+    "Price",
+    "Stochastic",
+    "ATR",
+    "High",
+    "Low",
+    "Open",
+    "Close",
+    "EMA",
+    "SMA",
+    "WMA",
+    "VWMA",
+    "RSI_MA",
+    "Volume_MA",
+    "ADX",
+    "CCI",
+    "ROC",
+    "MFI",
+    "OBV",
+    "Ichimoku",
+    "Parabolic SAR",
+    "Pivot Points",
+    "Fibonacci",
+    "Keltner Channel",
+    "Momentum",
+    "Williams %R",
+    "Awesome Oscillator",
+    "TRIX",
+    "Chaikin Money Flow",
+  ]
+
+  // Complete list of behaviors
+  const allBehaviors = [
+    "Crossing up",
+    "Crossing down",
+    "Greater than",
+    "Less than",
+    "Inside Channel",
+    "Moving up",
+    "Moving down",
+    "Cross Above",
+    "Cross Below",
+    "Above",
+    "Below",
+    "Equal to",
+    "Not equal to",
+    "Increasing",
+    "Decreasing",
+    "Flat",
+    "Diverging",
+    "Converging",
+    "Breaking out",
+    "Pulling back",
+    "Consolidating",
+    "Trending",
+    "Reversing",
+    "Oscillating",
+    "Oversold",
+    "Overbought",
+    "Neutral",
+  ]
+
+  // Complete list of actions
+  const allActions = [
+    "Long",
+    "Short",
+    "Wait",
+    "SL",
+    "TP",
+    "Buy",
+    "Sell",
+    "Hold",
+    "Exit",
+    "Scale in",
+    "Scale out",
+    "Hedge",
+    "Reverse position",
+    "Partial close",
+  ]
+
+  // Complete list of trade management options
+  const allTradeManagement = [
+    "Manage",
+    "Close",
+    "Cancel",
+    "No Trade",
+    "Reverse",
+    "SL",
+    "TP",
+    "Trailing stop",
+    "Break even",
+    "Move stop",
+    "Adjust target",
+    "Lock profit",
+    "Add to position",
+    "Reduce position",
+    "Split position",
+    "Merge positions",
+  ]
+
+  // Filter indicators based on search
+  const filteredIndicators = allIndicators.filter((indicator) =>
+    indicator.toLowerCase().includes(indicatorSearch.toLowerCase()),
+  )
+
+  // Filter behaviors based on search
+  const filteredBehaviors = allBehaviors.filter((behavior) =>
+    behavior.toLowerCase().includes(behaviorSearch.toLowerCase()),
+  )
+
   return (
     <div className="w-[300px] min-w-[300px] bg-[#141721] border-l border-gray-800 flex flex-col h-screen">
       <div className="p-4 border-b border-gray-800">
@@ -20,68 +170,24 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
         <div className="mb-6 bg-black p-4 rounded-lg">
           <h3 className="font-medium mb-3">Basic Components</h3>
           <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("If")}
-            >
-              If
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Unless")}
-            >
-              Unless
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Then")}
-            >
-              Then
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Timeframe")}
-            >
-              Timeframe
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Duration")}
-            >
-              Duration
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("When")}
-            >
-              When
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("At Candle")}
-            >
-              At Candle
-            </Button>
+            {(showAllBasic ? allBasicComponents : allBasicComponents.slice(0, 7)).map((component) => (
+              <Button
+                key={component}
+                variant="outline"
+                size="sm"
+                className="bg-[#2B2E38] border-0 hover:bg-gray-700"
+                onClick={() => onComponentSelect(component)}
+              >
+                {component}
+              </Button>
+            ))}
             <Button
               variant="outline"
               size="sm"
               className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
+              onClick={() => setShowAllBasic(!showAllBasic)}
             >
-              Show all
+              {showAllBasic ? "Show less" : "Show all"}
             </Button>
           </div>
         </div>
@@ -96,64 +202,40 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
           </div>
           <div className="relative mb-3">
             <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
-            <Input className="pl-8 bg-[#2B2E38] border-0" placeholder="Search indicators" />
+            <Input
+              className="pl-8 bg-[#2B2E38] border-0"
+              placeholder="Search indicators"
+              value={indicatorSearch}
+              onChange={(e) => setIndicatorSearch(e.target.value)}
+            />
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("RSI")}
-            >
-              RSI
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Volume")}
-            >
-              Volume
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("MACD")}
-            >
-              MACD
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Bollinger")}
-            >
-              Bollinger
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Price")}
-            >
-              Price
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Stochastic")}
-            >
-              Stochastic
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
-            >
-              Show all
-            </Button>
+            {(indicatorSearch !== ""
+              ? filteredIndicators
+              : showAllIndicators
+                ? allIndicators
+                : allIndicators.slice(0, 6)
+            ).map((indicator) => (
+              <Button
+                key={indicator}
+                variant="outline"
+                size="sm"
+                className="bg-[#2B2E38] border-0 hover:bg-gray-700"
+                onClick={() => onComponentSelect(indicator)}
+              >
+                {indicator}
+              </Button>
+            ))}
+            {indicatorSearch === "" && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
+                onClick={() => setShowAllIndicators(!showAllIndicators)}
+              >
+                {showAllIndicators ? "Show less" : "Show all"}
+              </Button>
+            )}
           </div>
         </div>
 
@@ -162,56 +244,40 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
           <h3 className="font-medium mb-3">Behaviours</h3>
           <div className="relative mb-3">
             <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
-            <Input className="pl-8 bg-[#2B2E38] border-0" placeholder="Search behaviours" />
+            <Input
+              className="pl-8 bg-[#2B2E38] border-0"
+              placeholder="Search behaviours"
+              value={behaviorSearch}
+              onChange={(e) => setBehaviorSearch(e.target.value)}
+            />
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Crossing up")}
-            >
-              Crossing up
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Crossing down")}
-            >
-              Crossing down
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Greater than")}
-            >
-              Greater than
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Less than")}
-            >
-              Less than
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Inside Channel")}
-            >
-              Inside Channel
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
-            >
-              Show all
-            </Button>
+            {(behaviorSearch !== ""
+              ? filteredBehaviors
+              : showAllBehaviors
+                ? allBehaviors
+                : allBehaviors.slice(0, 6)
+            ).map((behavior) => (
+              <Button
+                key={behavior}
+                variant="outline"
+                size="sm"
+                className="bg-[#2B2E38] border-0 hover:bg-gray-700"
+                onClick={() => onComponentSelect(behavior)}
+              >
+                {behavior}
+              </Button>
+            ))}
+            {behaviorSearch === "" && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
+                onClick={() => setShowAllBehaviors(!showAllBehaviors)}
+              >
+                {showAllBehaviors ? "Show less" : "Show all"}
+              </Button>
+            )}
           </div>
         </div>
 
@@ -219,29 +285,24 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
         <div className="mb-6 bg-black p-4 rounded-lg">
           <h3 className="font-medium mb-3">Actions</h3>
           <div className="flex flex-wrap gap-2">
+            {(showAllActions ? allActions : allActions.slice(0, 5)).map((action) => (
+              <Button
+                key={action}
+                variant="outline"
+                size="sm"
+                className="bg-[#2B2E38] border-0 hover:bg-gray-700"
+                onClick={() => onComponentSelect(action)}
+              >
+                {action}
+              </Button>
+            ))}
             <Button
               variant="outline"
               size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Long")}
+              className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
+              onClick={() => setShowAllActions(!showAllActions)}
             >
-              Long
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Short")}
-            >
-              Short
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Wait")}
-            >
-              Wait
+              {showAllActions ? "Show less" : "Show all"}
             </Button>
           </div>
         </div>
@@ -250,45 +311,24 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
         <div className="mb-6 bg-black p-4 rounded-lg">
           <h3 className="font-medium mb-3">Trade Management</h3>
           <div className="flex flex-wrap gap-2">
+            {(showAllTradeManagement ? allTradeManagement : allTradeManagement.slice(0, 5)).map((option) => (
+              <Button
+                key={option}
+                variant="outline"
+                size="sm"
+                className="bg-[#2B2E38] border-0 hover:bg-gray-700"
+                onClick={() => onComponentSelect(option)}
+              >
+                {option}
+              </Button>
+            ))}
             <Button
               variant="outline"
               size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Manage")}
+              className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
+              onClick={() => setShowAllTradeManagement(!showAllTradeManagement)}
             >
-              Manage
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Close")}
-            >
-              Close
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Cancel")}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("No Trade")}
-            >
-              No Trade
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-              onClick={() => onComponentSelect("Reverse")}
-            >
-              Reverse
+              {showAllTradeManagement ? "Show less" : "Show all"}
             </Button>
           </div>
         </div>
