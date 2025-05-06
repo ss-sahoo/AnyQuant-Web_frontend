@@ -70,7 +70,10 @@ export function ResponsiveTradingPlatform() {
                   View Dashboard
                 </Button>
               </Link>
-              <Button   onClick={handleCreateAlgorithm} className="bg-[#6BCAE2] hover:bg-[#5AB9D1] text-black rounded-full px-4 md:px-6 w-full sm:w-auto">
+              <Button
+                onClick={handleCreateAlgorithm}
+                className="bg-[#6BCAE2] hover:bg-[#5AB9D1] text-black rounded-full px-4 md:px-6 w-full sm:w-auto"
+              >
                 Create Algorithm
               </Button>
             </div>

@@ -173,7 +173,7 @@ export const updateUserProfile = async (userId, updatedData) => {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`, 
+      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(updatedData),
   })
@@ -232,25 +232,23 @@ export const createStatement = async ({ account, statement }) => {
       account,
       side: statement.side,
       saveresult: statement.saveresult,
-      strategy: statement.strategy,  // this is the nested JSON payload
+      strategy: statement.strategy, // this is the nested JSON payload
     }),
-  });
+  })
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error?.error || "Failed to create statement");
+    const error = await response.json()
+    throw new Error(error?.error || "Failed to create statement")
   }
 
-  return response.json();
-};
-
+  return response.json()
+}
 
 export const fetchStatement = async () => {
- 
-  const accountId = localStorage.getItem("account_id");  // Assuming the account ID is stored in localStorage
+  const accountId = localStorage.getItem("account_id") // Assuming the account ID is stored in localStorage
 
   if (!accountId) {
-    throw new Error("Account ID not found");
+    throw new Error("Account ID not found")
   }
 
   const response = await fetch(`/api/strategies/`, {
@@ -258,18 +256,18 @@ export const fetchStatement = async () => {
     headers: {
       "Content-Type": "application/json",
     },
-  });
+  })
 
   if (!response.ok) {
-    throw new Error("Failed to fetch strategy");
+    throw new Error("Failed to fetch strategy")
   }
 
-  const data = await response.json();
-  
-  const filteredData = data.filter((strategy) => strategy.account === accountId);
+  const data = await response.json()
 
-  return filteredData;
-};
+  const filteredData = data.filter((strategy) => strategy.account === accountId)
+
+  return filteredData
+}
 
 export const fetchStatementDetail = async (statement_id) => {
   const response = await Fetch(`/api/strategies/${statement_id}/`, {
@@ -277,16 +275,15 @@ export const fetchStatementDetail = async (statement_id) => {
     headers: {
       "Content-Type": "application/json",
     },
-  });
+  })
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error?.detail || "Failed to fetch statement detail");
+    const error = await response.json()
+    throw new Error(error?.detail || "Failed to fetch statement detail")
   }
 
-  return response.json();
-};
-
+  return response.json()
+}
 
 // API functions for strategy testing
 

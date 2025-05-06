@@ -28,7 +28,7 @@ export function MobileSidebar({ currentPage = "home" }: MobileSidebarProps) {
 
       {/* Mobile sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 w-64 bg-[#121420] border-r border-gray-800 z-40 transform transition-transform duration-300 ease-in-out ${
+        className={`fixed inset-y-0 left-0 w-64 bg-[#141721] border-r border-gray-800 z-40 transform transition-transform duration-300 ease-in-out ${
           isOpen ? "translate-x-0" : "-translate-x-full"
         } md:hidden`}
       >

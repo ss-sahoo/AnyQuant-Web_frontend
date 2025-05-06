@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Home, User, LogOut, BarChart2 } from "lucide-react"
+import { Home, User, LogOut } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface SidebarProps {
@@ -18,27 +18,11 @@ export function Sidebar({ currentPage = "home" }: SidebarProps) {
   }
 
   return (
-    <aside className="w-16 bg-[#121420] border-r border-gray-800 flex flex-col items-center py-6">
-      <div className="mb-8">
+    <aside className="w-16 bg-[#141721] border-r border-gray-800 flex flex-col items-center py-6 h-screen fixed left-0 top-0 z-50">
+      <div className="mb-8 flex items-center justify-center p-4">
         <Link href="/home">
-          <div className="w-10 h-10 bg-[#6BCAE2] rounded-md flex items-center justify-center">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="#121420" />
-              <path
-                d="M2 17L12 22L22 17"
-                stroke="#121420"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <path
-                d="M2 12L12 17L22 12"
-                stroke="#121420"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+          <div className="w-10 h-10 flex items-center justify-center">
+            <img src="/images/logo.png" alt="Logo" className="w-full h-full" />
           </div>
         </Link>
       </div>
@@ -53,16 +37,6 @@ export function Sidebar({ currentPage = "home" }: SidebarProps) {
         >
           <Home className="w-6 h-6 mb-1" />
           <span>Home</span>
-        </Link>
-        <Link
-          href="/dashboard"
-          className={cn(
-            "flex flex-col items-center text-xs transition-colors",
-            currentPage === "dashboard" ? "text-[#6BCAE2]" : "text-white hover:text-[#6BCAE2]",
-          )}
-        >
-          <BarChart2 className="w-6 h-6 mb-1" />
-          <span>Dashboard</span>
         </Link>
         <Link
           href="/profile"

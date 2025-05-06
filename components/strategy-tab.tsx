@@ -1,7 +1,5 @@
 "use client"
 
-import { FileUploader } from "@/components/file-uploader"
-
 interface StrategyTabProps {
   selectedStrategy: string
   setSelectedStrategy: (strategy: string) => void

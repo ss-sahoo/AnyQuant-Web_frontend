@@ -1,4 +1,3 @@
-
 "use client"
 
 import type React from "react"
@@ -37,31 +36,28 @@ export default function StrategyTestingPage() {
   const [lot, setLot] = useState("mini")
   const [parsedStatement, setParsedStatement] = useState<any>(null)
 
-
   // Add a state for tracking if the chart is expanded
   const [isChartExpanded, setIsChartExpanded] = useState(false)
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedStrategy = localStorage.getItem("savedStrategy");
-      setStrID(savedStrategy);
-      setStrategy(savedStrategy);
-  
-      const id = localStorage.getItem("strategy_id");
-      setStrategyId(id);
-  
+    if (typeof window !== "undefined") {
+      const savedStrategy = localStorage.getItem("savedStrategy")
+      setStrID(savedStrategy)
+      setStrategy(savedStrategy)
+
+      const id = localStorage.getItem("strategy_id")
+      setStrategyId(id)
+
       if (savedStrategy) {
         try {
-          const parsed = JSON.parse(savedStrategy);
-          setParsedStatement(parsed);
+          const parsed = JSON.parse(savedStrategy)
+          setParsedStatement(parsed)
         } catch (err) {
-          console.error("Error parsing saved strategy:", err);
+          console.error("Error parsing saved strategy:", err)
         }
       }
     }
-  }, []);
-  
-  
+  }, [])
 
   // Add this function to handle expanding/collapsing the chart
   const toggleChartExpansion = () => {
@@ -124,11 +120,11 @@ export default function StrategyTestingPage() {
       alert("Strategy statement is missing or not parsed!")
       return
     }
-  
+
     try {
       setIsLoading(true)
       const result = await runBacktest({ statement: parsedStatement })
-  
+
       if (result?.plot_html) {
         setPlotHtml(result.plot_html)
       } else {
@@ -141,7 +137,6 @@ export default function StrategyTestingPage() {
       setIsLoading(false)
     }
   }
-  
 
   const handleClick = () => {
     fileInputRef.current?.click()

@@ -222,7 +222,6 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
           </div>
         </div>
       </div>
-      </div>
-    
+    </div>
   )
 }

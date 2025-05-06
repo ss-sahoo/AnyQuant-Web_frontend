@@ -1,9 +1,7 @@
 "use client"
 
-import { useState, useRef } from "react"
-import { Edit, MoreVertical, Plus, ChevronDown } from "lucide-react"
-import { ComponentsSidebar } from "@/components/components-sidebar"
-import { TimeframeDropdown } from "@/components/timeframe-dropdown"
+import { useState, useRef, useEffect } from "react"
+import { Edit, MoreVertical, Plus, ChevronDown, X } from "lucide-react"
 import { StochasticSettingsModal } from "@/components/modals/stochastic-settings-modal"
 import { CrossingUpSettingsModal } from "@/components/modals/crossing-up-settings-modal"
 import { BollingerBandsSettingsModal } from "@/components/modals/bollinger-bands-settings-modal"
@@ -224,7 +222,6 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
       strategy: [
         {
           statement: "if",
-
           timeframe: "3h", // Initial timeframe for new statements
         },
       ],
@@ -290,6 +287,50 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           operator: `${settings.type} = Entry_Price * ${actualMultiplier}`,
         })
       }
+    }
+
+    setStatements(newStatements)
+  }
+
+  // Function to remove a component from a strategy
+  const removeComponent = (
+    statementIndex: number,
+    conditionIndex: number,
+    componentType: "statement" | "inp1" | "operator" | "inp2" | "timeframe",
+  ) => {
+    const newStatements = [...statements]
+    const currentStatement = newStatements[statementIndex]
+    const condition = currentStatement.strategy[conditionIndex]
+
+    if (componentType === "statement" && condition.statement !== "if") {
+      // Remove the entire condition if it's not an "if" statement
+      currentStatement.strategy.splice(conditionIndex, 1)
+    } else if (componentType === "inp1" && condition.inp1) {
+      // Remove the inp1 component
+      delete condition.inp1
+    } else if (componentType === "operator" && condition.operator_name) {
+      // Remove the operator and inp2 if it exists
+      delete condition.operator_name
+      delete condition.inp2
+    } else if (componentType === "inp2" && condition.inp2) {
+      // Remove just the inp2 component
+      delete condition.inp2
+    } else if (
+      componentType === "timeframe" &&
+      (condition.timeframe || (condition.inp1 && "timeframe" in condition.inp1))
+    ) {
+      // Remove the timeframe
+      if (condition.timeframe) {
+        delete condition.timeframe
+      } else if (condition.inp1 && "timeframe" in condition.inp1) {
+        // If timeframe is in inp1, we need to set a default
+        condition.inp1.timeframe = "1h"
+      }
+    }
+
+    // If the condition is now empty and it's not the first one, remove it
+    if (conditionIndex > 0 && !condition.inp1 && !condition.operator_name && !condition.inp2 && !condition.timeframe) {
+      currentStatement.strategy.splice(conditionIndex, 1)
     }
 
     setStatements(newStatements)
@@ -483,10 +524,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           // Add wait parameter to inp1 regardless of whether it already has one or not
           if ("wait" in lastCondition.inp1) {
             // Toggle if it already exists
-            lastCondition.inp1.wait =
-              lastCondition.inp1.wait === "yes"
-                ? undefined
-                : "yes"
+            lastCondition.inp1.wait = lastCondition.inp1.wait === "yes" ? undefined : "yes"
           } else {
             // Add it if it doesn't exist
             if (typeof lastCondition.inp1 === "object") {
@@ -498,10 +536,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
         else if (lastCondition.inp2 && typeof lastCondition.inp2 !== "string" && "type" in lastCondition.inp2) {
           if ("wait" in lastCondition.inp2) {
             // Toggle if it already exists
-            lastCondition.inp2.wait =
-              lastCondition.inp2.wait === "yes"
-                ? undefined
-                : "yes"
+            lastCondition.inp2.wait = lastCondition.inp2.wait === "yes" ? undefined : "yes"
           } else {
             // Add it if it doesn't exist
             lastCondition.inp2.wait = "yes"
@@ -616,8 +651,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
       // Add or toggle wait parameter for inp1
       if ("wait" in condition.inp1) {
         // Toggle if it already exists
-        condition.inp1.wait =
-          condition.inp1.wait === "yes" ? undefined : "yes"
+        condition.inp1.wait = condition.inp1.wait === "yes" ? undefined : "yes"
       } else {
         // Add it if it doesn't exist
         if (typeof condition.inp1 === "object") {
@@ -629,8 +663,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
       // Add or toggle wait for inp2
       if ("wait" in condition.inp2) {
         // Toggle if it already exists
-        condition.inp2.wait =
-          condition.inp2.wait === "yes" ? undefined : "yes"
+        condition.inp2.wait = condition.inp2.wait === "yes" ? undefined : "yes"
       } else {
         // Add it if it doesn't exist
         condition.inp2.wait = "yes"
@@ -639,17 +672,30 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     }
   }
 
-  // Update the renderStrategyConditions function to handle the new structure
+  // Update the timeframe button styling to match the design
+  // Replace the timeframe component in renderStrategyConditions function
+  // Replace the timeframe component in renderStrategyConditions function with this:
+
   const renderStrategyConditions = (statement: StrategyStatement) => {
     const components: JSX.Element[] = []
 
     // Add each condition with appropriate background
     statement.strategy.forEach((condition, index) => {
-      if (condition.statement) {
-        // Basic components (if, and, etc.) with dark background
+      // Skip rendering "if" statements but keep "and" statements
+      if (condition.statement && condition.statement.toLowerCase() !== "if") {
+        // Basic components (and, etc.) with dark background
         components.push(
-          <div key={`statement-${index}`} className="bg-[#1A1D2D] text-white px-3 py-1 rounded-md mr-2 mb-2">
+          <div
+            key={`statement-${index}`}
+            className="bg-[#151718] text-white px-3 py-1 rounded-md mr-2 mb-2 relative group"
+          >
             {condition.statement.toUpperCase()}
+            <button
+              onClick={() => removeComponent(activeStatementIndex, index, "statement")}
+              className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+            >
+              <X className="w-3 h-3" />
+            </button>
           </div>,
         )
       }
@@ -661,62 +707,93 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
 
       if (timeframeValue) {
         components.push(
-          <div key={`timeframe-${index}`} className="flex flex-col mr-2 mb-2">
+          <div key={`timeframe-${index}`} className="mr-2 mb-2 relative group">
             <div className="text-xs text-gray-400 mb-1">Timeframe</div>
-            <div className="relative">
-              <button
-                onClick={() => openTimeframeDropdown(activeStatementIndex, index)}
-                className="bg-[#1A1D2D] text-white px-3 py-1 rounded-md flex items-center justify-between min-w-[80px]"
-              >
-                {timeframeValue} <ChevronDown className="ml-1 w-4 h-4" />
-              </button>
-            </div>
+            <button
+              onClick={() => openTimeframeDropdown(activeStatementIndex, index)}
+              className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[160px] border border-[#2A2D42]"
+              data-timeframe-index={index}
+            >
+              <span className="text-gray-400">{timeframeValue || "Select timeframe"}</span>
+              <ChevronDown className="ml-1 w-4 h-4" />
+            </button>
+            <button
+              onClick={() => removeComponent(activeStatementIndex, index, "timeframe")}
+              className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+            >
+              <X className="w-3 h-3" />
+            </button>
           </div>,
         )
       }
 
       if (condition.inp1) {
-        // Indicators with white background
+        // Indicators with light gray background
         const displayName =
           "name" in condition.inp1
             ? condition.inp1.name
             : condition.inp1.name || condition.inp1.input?.toUpperCase() || ""
 
         components.push(
-          <div key={`inp1-${index}`} className="flex items-center">
-            <div className="bg-white text-black px-3 py-1 rounded-md mr-2 mb-2">{displayName}</div>
+          <div key={`inp1-${index}`} className="flex items-center relative group">
+            <div className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2">{displayName}</div>
             {"wait" in condition.inp1 && condition.inp1.wait && (
-              <div className="ml-1 px-2 py-1 rounded-md text-xs  text-white">Wait: Yes</div>
+              <div className="ml-1 px-2 py-1 rounded-md text-xs text-white">Wait: Yes</div>
             )}
+            <button
+              onClick={() => removeComponent(activeStatementIndex, index, "inp1")}
+              className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+            >
+              <X className="w-3 h-3" />
+            </button>
           </div>,
         )
       }
 
       if (condition.operator_name) {
-        // Behaviors with white background
+        // Behaviors with light gray background
         components.push(
-          <div key={`operator-${index}`} className="bg-white text-black px-3 py-1 rounded-md mr-2 mb-2">
+          <div
+            key={`operator-${index}`}
+            className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2 relative group"
+          >
             {condition.operator_name.replace("_", " ")}
+            <button
+              onClick={() => removeComponent(activeStatementIndex, index, "operator")}
+              className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+            >
+              <X className="w-3 h-3" />
+            </button>
           </div>,
         )
       }
 
       // Show inp2 value for all behaviors
       if (condition.inp2) {
-        // Values with white background
+        // Values with light gray background
         if ("type" in condition.inp2 && condition.inp2.type === "value") {
           components.push(
-            <div key={`inp2-${index}`} className="flex items-center">
-              <div className="bg-white text-black px-3 py-1 rounded-md mr-2 mb-2">{condition.inp2.value}</div>
-              {condition.inp2.wait && (
-                <div className="ml-1 px-2 py-1 rounded-md text-xs text-white">Wait: Yes</div>
-              )}
+            <div key={`inp2-${index}`} className="flex items-center relative group">
+              <div className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2">{condition.inp2.value}</div>
+              {condition.inp2.wait && <div className="ml-1 px-2 py-1 rounded-md text-xs text-white">Wait: Yes</div>}
+              <button
+                onClick={() => removeComponent(activeStatementIndex, index, "inp2")}
+                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+              >
+                <X className="w-3 h-3" />
+              </button>
             </div>,
           )
         } else if ("name" in condition.inp2) {
           components.push(
-            <div key={`inp2-${index}`} className="flex items-center">
-              <div className="bg-white text-black px-3 py-1 rounded-md mr-2 mb-2">{condition.inp2.name}</div>
+            <div key={`inp2-${index}`} className="flex items-center relative group">
+              <div className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2">{condition.inp2.name}</div>
+              <button
+                onClick={() => removeComponent(activeStatementIndex, index, "inp2")}
+                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+              >
+                <X className="w-3 h-3" />
+              </button>
             </div>,
           )
         }
@@ -737,8 +814,18 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
         <h4 className="text-sm font-medium mb-2">Equity Rules</h4>
         <div className="flex flex-wrap gap-2">
           {statement.Equity.map((rule, index) => (
-            <div key={index} className="bg-[#2A2D42] text-white px-3 py-1 rounded-md">
+            <div key={index} className="bg-[#2A2D42] text-white px-3 py-1 rounded-md relative group">
               {rule.operator}
+              <button
+                onClick={() => {
+                  const newStatements = [...statements]
+                  newStatements[activeStatementIndex].Equity.splice(index, 1)
+                  setStatements(newStatements)
+                }}
+                className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+              >
+                <X className="w-3 h-3" />
+              </button>
             </div>
           ))}
         </div>
@@ -751,152 +838,180 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     setIsDropdownOpen(!isDropdownOpen)
   }
 
+  // Listen for component selection events from the sidebar
+  useEffect(() => {
+    const handleComponentSelected = (e: CustomEvent) => {
+      const { component, statementIndex } = e.detail
+      handleAddComponent(statementIndex, component)
+    }
+
+    document.addEventListener("component-selected", handleComponentSelected as EventListener)
+
+    return () => {
+      document.removeEventListener("component-selected", handleComponentSelected as EventListener)
+    }
+  }, [statements]) // Re-add event listener when statements change
+
   return (
-    <div className="flex flex-col min-h-screen">
-      {/* Tabs */}
-      <div className="flex w-full">
-        <div
-          className={`flex-1 py-3 text-center font-medium cursor-pointer ${
-            activeTab === "create" ? "bg-[#c7c7c7] text-black" : "bg-[#9d9d9d] text-white"
-          }`}
-          onClick={() => setActiveTab("create")}
-        >
-          CREATE
-        </div>
-        <div
-          className={`flex-1 py-3 text-center font-medium cursor-pointer ${
-            activeTab === "test" ? "bg-[#c7c7c7] text-black" : "bg-[#9d9d9d] text-white"
-          }`}
-          onClick={() => setActiveTab("test")}
-        >
-          TEST & OPTIMISE
-        </div>
-      </div>
-
-      <div className="flex flex-1">
-        {/* Main content */}
-        <div className="flex-1 p-6">
-          {/* Header */}
-          <div className="flex justify-between items-center mb-6">
-            <div className="flex items-center">
-              <h1 className="text-2xl font-medium">Building algorithm for {initialInstrument}</h1>
-              <button className="ml-2 p-1 hover:bg-gray-700 rounded-full">
-                <Edit className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="flex gap-3">
-              {/* Buy/Sell selector */}
-              <button className="px-4 py-2 bg-[#1E2132] rounded-full text-white hover:bg-gray-700">Add Setup</button>
-              <button
-                className="px-4 py-2 bg-[#1E2132] rounded-full text-white hover:bg-gray-700"
-                onClick={addStatement}
-              >
-                Add Statement
-              </button>
-            </div>
+    <div className="flex-1 flex flex-col">
+      {/* Main content area with scrolling */}
+      <div className="flex-1 p-6 overflow-auto">
+        {/* Header */}
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center">
+            <h1 className="text-2xl font-medium">Building algorithm for {initialInstrument}</h1>
+            <button className="ml-2 p-1 hover:bg-gray-700 rounded-full">
+              <Edit className="w-5 h-5" />
+            </button>
           </div>
+          <div className="flex gap-3">
+            {/* Buy/Sell selector */}
+            <button className="px-4 py-2 bg-[#151718] rounded-full text-white hover:bg-gray-700">Add Setup</button>
+            <button className="px-4 py-2 bg-[#151718] rounded-full text-white hover:bg-gray-700" onClick={addStatement}>
+              Add Statement
+            </button>
+          </div>
+        </div>
 
-          {/* Statements */}
-          <div className="space-y-6">
-            {statements.map((statement, index) => (
-              <div key={index} className="bg-[#1E2132] rounded-lg p-4">
-                <div className="flex justify-between items-center mb-4">
-                  <div className="flex items-center">
-                    <h2 className="text-xl font-medium">{statement.saveresult}</h2>
-                    <span className="ml-3 px-3 py-1 bg-[#2A2D42] rounded-full text-sm">
-                      {statement.side === "B" ? "Long " : "Short"}
-                    </span>
-                  </div>
-                  <div className="relative flex items-center gap-4">
-                    <button onClick={toggleDropdown} className="p-1 hover:bg-gray-700 rounded-full">
-                      <MoreVertical className="w-5 h-5" />
-                    </button>
-                    {isDropdownOpen && (
-                      <div className="absolute right-0 top-3 bg-[#2A2D42] rounded-lg shadow-md p-2 mt-4">
-                        <button className="w-full text-white p-2 hover:bg-red-600 rounded-lg">Delete</button>
+        {/* Statements */}
+        <div className="space-y-6">
+          {statements.map((statement, index) => (
+            <div
+              key={index}
+              className="bg-[#151718] rounded-lg p-4"
+              data-active-statement={activeStatementIndex === index}
+              data-active-index={index}
+            >
+              <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center">
+                  <h2 className="text-xl font-medium">{statement.saveresult}</h2>
+                  <span className="ml-3 px-3 py-1 bg-[#2A2D42] rounded-full text-sm">
+                    {statement.side === "B" ? "Long " : "Short"}
+                  </span>
+                </div>
+                <div className="relative flex items-center gap-4">
+                  <button onClick={toggleDropdown} className="p-1 hover:bg-gray-700 rounded-full">
+                    <MoreVertical className="w-5 h-5" />
+                  </button>
+                  {isDropdownOpen && (
+                    <div className="absolute right-0 top-3 bg-[#2A2D42] rounded-lg shadow-md p-2 mt-4">
+                      <button className="w-full text-white p-2 hover:bg-red-600 rounded-lg">Delete</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Strategy section */}
+              <div className="bg-[#151718] p-4 rounded-lg mb-4">
+                {/* Replace the existing flex flex-col space-y-4 div with this: */}
+                <div className="flex items-center flex-wrap gap-2">
+                  {renderStrategyConditions(statement)}
+
+                  <div className="relative flex-1 min-w-[200px]">
+                    <input
+                      ref={(el) => (searchInputRefs.current[index] = el)}
+                      type="text"
+                      placeholder="Start typing a component name..."
+                      className="w-full bg-transparent border-b border-white pb-1 outline-none focus:border-white"
+                      value={activeStatementIndex === index ? searchTerm : ""}
+                      onChange={(e) => handleSearchInput(index, e.target.value)}
+                      onClick={() => setActiveStatementIndex(index)}
+                    />
+
+                    {/* Search results dropdown */}
+                    {activeStatementIndex === index && searchResults.length > 0 && (
+                      <div className="absolute z-10 mt-1 w-full bg-[#2B2E38] border border-gray-700 rounded-md shadow-lg max-h-60 overflow-auto">
+                        {searchResults.map((result, idx) => (
+                          <button
+                            key={idx}
+                            className="w-full text-left px-4 py-2 hover:bg-[#3A3D47] text-white"
+                            onClick={() => {
+                              handleAddComponent(index, result)
+                            }}
+                          >
+                            {result}
+                          </button>
+                        ))}
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Strategy section */}
-                <div className="bg-[#1A1D2D] p-4 rounded-lg mb-4">
-                  {/* Replace the existing flex flex-col space-y-4 div with this: */}
-                  <div className="flex items-center flex-wrap gap-2">
-                    {renderStrategyConditions(statement)}
-
-                    <div className="relative flex-1 min-w-[200px]">
-                      <input
-                        ref={(el) => (searchInputRefs.current[index] = el)}
-                        type="text"
-                        placeholder="Start typing a component name..."
-                        className="w-full bg-transparent border-none outline-none"
-                        value={activeStatementIndex === index ? searchTerm : ""}
-                        onChange={(e) => handleSearchInput(index, e.target.value)}
-                        onClick={() => setActiveStatementIndex(index)}
-                      />
-
-                      {/* Search results dropdown */}
-                      {activeStatementIndex === index && searchResults.length > 0 && (
-                        <div className="absolute z-10 mt-1 w-full bg-[#2B2E38] border border-gray-700 rounded-md shadow-lg max-h-60 overflow-auto">
-                          {searchResults.map((result, idx) => (
-                            <button
-                              key={idx}
-                              className="w-full text-left px-4 py-2 hover:bg-[#3A3D47] text-white"
-                              onClick={() => {
-                                handleAddComponent(index, result)
-                              }}
-                            >
-                              {result}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Render equity rules if they exist */}
-                  {renderEquityRules(statement)}
-                </div>
+                {/* Render equity rules if they exist */}
+                {renderEquityRules(statement)}
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
+        </div>
 
-          {/* Add statement button */}
-          <div className="flex justify-center mt-6">
-            <button onClick={addStatement} className="p-3 rounded-full bg-[#1E2132] hover:bg-gray-700">
-              <Plus className="w-6 h-6" />
-            </button>
-          </div>
-
-          {/* Bottom buttons */}
-          <div className="flex justify-between mt-8">
-            <Link href="/">
-              <button className="px-8 py-3 bg-[#1E2132] rounded-full text-white hover:bg-gray-700">Cancel</button>
-            </Link>
-            <div className="flex gap-3">
-              <button className="px-8 py-3 bg-[#1E2132] rounded-full text-white hover:bg-gray-700">
-                Save for later
-              </button>
-              <button
-                className="px-8 py-3 bg-[#85e1fe] rounded-full text-black hover:bg-[#5AB9D1]"
-                onClick={handleContinue}
-              >
-                Continue
-              </button>
+        {/* Add statement button */}
+        <div className="flex justify-center mt-6">
+          <button onClick={addStatement} className="p-3 rounded-full bg-[#151718] hover:bg-gray-700">
+            <Plus className="w-6 h-6" />
+          </button>
+        </div>
+      </div>
+      {/* Fixed bottom buttons */}
+      <div className="flex justify-between p-6 bg-[#141721] sticky bottom-0 border-t border-gray-800">
+        <Link href="/">
+          <button className="px-8 py-3 bg-[#151718] rounded-full text-white hover:bg-gray-700">Cancel</button>
+        </Link>
+        <div className="flex gap-3">
+          <button className="px-8 py-3 bg-[#151718] rounded-full text-white hover:bg-gray-700">Save for later</button>
+          <button
+            className="px-8 py-3 bg-[#85e1fe] rounded-full text-black hover:bg-[#5AB9D1]"
+            onClick={handleContinue}
+          >
+            Continue
+          </button>
+        </div>
+      </div>
+      {/* Timeframe dropdown */}
+      {showTimeframeDropdown && (
+        <div className="fixed inset-0 z-50" onClick={() => setShowTimeframeDropdown(false)}>
+          <div
+            className="absolute bg-white rounded-md shadow-lg overflow-hidden max-h-60 w-[160px] border border-[#2A2D42]"
+            style={{
+              top:
+                activeConditionIndex !== null
+                  ? document.querySelector(`[data-timeframe-index="${activeConditionIndex}"]`)?.getBoundingClientRect()
+                      .bottom +
+                    window.scrollY +
+                    5
+                  : 0,
+              left:
+                activeConditionIndex !== null
+                  ? document.querySelector(`[data-timeframe-index="${activeConditionIndex}"]`)?.getBoundingClientRect()
+                      .left + window.scrollX
+                  : 0,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="overflow-auto">
+              {[
+                "1 minute",
+                "5 minute",
+                "15 minute",
+                "20 minute",
+                "30 minute",
+                "45 minute",
+                "1h",
+                "3h",
+                "4h",
+                "1 day",
+              ].map((timeframe) => (
+                <button
+                  key={timeframe}
+                  className="w-full text-left px-4 py-2 text-black hover:bg-gray-100"
+                  onClick={() => handleTimeframeSelect(timeframe)}
+                >
+                  {timeframe}
+                </button>
+              ))}
             </div>
           </div>
         </div>
-
-        {/* Components sidebar */}
-        <ComponentsSidebar onComponentSelect={(component) => handleAddComponent(activeStatementIndex, component)} />
-      </div>
-
-      {/* Timeframe dropdown */}
-      {showTimeframeDropdown && (
-        <TimeframeDropdown onSelect={handleTimeframeSelect} onClose={() => setShowTimeframeDropdown(false)} />
       )}
-
       {/* Modals */}
       {showStochasticModal && (
         <StochasticSettingsModal
@@ -907,7 +1022,6 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           }}
         />
       )}
-
       {showCrossingUpModal && (
         <CrossingUpSettingsModal
           onClose={() => setShowCrossingUpModal(false)}
@@ -938,7 +1052,6 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           }}
         />
       )}
-
       {showRsiModal && (
         <RsiSettingsModal
           onClose={() => setShowRsiModal(false)}
@@ -978,7 +1091,6 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           }}
         />
       )}
-
       {showBollingerModal && (
         <BollingerBandsSettingsModal
           onClose={() => setShowBollingerModal(false)}
@@ -1000,7 +1112,6 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           }}
         />
       )}
-
       {showVolumeModal && (
         <VolumeSettingsModal
           onClose={() => setShowVolumeModal(false)}
@@ -1036,7 +1147,6 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           }}
         />
       )}
-
       {showAtrModal && (
         <AtrSettingsModal
           onClose={() => setShowAtrModal(false)}
@@ -1059,7 +1169,6 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           }}
         />
       )}
-
       {showMacdModal && (
         <MacdSettingsModal
           onClose={() => setShowMacdModal(false)}
@@ -1082,7 +1191,6 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           }}
         />
       )}
-
       {showChannelModal && (
         <ChannelSettingsModal
           onClose={() => setShowChannelModal(false)}
@@ -1107,7 +1215,6 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           }}
         />
       )}
-
       {/* SL/TP Settings Modal */}
       {showSLTPModal.show && (
         <SLTPSettingsModal
