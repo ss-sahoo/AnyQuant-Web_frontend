@@ -885,9 +885,9 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
               <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center">
                   <h2 className="text-xl font-medium">{statement.saveresult}</h2>
-                  <span className="ml-3 px-3 py-1 bg-[#2A2D42] rounded-full text-sm">
+                  {/* <span className="ml-3 px-3 py-1 bg-[#2A2D42] rounded-full text-sm">
                     {statement.side === "B" ? "Long " : "Short"}
-                  </span>
+                  </span> */}
                 </div>
                 <div className="relative flex items-center gap-4">
                   <button onClick={toggleDropdown} className="p-1 hover:bg-gray-700 rounded-full">
@@ -989,12 +989,11 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           >
             <div className="overflow-auto">
               {[
-                "1 minute",
-                "5 minute",
-                "15 minute",
-                "20 minute",
-                "30 minute",
-                "45 minute",
+    
+                "15min",
+                "20min",
+                "30min",
+                "45min",
                 "1h",
                 "3h",
                 "4h",
