@@ -56,9 +56,33 @@ interface StrategyCondition {
 
 interface EquityRule {
   statement: string
-  operator: string
-  inp1?: { name: string }
-  inp2?: { name: string }
+  operator?: string
+  inp1?: {
+    name: string
+    input_params?: {
+      TrailingStop?: string
+      TrailingStep?: string
+      [key: string]: any
+    }
+    partial_tp_list?: Array<{
+      Price: string
+      Close: string
+      name?: string
+      operator?: string
+      Action?: string
+    }>
+    [key: string]: any
+  }
+  inp2?: {
+    name: string
+    side?: string
+    timeframe?: string
+    input_params?: {
+      nperiod?: number
+      [key: string]: any
+    }
+    [key: string]: any
+  }
 }
 
 interface StrategyStatement {
@@ -87,7 +111,10 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
   const [showMacdModal, setShowMacdModal] = useState(false)
   const [showRsiModal, setShowRsiModal] = useState(false)
   const [showChannelModal, setShowChannelModal] = useState(false)
-  const [showSLTPModal, setShowSLTPModal] = useState<{ show: boolean; type: "SL" | "TP" }>({ show: false, type: "SL" })
+  const [showSLTPSettings, setShowSLTPSettings] = useState<{ show: boolean; type: "SL" | "TP" }>({
+    show: false,
+    type: "SL",
+  })
 
   // Initialize with a statement structure that includes "if" and a timeframe
   const [statements, setStatements] = useState<StrategyStatement[]>([
@@ -252,7 +279,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     return behavior.toLowerCase()
   }
 
-  // Handle SLTP settings
+  // Update the handleSLTPSettings function to handle all the different equity formats
   const handleSLTPSettings = (settings: SLTPSettings) => {
     const newStatements = [...statements]
     const currentStatement = newStatements[activeStatementIndex]
@@ -262,14 +289,56 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
       currentStatement.Equity = []
     }
 
+    // Handle partial take profit
+    if (settings.type === "partial_tp" && settings.partialTpList && settings.partialTpList.length > 0) {
+      currentStatement.Equity.push({
+        statement: "and",
+        inp1: {
+          name: "partial_tp",
+          partial_tp_list: settings.partialTpList.map((item) => ({
+            Price: item.Price,
+            Close: item.Close,
+            ...(item.Action ? { Action: item.Action } : {}),
+          })),
+        },
+      })
+      setStatements(newStatements)
+      return
+    }
+
     if (settings.useAdvanced) {
       // Advanced format with inp1 and inp2
-      currentStatement.Equity.push({
+      const equityRule: EquityRule = {
         statement: "and",
         operator: `inp1 = inp2 ${settings.direction} ${settings.value}pips`,
         inp1: { name: settings.type },
         inp2: { name: settings.inp2 || "Entry_Price" },
-      })
+      }
+
+      // Add trailing stop parameters if provided
+      if (settings.trailingStop) {
+        equityRule.inp1 = {
+          name: settings.type,
+          input_params: {
+            TrailingStop: "yes",
+            TrailingStep: settings.trailingStep || "0pips",
+          },
+        }
+      }
+
+      // Add indicator parameters if provided
+      if (settings.valueType === "indicator" && settings.indicatorParams) {
+        equityRule.inp2 = {
+          name: settings.indicatorParams.name || "nperiod_hl",
+          side: settings.indicatorParams.side || "low",
+          timeframe: settings.indicatorParams.timeframe || "1h",
+          input_params: {
+            nperiod: settings.indicatorParams.nperiod || 30,
+          },
+        }
+      }
+
+      currentStatement.Equity.push(equityRule)
     } else {
       // Simple format
       if (settings.valueType === "pips") {
@@ -285,6 +354,26 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
         currentStatement.Equity.push({
           statement: "and",
           operator: `${settings.type} = Entry_Price * ${actualMultiplier}`,
+        })
+      } else if (settings.valueType === "fixed") {
+        // For fixed price values
+        currentStatement.Equity.push({
+          statement: "and",
+          operator: `${settings.type} = ${settings.value}`,
+        })
+      } else if (settings.valueType === "indicator") {
+        // For indicator-based values
+        currentStatement.Equity.push({
+          statement: "and",
+          operator: `${settings.type} = inp2 ${settings.direction} ${settings.value}pips`,
+          inp2: {
+            name: settings.indicatorParams?.name || "nperiod_hl",
+            side: settings.indicatorParams?.side || "low",
+            timeframe: settings.indicatorParams?.timeframe || "1h",
+            input_params: {
+              nperiod: settings.indicatorParams?.nperiod || 30,
+            },
+          },
         })
       }
     }
@@ -545,10 +634,10 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
       }
     } else if (component.toLowerCase() === "sl") {
       // Show SL settings modal
-      setShowSLTPModal({ show: true, type: "SL" })
+      setShowSLTPSettings({ show: true, type: "SL" })
     } else if (component.toLowerCase() === "tp") {
       // Show TP settings modal
-      setShowSLTPModal({ show: true, type: "TP" })
+      setShowSLTPSettings({ show: true, type: "TP" })
     }
 
     setStatements(newStatements)
@@ -631,8 +720,13 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
       console.log("Statement created successfully:", result)
 
       // Store the strategy ID in localStorage if it exists in the response
-      if (result && result.id) {
-        localStorage.setItem("strategy_id", result.id)
+      if (result) {
+        if (result.id) {
+          localStorage.setItem("strategy_id", result.id)
+        }
+        if (result.timeframes_required) {
+          localStorage.setItem("timeframes_required", JSON.stringify(result.timeframes_required))
+        }
       }
 
       router.push("/strategy-testing")
@@ -988,17 +1082,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
             onClick={(e) => e.stopPropagation()}
           >
             <div className="overflow-auto">
-              {[
-    
-                "15min",
-                "20min",
-                "30min",
-                "45min",
-                "1h",
-                "3h",
-                "4h",
-                "1 day",
-              ].map((timeframe) => (
+              {["15min", "20min", "30min", "45min", "1h", "3h", "4h", "1 day"].map((timeframe) => (
                 <button
                   key={timeframe}
                   className="w-full text-left px-4 py-2 text-black hover:bg-gray-100"
@@ -1215,13 +1299,13 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
         />
       )}
       {/* SL/TP Settings Modal */}
-      {showSLTPModal.show && (
+      {showSLTPSettings.show && (
         <SLTPSettingsModal
-          type={showSLTPModal.type}
-          onClose={() => setShowSLTPModal({ show: false, type: "SL" })}
+          type={showSLTPSettings.type}
+          onClose={() => setShowSLTPSettings({ show: false, type: "SL" })}
           onSave={(settings) => {
             handleSLTPSettings(settings)
-            setShowSLTPModal({ show: false, type: "SL" })
+            setShowSLTPSettings({ show: false, type: "SL" })
           }}
         />
       )}
