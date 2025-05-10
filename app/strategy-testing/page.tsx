@@ -14,6 +14,8 @@ export default function StrategyTestingPage() {
 
   const [selectedStrategy, setSelectedStrategy] = useState("xauscalper.py")
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([])
+  // Add a state to store the actual File objects
+  const [fileObjects, setFileObjects] = useState<Record<string, File>>({})
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [currentFile, setCurrentFile] = useState("")
   const [inputFile, setInputFile] = useState<File | null>(null)
@@ -91,6 +93,13 @@ export default function StrategyTestingPage() {
       setInputFile(file)
       setCurrentFile(file.name)
       setUploadedFiles([...uploadedFiles, file.name])
+
+      // Store the actual File object
+      setFileObjects((prev) => ({
+        ...prev,
+        [file.name]: file,
+      }))
+
       setShowSuccessModal(true)
     } else {
       alert("Only .py and .csv files are supported")
@@ -115,16 +124,108 @@ export default function StrategyTestingPage() {
     }
   }
 
+  const [requiredTimeframes, setRequiredTimeframes] = useState([])
+
+  useEffect(() => {
+    const tf = JSON.parse(localStorage.getItem("timeframes_required") || "[]")
+    setRequiredTimeframes(tf)
+  }, [])
+
+  // Helper function to match timeframes with filenames
+  function matchesTimeframe(filename, timeframe) {
+    // Convert filename to lowercase for case-insensitive matching
+    const lowerFilename = filename.toLowerCase();
+    const lowerTimeframe = timeframe.toLowerCase();
+  
+    console.log(`Checking if "${lowerFilename}" matches timeframe "${lowerTimeframe}"`);
+  
+    // Direct matching (e.g., "3h" in filename)
+    if (lowerFilename.includes(lowerTimeframe)) {
+      console.log("✅ Direct match found");
+      return true;
+    }
+  
+    // Handle numeric equivalents
+    // Map common timeframes to their minute equivalents
+    const timeframeToMinutes = {
+      "1min": 1,
+      "5min": 5,
+      "15min": 15,
+      "20min": 20,
+      "30min": 30,
+      "1h": 60,
+      "2h": 120,
+      "3h": 180,
+      "4h": 240,
+      "6h": 360,
+      "8h": 480,
+      "12h": 720,
+      "1d": 1440,
+      "1 day": 1440,
+      "1w": 10080,
+      "1 week": 10080,
+    };
+  
+    // Extract the minute value for the timeframe
+    const minutes = timeframeToMinutes[lowerTimeframe];
+    console.log(`Minutes value for ${lowerTimeframe}: ${minutes}`);
+    
+    if (minutes) {
+      // Check if the filename contains the minute value
+      const minutesStr = minutes.toString();
+      const containsMinutes = lowerFilename.includes(minutesStr);
+      console.log(`Checking if filename contains "${minutesStr}": ${containsMinutes}`);
+      
+      // Additional check: Make sure it's not part of another number
+      // For example, "20" in "120" should not match "20m"
+      const regex = new RegExp(`\\b${minutesStr}\\b`);
+      const isStandaloneNumber = regex.test(lowerFilename);
+      console.log(`Is "${minutesStr}" a standalone number: ${isStandaloneNumber}`);
+      
+      return containsMinutes;
+    }
+  
+    return false;
+  }
+
+  // Updated handleRunBacktest function to use the new API structure
   const handleRunBacktest = async () => {
     if (!parsedStatement) {
       alert("Strategy statement is missing or not parsed!")
       return
     }
-
+  
+    if (requiredTimeframes.length > uploadedFiles.length) {
+      alert("Not enough files uploaded for the required timeframes")
+      return
+    }
+  
     try {
       setIsLoading(true)
-      const result = await runBacktest({ statement: parsedStatement })
-
+  
+      const timeframeFiles: Record<string, File> = {}
+  
+      // Directly map each required timeframe to the uploaded file in order
+      requiredTimeframes.forEach((timeframe, index) => {
+        const filename = uploadedFiles[index]
+        if (filename && fileObjects[filename]) {
+          timeframeFiles[timeframe] = fileObjects[filename]
+        }
+      })
+  
+      // Add unmatched remaining files to the form with filename as key (optional fallback)
+      uploadedFiles.forEach((filename) => {
+        if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
+          const key = filename.split(".")[0]
+          timeframeFiles[key] = fileObjects[filename]
+        }
+      })
+  
+      const result = await runBacktest({
+        statement: parsedStatement,
+        files: timeframeFiles,
+      })
+  
       if (result?.plot_html) {
         setPlotHtml(result.plot_html)
       } else {
@@ -137,6 +238,7 @@ export default function StrategyTestingPage() {
       setIsLoading(false)
     }
   }
+  
 
   const handleClick = () => {
     fileInputRef.current?.click()
@@ -144,6 +246,12 @@ export default function StrategyTestingPage() {
 
   const handleDeleteFile = (fileName: string) => {
     setUploadedFiles(uploadedFiles.filter((file) => file !== fileName))
+
+    // Also remove from fileObjects
+    const newFileObjects = { ...fileObjects }
+    delete newFileObjects[fileName]
+    setFileObjects(newFileObjects)
+
     if (currentFile === fileName) {
       setCurrentFile("")
       setInputFile(null)
@@ -299,7 +407,7 @@ export default function StrategyTestingPage() {
         </div>
 
         {/* Content area with overflow to allow scrolling */}
-        <div className="flex-1 overflow-y-auto pb-[160px] bg-[#000000]">
+        <div className="flex-1 overflow-y-auto pb-[160px] bg-[#000000] ml-[63px]">
           {activeTab === "backtest" && (
             <div className="p-6">
               <div className="flex justify-between items-start mb-6">
@@ -449,6 +557,9 @@ export default function StrategyTestingPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Required Timeframes Upload Section */}
+             
             </div>
           )}
 
@@ -490,6 +601,69 @@ export default function StrategyTestingPage() {
 
               {/* File Upload Area */}
               <div className="p-4 bg-black">
+                {/* Required Timeframes Section */}
+                {requiredTimeframes.length > 0 && (
+                  <div className="mb-4 p-3 bg-[#1E2132] rounded-md">
+                    <h3 className="text-md font-medium mb-2 flex items-center">
+                      <svg
+                        className="w-5 h-5 mr-2"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                        ></path>
+                      </svg>
+                      Required Timeframes
+                    </h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mb-3">
+                      {requiredTimeframes.map((timeframe, index) => {
+                        // Check if this timeframe has been uploaded
+                        const isUploaded = uploadedFiles.some((file) => matchesTimeframe(file, timeframe))
+
+                        return (
+                          <div
+                            key={index}
+                            className={`p-2 rounded-md border flex items-center ${
+                              isUploaded
+                                ? "bg-green-500/20 border-green-500/30 text-green-200"
+                                : "bg-blue-500/20 border-blue-500/30 text-blue-200"
+                            }`}
+                          >
+                            <span className="mr-2">{index + 1}.</span>
+                            <span className="font-medium">{timeframe}</span>
+                            {isUploaded && (
+                              <svg
+                                className="w-4 h-4 ml-auto text-green-400"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                                xmlns="http://www.w3.org/2000/svg"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="2"
+                                  d="M5 13l4 4L19 7"
+                                ></path>
+                              </svg>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <p className="text-xs text-gray-400">
+                      Please upload data files for all required timeframes. Each filename should include the timeframe
+                      (e.g., "data_3h.csv") or its minute equivalent (e.g., "180" for 3h).
+                    </p>
+                  </div>
+                )}
+
                 <div
                   className={`border-2 border-dashed ${
                     isDragging ? "border-[#85e1fe] bg-[#85e1fe]/10" : "border-gray-700"
@@ -526,56 +700,124 @@ export default function StrategyTestingPage() {
                       </svg>
                     </div>
                     <p className="text-lg font-medium mb-2">Click here to upload a file or drag and drop</p>
-                    <p className="text-sm text-gray-400">Supported format: .py, .csv</p>
+                    <p className="text-sm text-gray-400 mb-2">Supported format: .py, .csv</p>
+                    {requiredTimeframes.length > 0 && (
+                      <div className="mt-2 flex flex-wrap justify-center gap-2">
+                        {requiredTimeframes.map((tf, idx) => (
+                          <span key={idx} className="text-xs bg-[#1E2132] text-[#85e1fe] px-2 py-1 rounded-full">
+                            {tf}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {/* Uploaded Files List */}
+                {/* Uploaded Files List with Timeframe Matching */}
                 {uploadedFiles.length > 0 && (
                   <div className="mt-4">
-                    {uploadedFiles.map((file, index) => (
-                      <div key={index} className="flex justify-between items-center py-2">
-                        <div className="flex items-center">
-                          <svg
-                            className="w-5 h-5 mr-2"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                            xmlns="http://www.w3.org/2000/svg"
+                    <h3 className="text-md font-medium mb-2">Uploaded Files</h3>
+                    <div className="bg-[#1E2132] rounded-md overflow-hidden">
+                      {uploadedFiles.map((file, index) => {
+                        // Check if this file matches a required timeframe
+                        const matchingTimeframe = requiredTimeframes.find((tf) => matchesTimeframe(file, tf))
+
+                        return (
+                          <div
+                            key={index}
+                            className={`flex justify-between items-center py-3 px-4 ${
+                              index !== uploadedFiles.length - 1 ? "border-b border-gray-800" : ""
+                            }`}
                           >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth="2"
-                              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                            ></path>
-                          </svg>
-                          <span>{file}</span>
+                            <div className="flex items-center">
+                              <svg
+                                className="w-5 h-5 mr-2 text-gray-400"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                                xmlns="http://www.w3.org/2000/svg"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="2"
+                                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                                ></path>
+                              </svg>
+                              <div className="flex flex-col">
+                                <span className="text-sm">{file}</span>
+                                {matchingTimeframe ? (
+                                  <span className="text-xs text-green-400">
+                                    Matches required timeframe: {matchingTimeframe}
+                                  </span>
+                                ) : (
+                                  requiredTimeframes.length > 0 && (
+                                    <span className="text-xs text-yellow-400">
+                                      Doesn't match any required timeframe
+                                    </span>
+                                  )
+                                )}
+                              </div>
+                            </div>
+                            <button
+                              className="text-red-500 hover:text-red-400"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleDeleteFile(file)
+                              }}
+                            >
+                              <svg
+                                className="w-5 h-5"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                                xmlns="http://www.w3.org/2000/svg"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="2"
+                                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                ></path>
+                              </svg>
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {/* Upload Progress */}
+                    {requiredTimeframes.length > 0 && (
+                      <div className="mt-3">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-sm text-gray-400">Upload Progress</span>
+                          <span className="text-sm text-gray-400">
+                            {
+                              uploadedFiles.filter((file) =>
+                                requiredTimeframes.some((tf) => matchesTimeframe(file, tf)),
+                              ).length
+                            }{" "}
+                            / {requiredTimeframes.length}
+                          </span>
                         </div>
-                        <button
-                          className="text-red-500 hover:text-red-400"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleDeleteFile(file)
-                          }}
-                        >
-                          <svg
-                            className="w-5 h-5"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                            xmlns="http://www.w3.org/2000/svg"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth="2"
-                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                            ></path>
-                          </svg>
-                        </button>
+                        <div className="w-full bg-gray-700 h-2 rounded-full overflow-hidden">
+                          <div
+                            className="bg-[#85e1fe] h-full transition-all duration-500 ease-out"
+                            style={{
+                              width: `${
+                                requiredTimeframes.length
+                                  ? (
+                                      uploadedFiles.filter((file) =>
+                                        requiredTimeframes.some((tf) => matchesTimeframe(file, tf)),
+                                      ).length / requiredTimeframes.length
+                                    ) * 100
+                                  : 0
+                              }%`,
+                            }}
+                          ></div>
+                        </div>
                       </div>
-                    ))}
+                    )}
                   </div>
                 )}
               </div>
@@ -584,7 +826,7 @@ export default function StrategyTestingPage() {
         </div>
 
         {/* Sticky footer with progress and buttons */}
-        <div className="absolute bottom-0 left-0 right-0 bg-black border-t border-gray-800 z-10">
+        <div className="absolute bottom-0 left-0 right-0 bg-black border-t border-gray-800 z-10 ml-[63px]">
           {/* Progress Bar */}
           <div className="p-4">
             <div className="flex justify-between items-center mb-2">

@@ -204,13 +204,21 @@ export const sendOtp = async (email) => {
 
 // src/api/runBacktest.js or .ts
 
-export const runBacktest = async ({ statement }) => {
+export const runBacktest = async ({ statement, files }) => {
+  const formData = new FormData()
+
+  // Attach the statement JSON as a string
+  formData.append("statement", JSON.stringify(statement))
+
+  // Attach each file using its timeframe key
+  // Example: files = { "3h": File, "15min": File }
+  for (const [timeframe, file] of Object.entries(files)) {
+    formData.append(timeframe, file)
+  }
+
   const response = await Fetch("/api/run-backtest/", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ statement: JSON.stringify(statement) }),
+    body: formData,
   })
 
   if (!response.ok) {
@@ -221,19 +229,27 @@ export const runBacktest = async ({ statement }) => {
   return response.json()
 }
 
+
 // AllApiCalls.ts
 export const createStatement = async ({ account, statement }) => {
+  const payload = {
+    account,
+    side: statement.side,
+    saveresult: statement.saveresult,
+    strategy: statement.strategy,
+  }
+
+  // Add 'equity' only if it's provided
+  if (statement.Equity !== undefined && statement.Equity !== null) {
+    payload.Equity = statement.Equity
+  }
+
   const response = await Fetch("/api/strategies/", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      account,
-      side: statement.side,
-      saveresult: statement.saveresult,
-      strategy: statement.strategy, // this is the nested JSON payload
-    }),
+    body: JSON.stringify(payload),
   })
 
   if (!response.ok) {
@@ -244,14 +260,15 @@ export const createStatement = async ({ account, statement }) => {
   return response.json()
 }
 
+
 export const fetchStatement = async () => {
-  const accountId = localStorage.getItem("account_id") // Assuming the account ID is stored in localStorage
+  const accountId = localStorage.getItem("account_id")
 
   if (!accountId) {
     throw new Error("Account ID not found")
   }
 
-  const response = await fetch(`/api/strategies/`, {
+  const response = await Fetch(`/api/strategies/`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
