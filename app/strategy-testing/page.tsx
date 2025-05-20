@@ -41,6 +41,17 @@ export default function StrategyTestingPage() {
   // Add a state for tracking if the chart is expanded
   const [isChartExpanded, setIsChartExpanded] = useState(false)
 
+  const [isLimitationsCollapsed, setIsLimitationsCollapsed] = useState(false)
+
+  // Add a new state variable for showing/hiding the Advanced Settings modal:
+  const [showAdvancedSettingsModal, setShowAdvancedSettingsModal] = useState(false)
+
+  // Add state variables for the Advanced Settings form values:
+  const [populationSize, setPopulationSize] = useState("500")
+  const [generations, setGenerations] = useState("100")
+  const [mutationRate, setMutationRate] = useState("0.2")
+  const [tournamentSize, setTournamentSize] = useState("5")
+
   useEffect(() => {
     if (typeof window !== "undefined") {
       const savedStrategy = localStorage.getItem("savedStrategy")
@@ -134,17 +145,17 @@ export default function StrategyTestingPage() {
   // Helper function to match timeframes with filenames
   function matchesTimeframe(filename, timeframe) {
     // Convert filename to lowercase for case-insensitive matching
-    const lowerFilename = filename.toLowerCase();
-    const lowerTimeframe = timeframe.toLowerCase();
-  
-    console.log(`Checking if "${lowerFilename}" matches timeframe "${lowerTimeframe}"`);
-  
+    const lowerFilename = filename.toLowerCase()
+    const lowerTimeframe = timeframe.toLowerCase()
+
+    console.log(`Checking if "${lowerFilename}" matches timeframe "${lowerTimeframe}"`)
+
     // Direct matching (e.g., "3h" in filename)
     if (lowerFilename.includes(lowerTimeframe)) {
-      console.log("✅ Direct match found");
-      return true;
+      console.log("✅ Direct match found")
+      return true
     }
-  
+
     // Handle numeric equivalents
     // Map common timeframes to their minute equivalents
     const timeframeToMinutes = {
@@ -164,28 +175,28 @@ export default function StrategyTestingPage() {
       "1 day": 1440,
       "1w": 10080,
       "1 week": 10080,
-    };
-  
+    }
+
     // Extract the minute value for the timeframe
-    const minutes = timeframeToMinutes[lowerTimeframe];
-    console.log(`Minutes value for ${lowerTimeframe}: ${minutes}`);
-    
+    const minutes = timeframeToMinutes[lowerTimeframe]
+    console.log(`Minutes value for ${lowerTimeframe}: ${minutes}`)
+
     if (minutes) {
       // Check if the filename contains the minute value
-      const minutesStr = minutes.toString();
-      const containsMinutes = lowerFilename.includes(minutesStr);
-      console.log(`Checking if filename contains "${minutesStr}": ${containsMinutes}`);
-      
+      const minutesStr = minutes.toString()
+      const containsMinutes = lowerFilename.includes(minutesStr)
+      console.log(`Checking if filename contains "${minutesStr}": ${containsMinutes}`)
+
       // Additional check: Make sure it's not part of another number
       // For example, "20" in "120" should not match "20m"
-      const regex = new RegExp(`\\b${minutesStr}\\b`);
-      const isStandaloneNumber = regex.test(lowerFilename);
-      console.log(`Is "${minutesStr}" a standalone number: ${isStandaloneNumber}`);
-      
-      return containsMinutes;
+      const regex = new RegExp(`\\b${minutesStr}\\b`)
+      const isStandaloneNumber = regex.test(lowerFilename)
+      console.log(`Is "${minutesStr}" a standalone number: ${isStandaloneNumber}`)
+
+      return containsMinutes
     }
-  
-    return false;
+
+    return false
   }
 
   // Updated handleRunBacktest function to use the new API structure
@@ -194,17 +205,17 @@ export default function StrategyTestingPage() {
       alert("Strategy statement is missing or not parsed!")
       return
     }
-  
+
     if (requiredTimeframes.length > uploadedFiles.length) {
       alert("Not enough files uploaded for the required timeframes")
       return
     }
-  
+
     try {
       setIsLoading(true)
-  
+
       const timeframeFiles: Record<string, File> = {}
-  
+
       // Directly map each required timeframe to the uploaded file in order
       requiredTimeframes.forEach((timeframe, index) => {
         const filename = uploadedFiles[index]
@@ -212,7 +223,7 @@ export default function StrategyTestingPage() {
           timeframeFiles[timeframe] = fileObjects[filename]
         }
       })
-  
+
       // Add unmatched remaining files to the form with filename as key (optional fallback)
       uploadedFiles.forEach((filename) => {
         if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
@@ -220,12 +231,12 @@ export default function StrategyTestingPage() {
           timeframeFiles[key] = fileObjects[filename]
         }
       })
-  
+
       const result = await runBacktest({
         statement: parsedStatement,
         files: timeframeFiles,
       })
-  
+
       if (result?.plot_html) {
         setPlotHtml(result.plot_html)
       } else {
@@ -238,7 +249,6 @@ export default function StrategyTestingPage() {
       setIsLoading(false)
     }
   }
-  
 
   const handleClick = () => {
     fileInputRef.current?.click()
@@ -409,7 +419,7 @@ export default function StrategyTestingPage() {
         {/* Content area with overflow to allow scrolling */}
         <div className="flex-1 overflow-y-auto pb-[160px] bg-[#000000] ml-[63px]">
           {activeTab === "backtest" && (
-            <div className="p-6">
+            <div className="p-6 ml-[63px]">
               <div className="flex justify-between items-start mb-6">
                 {/* Left side - Dates */}
                 <div className="w-[30%]">
@@ -559,11 +569,193 @@ export default function StrategyTestingPage() {
               </div>
 
               {/* Required Timeframes Upload Section */}
-             
             </div>
           )}
 
-          {activeTab !== "backtest" && (
+          {activeTab === "optimisation" && (
+            <div className="p-4 bg-[#000000]">
+              <div className="ml-[63px]">
+                {/* Defaults Section */}
+                <div className="mb-6">
+                  <h3 className="text-white text-base font-medium mb-4">Defaults</h3>
+
+                  <div className="flex justify-between items-center mb-4">
+                    <div className="text-white">Optimized parameter</div>
+                    <div className="relative">
+                      <select
+                        className="appearance-none bg-transparent text-white pr-8 focus:outline-none"
+                        defaultValue="Balance"
+                      >
+                        <option value="Balance">Balance</option>
+                        <option value="Profit">Profit</option>
+                        <option value="Drawdown">Drawdown</option>
+                      </select>
+                      <div className="absolute inset-y-0 right-0 flex items-center pointer-events-none">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path
+                            d="M6 9l6 6 6-6"
+                            stroke="white"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center mb-4">
+                    <div className="flex items-center">
+                      <input type="checkbox" id="genetic-algorithm" className="mr-2" />
+                      <label htmlFor="genetic-algorithm" className="text-white">
+                        Genetic algorithm
+                      </label>
+                    </div>
+                    <button
+                      className="bg-transparent border border-[#2b2e38] text-white rounded-full px-4 py-2 text-sm"
+                      onClick={() => setShowAdvancedSettingsModal(true)}
+                    >
+                      Advanced Settings
+                    </button>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center">
+                      <input type="checkbox" id="duration-limit" className="mr-2" />
+                      <label htmlFor="duration-limit" className="text-white">
+                        Duration Limit
+                      </label>
+                    </div>
+                    <div className="flex items-center">
+                      <input
+                        type="text"
+                        value="5h 30m"
+                        className="bg-transparent border border-[#2b2e38] text-white rounded-md px-3 py-2 w-24 text-center"
+                        readOnly
+                      />
+                      <button className="ml-2 bg-transparent border border-[#2b2e38] text-white rounded-md p-2">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <rect x="3" y="6" width="18" height="15" rx="2" stroke="white" strokeWidth="2" />
+                          <path d="M3 10H21" stroke="white" strokeWidth="2" />
+                          <path d="M8 3V7" stroke="white" strokeWidth="2" strokeLinecap="round" />
+                          <path d="M16 3V7" stroke="white" strokeWidth="2" strokeLinecap="round" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Limitations Section - Only show when not collapsed */}
+                {!isLimitationsCollapsed && (
+                  <div className="mb-6">
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-white text-base font-medium">Limitations</h3>
+                      <h3 className="text-white text-base font-medium">Value</h3>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center">
+                          <input type="checkbox" id="balance-minimum" className="mr-2" />
+                          <label htmlFor="balance-minimum" className="text-white">
+                            Balance minimum
+                          </label>
+                        </div>
+                        <div className="text-white">200</div>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center">
+                          <input type="checkbox" id="profit-maximum" className="mr-2" />
+                          <label htmlFor="profit-maximum" className="text-white">
+                            Profit maximum
+                          </label>
+                        </div>
+                        <div className="text-white">10000</div>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center">
+                          <input type="checkbox" id="minimal-margin" className="mr-2" />
+                          <label htmlFor="minimal-margin" className="text-white">
+                            Minimal margin level %
+                          </label>
+                        </div>
+                        <div className="text-white">30</div>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center">
+                          <input type="checkbox" id="maximal-drawdown" className="mr-2" />
+                          <label htmlFor="maximal-drawdown" className="text-white">
+                            Maximal drawdown
+                          </label>
+                        </div>
+                        <div className="text-white">70</div>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center">
+                          <input type="checkbox" id="consecutive-loss" className="mr-2" />
+                          <label htmlFor="consecutive-loss" className="text-white">
+                            Consecutive loss
+                          </label>
+                        </div>
+                        <div className="text-white">500</div>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center">
+                          <input type="checkbox" id="consecutive-loss-trades" className="mr-2" />
+                          <label htmlFor="consecutive-loss-trades" className="text-white">
+                            Consecutive loss trades
+                          </label>
+                        </div>
+                        <div className="text-white">10</div>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center">
+                          <input type="checkbox" id="consecutive-win" className="mr-2" />
+                          <label htmlFor="consecutive-win" className="text-white">
+                            Consecutive win
+                          </label>
+                        </div>
+                        <div className="text-white">1000</div>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center">
+                          <input type="checkbox" id="consecutive-win-trades" className="mr-2" />
+                          <label htmlFor="consecutive-win-trades" className="text-white">
+                            Consecutive win trades
+                          </label>
+                        </div>
+                        <div className="text-white">30</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-between items-center mb-6">
+                  <button
+                    className="text-white hover:text-gray-300"
+                    onClick={() => setIsLimitationsCollapsed(!isLimitationsCollapsed)}
+                  >
+                    {isLimitationsCollapsed ? "Expand" : "Collapse"}
+                  </button>
+                  <div className="flex space-x-2">
+                    <button className="bg-transparent border border-[#2b2e38] text-white rounded-full px-6 py-2">
+                      Reset
+                    </button>
+                    <button className="bg-[#85e1fe] text-black rounded-full px-6 py-2">Save</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab !== "backtest" && activeTab !== "optimisation" && (
             <div className="p-4">
               {/* Strategy Selection */}
               <div className="p-4 bg-black">
@@ -910,6 +1102,77 @@ export default function StrategyTestingPage() {
         </div>
       )}
       {isChartExpanded && <div className="fixed inset-0 bg-black bg-opacity-50 z-40" onClick={toggleChartExpansion} />}
+
+      {/* Advanced Settings Modal */}
+      {showAdvancedSettingsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-[#f5f5f5] rounded-lg shadow-lg w-full max-w-md p-6">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-black">Advanced Settings</h2>
+              <button onClick={() => setShowAdvancedSettingsModal(false)} className="text-gray-500 hover:text-gray-700">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mb-8">
+              <div>
+                <label className="block text-sm text-gray-600 mb-2">Population size</label>
+                <input
+                  type="text"
+                  value={populationSize}
+                  onChange={(e) => setPopulationSize(e.target.value)}
+                  className="w-full bg-white border border-gray-300 rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-black"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-2">Generations</label>
+                <input
+                  type="text"
+                  value={generations}
+                  onChange={(e) => setGenerations(e.target.value)}
+                  className="w-full bg-white border border-gray-300 rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-black"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-2">Mutation rate</label>
+                <input
+                  type="text"
+                  value={mutationRate}
+                  onChange={(e) => setMutationRate(e.target.value)}
+                  className="w-full bg-white border border-gray-300 rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-black"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-2">Tournament size</label>
+                <input
+                  type="text"
+                  value={tournamentSize}
+                  onChange={(e) => setTournamentSize(e.target.value)}
+                  className="w-full bg-white border border-gray-300 rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-black"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setShowAdvancedSettingsModal(false)}
+                className="px-6 py-3 border border-gray-300 rounded-full text-black"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  // Save the settings here
+                  setShowAdvancedSettingsModal(false)
+                }}
+                className="px-6 py-3 bg-[#85e1fe] rounded-full text-black"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

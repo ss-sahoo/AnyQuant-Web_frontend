@@ -59,16 +59,16 @@ export function AuthForm({ activeTab, setActiveTab }: AuthFormProps) {
         localStorage.setItem("user_id", data.user_id)
 
         router.push("/home")
+        
       } else {
         await createAccount({ username: fullname, email, password })
         await sendOtpEmail(email)
         localStorage.setItem("signup_email", email)
         router.push("/auth/verify")
+        
       }
     } catch (error) {
       // setEmailError(error.message || "Something went wrong.")
-    } finally {
-      setLoading(false)
     }
   }
 

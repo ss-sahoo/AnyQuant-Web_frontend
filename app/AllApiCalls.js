@@ -145,16 +145,12 @@ export const resetPassword = async ({ login_identifier, new_password }) => {
 }
 
 export const getUserProfile = async (userId) => {
-  const token = localStorage.getItem("auth_token")
-  if (!token) {
-    throw new Error("Auth token not found")
-  }
 
-  const response = await fetch(`http://127.0.0.1:8000/api/profile/${userId}/`, {
+  const response = await Fetch(`/api/profile/${userId}/`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Token ${token}`, // ✅ Token should not be undefined
+      
     },
   })
 
@@ -234,14 +230,20 @@ export const runBacktest = async ({ statement, files }) => {
 export const createStatement = async ({ account, statement }) => {
   const payload = {
     account,
+    name: statement.name,
     side: statement.side,
     saveresult: statement.saveresult,
     strategy: statement.strategy,
+    instrument: statement.instrument || "XAU/USD",  // use default if not provided
   }
 
-  // Add 'equity' only if it's provided
+  // Add optional fields if they exist
   if (statement.Equity !== undefined && statement.Equity !== null) {
     payload.Equity = statement.Equity
+  }
+
+  if (statement.tradingtype !== undefined && statement.tradingtype !== null) {
+    payload.tradingtype = statement.tradingtype
   }
 
   const response = await Fetch("/api/strategies/", {
@@ -261,8 +263,9 @@ export const createStatement = async ({ account, statement }) => {
 }
 
 
+
 export const fetchStatement = async () => {
-  const accountId = localStorage.getItem("account_id")
+  const accountId = localStorage.getItem("user_id")
 
   if (!accountId) {
     throw new Error("Account ID not found")
@@ -281,7 +284,7 @@ export const fetchStatement = async () => {
 
   const data = await response.json()
 
-  const filteredData = data.filter((strategy) => strategy.account === accountId)
+  const filteredData = data.filter((strategy) => strategy.account == accountId)
 
   return filteredData
 }
@@ -301,6 +304,40 @@ export const fetchStatementDetail = async (statement_id) => {
 
   return response.json()
 }
+
+export const deleteStatement = async (statement_id) => {
+  const response = await Fetch(`/api/strategies/${statement_id}/delete/`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error?.detail || "Failed to delete statement")
+  }
+
+  return response.json()
+}
+export const updateStatement = async (statement_id, updatedData) => {
+  const response = await Fetch(`/api/strategies/${statement_id}/`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(updatedData),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error?.detail || "Failed to update statement")
+  }
+
+  return response.json()
+}
+
+
 
 // API functions for strategy testing
 
@@ -358,6 +395,33 @@ export const updateStrategy = async (
 
     if (!response.ok) {
       throw new Error(`API error: ${response.status}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error("Error updating strategy:", error)
+    throw error
+  }
+}
+
+/**
+ * Updates a strategy with new name and instrument
+ * @param {string} id - The strategy ID to update
+ * @param {object} data - The data containing name and instrument
+ * @returns {Promise} Promise with the updated strategy data
+ */
+export async function editStrategy(id, data) {
+  try {
+    const response = await Fetch(`/api/strategies/${id}/edit/`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(data),
+    })
+
+    if (!response.ok) {
+      throw new Error(`Failed to update strategy: ${response.status}`)
     }
 
     return await response.json()

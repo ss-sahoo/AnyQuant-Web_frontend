@@ -108,7 +108,7 @@ export function MobileResponsiveDashboard() {
               {/* Draft Algorithms Section */}
               <div className="lg:col-span-2 order-2 lg:order-1">
                 <div className="flex justify-between items-center mb-4">
-                  <h1 className="text-xl md:text-2xl font-normal">Draft algorithms</h1>
+                  {/* <h1 className="text-xl md:text-2xl font-normal">Draft algorithms</h1> */}
                   <button className="bg-[#6BCAE2] hover:bg-[#5AB9D1] text-black rounded-full px-4 md:px-6 py-1.5 md:py-2 text-xs md:text-sm">
                     Create Strategy
                   </button>

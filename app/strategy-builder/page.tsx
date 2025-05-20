@@ -56,7 +56,7 @@ export default function StrategyBuilderPage() {
           </div>
 
           {/* Strategy builder */}
-          <StrategyBuilder initialName={strategyName || "My Strategy"} initialInstrument={instrument || "XAU/USD"} />
+          <StrategyBuilder initialName={strategyName || ""} initialInstrument={instrument || "XAU/USD"} />
         </div>
 
         {/* Components sidebar */}
