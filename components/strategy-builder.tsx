@@ -1442,7 +1442,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           <button className="px-8 py-3 bg-[#151718] rounded-full text-white hover:bg-gray-700">Cancel</button>
         </Link>
         <div className="flex gap-3">
-          <button className="px-8 py-3 bg-[#151718] rounded-full text-white hover:bg-gray-700">Save for later</button>
+          <button onClick={handleContinue} className="px-8 py-3 bg-[#151718] rounded-full text-white hover:bg-gray-700">Save</button>
           <button
             className="px-8 py-3 bg-[#85e1fe] rounded-full text-black hover:bg-[#5AB9D1]"
             onClick={handleContinue}
