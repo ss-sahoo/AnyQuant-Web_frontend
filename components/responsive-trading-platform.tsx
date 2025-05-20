@@ -1,11 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { MobileSidebar } from "@/components/mobile-sidebar"
 import { AlgorithmTable } from "@/components/algorithm-table"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
+import { AlgorithmShortTable } from "@/components/algorithm-shorttable"
+import { fetchStatement, editStrategy, deleteStatement } from "@/app/AllApiCalls"
+
 
 import { useRouter } from "next/navigation"
 import { mockAlgorithms, mockShortlistedAlgorithms } from "@/lib/mock-data"
@@ -13,36 +16,97 @@ import type { Algorithm } from "@/lib/types"
 
 export function ResponsiveTradingPlatform() {
   const router = useRouter()
-  const [algorithms, setAlgorithms] = useState(mockAlgorithms)
+  const [algorithm, setAlgorithm] = useState(mockAlgorithms)
   const [shortlistedAlgorithms, setShortlistedAlgorithms] = useState(mockShortlistedAlgorithms)
+  const [algorithms, setAlgorithms] = useState<Algorithm[]>([])
+  const [loading, setLoading] = useState(true)
 
-  const user_id = localStorage.getItem("user_id")
-  console.log("user id ", user_id)
-  const handleDeleteAlgorithm = (id: string, isShortlisted: boolean) => {
-    if (isShortlisted) {
-      setShortlistedAlgorithms(shortlistedAlgorithms.filter((algo) => algo.id !== id))
-    } else {
-      setAlgorithms(algorithms.filter((algo) => algo.id !== id))
+  const refreshAlgorithms = async () => {
+    setLoading(true)
+    try {
+      const data = await fetchStatement()
+      const sortedData = data
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 10)
+      const mapped = sortedData.map((item, index) => ({
+        ...item,
+        id: item.id ? `${item.id}-${index}` : `strategy-${index}`,
+        name: item.name || item.saveresult || "Unnamed Strategy",
+        instrument: item.instrument || "Unknown",
+      }))
+      setAlgorithms(mapped)
+    } catch (err) {
+      console.error("Error fetching:", err)
+      setAlgorithms([])
+    } finally {
+      setLoading(false)
     }
   }
+  console.log("Fetched algorithms:", algorithms)
+
+  
+  useEffect(() => {
+    refreshAlgorithms()
+  }, [])
+
+  const handleDeleteAlgorithm = async (id: string) => {
+    try {
+      await deleteStatement(id.split("-")[0])
+      await refreshAlgorithms()
+    } catch (err) {
+      await refreshAlgorithms()
+    }
+  }
+  
+  const handleEditAlgorithm = async (id: string, name: string, instrument: string) => {
+    try {
+      const numericId = id.split("-")[0]
+  
+      const payload = {
+        name: String(name),
+        instrument: String(instrument),
+      }
+  
+      console.log("Sending payload to editStrategy:", payload)
+  
+      await editStrategy(numericId, payload)
+      await refreshAlgorithms()
+    } catch (err) {
+      console.error("Edit failed:", err)
+      alert("Edit failed.")
+    }
+  }
+  
+  
+  
+  
+  const user_id = localStorage.getItem("user_id")
+  console.log("user id ", user_id)
+  // const handleDeleteAlgorithm = (id: string, isShortlisted: boolean) => {
+  //   if (isShortlisted) {
+  //     setShortlistedAlgorithms(shortlistedAlgorithms.filter((algo) => algo.id !== id))
+  //   } else {
+  //     setAlgorithm(algorithm.filter((algo) => algo.id !== id))
+  //   }
+  // }
 
   const handleDuplicateAlgorithm = (duplicatedAlgorithm: Algorithm, isShortlisted: boolean) => {
     if (isShortlisted) {
       setShortlistedAlgorithms([...shortlistedAlgorithms, duplicatedAlgorithm])
     } else {
-      setAlgorithms([...algorithms, duplicatedAlgorithm])
+      setAlgorithm([...algorithm, duplicatedAlgorithm])
     }
   }
 
-  const handleEditAlgorithm = (updatedAlgorithm: Algorithm, isShortlisted: boolean) => {
-    if (isShortlisted) {
-      setShortlistedAlgorithms(
-        shortlistedAlgorithms.map((algo) => (algo.id === updatedAlgorithm.id ? updatedAlgorithm : algo)),
-      )
-    } else {
-      setAlgorithms(algorithms.map((algo) => (algo.id === updatedAlgorithm.id ? updatedAlgorithm : algo)))
-    }
-  }
+  // const handleEditAlgorithm = (updatedAlgorithm: Algorithm, isShortlisted: boolean) => {
+  //   if (isShortlisted) {
+  //     setShortlistedAlgorithms(
+  //       shortlistedAlgorithms.map((algo) => (algo.id === updatedAlgorithm.id ? updatedAlgorithm : algo)),
+  //     )
+  //   } else {
+  //     setAlgorithm(algorithm.map((algo) => (algo.id === updatedAlgorithm.id ? updatedAlgorithm : algo)))
+  //   }
+  // }
   const handleCreateAlgorithm = () => {
     router.push("/strategy-builder")
   }
@@ -80,16 +144,18 @@ export function ResponsiveTradingPlatform() {
           </div>
 
           <AlgorithmTable
-            algorithms={algorithms}
-            onDelete={(id) => handleDeleteAlgorithm(id, false)}
-            onDuplicate={(algorithm) => handleDuplicateAlgorithm(algorithm, false)}
-            onEdit={(algorithm) => handleEditAlgorithm(algorithm, false)}
-          />
+              algorithms={algorithms}
+              loading={loading}
+              onDelete={handleDeleteAlgorithm}
+              onEdit={(id, name, instrument) => handleEditAlgorithm(id, name, instrument)}
+              onDuplicate={(algorithm) => handleDuplicateAlgorithm(algorithm, false)}
+              />
+
 
           <h1 className="text-2xl md:text-3xl font-normal mt-8 md:mt-12 mb-6 md:mb-8">shortlisted strategy variants</h1>
 
-          <AlgorithmTable
-            algorithms={shortlistedAlgorithms}
+          <AlgorithmShortTable
+            algorithm={shortlistedAlgorithms}
             onDelete={(id) => handleDeleteAlgorithm(id, true)}
             onDuplicate={(algorithm) => handleDuplicateAlgorithm(algorithm, true)}
             onEdit={(algorithm) => handleEditAlgorithm(algorithm, true)}

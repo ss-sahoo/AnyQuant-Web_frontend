@@ -9,6 +9,7 @@ interface SLTPSettingsModalProps {
   onSave: (settings: SLTPSettings) => void
 }
 
+// Add a new "close" option to the valueType in the interface
 export interface SLTPSettings {
   type: "SL" | "TP" | "partial_tp"
   valueType: "pips" | "percentage" | "fixed" | "indicator" | "close"
@@ -30,7 +31,10 @@ export interface SLTPSettings {
     Price: string
     Close: string
     Action?: string
+    name?: string
+    operator?: string
   }>
+  formatType?: "simple" | "advanced" | "trailing" | "indicator" | "partial" | "fixed"
 }
 
 export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalProps) {
@@ -52,6 +56,10 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
     const updatedSettings = {
       ...settings,
       useAdvanced: formatType !== "simple" && formatType !== "fixed",
+      trailingStop: formatType === "trailing",
+      formatType: formatType, // Add the formatType to the settings
+      // Set type to "partial_tp" when formatType is "partial"
+      type: formatType === "partial" ? "partial_tp" : settings.type,
     }
     onSave(updatedSettings)
     onClose()
@@ -185,6 +193,20 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                   >
                     Percentage
                   </button>
+                  <button
+                    className={`px-3 py-1 rounded-md ${
+                      settings.valueType === "close" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                    }`}
+                    onClick={() =>
+                      setSettings({
+                        ...settings,
+                        valueType: "close",
+                        direction: "*",
+                      })
+                    }
+                  >
+                    Close Price
+                  </button>
                 </div>
               </div>
 
@@ -234,6 +256,19 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                   className="w-full bg-[#2A2D42] px-3 py-2 rounded-md focus:outline-none"
                 />
               </div>
+              {settings.valueType === "close" && (
+                <div>
+                  <label className="block text-sm font-medium mb-1">Multiplier</label>
+                  <input
+                    type="text"
+                    value={settings.value}
+                    onChange={(e) => setSettings({ ...settings, value: e.target.value })}
+                    className="w-full bg-[#2A2D42] px-3 py-2 rounded-md focus:outline-none"
+                    placeholder="e.g. 1.02 for SL, 0.96 for TP"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">{settings.type} will be set to Close * multiplier</p>
+                </div>
+              )}
             </>
           )}
 
@@ -359,15 +394,38 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                   <span className="ml-2">pips</span>
                 </div>
 
-                <div className="flex items-center">
-                  <label className="block text-sm font-medium mr-2">Trailing Step</label>
-                  <input
-                    type="text"
-                    value={settings.trailingStep || "250"}
-                    onChange={(e) => setSettings({ ...settings, trailingStep: e.target.value })}
-                    className="w-24 bg-[#2A2D42] px-3 py-2 rounded-md focus:outline-none"
-                  />
-                  <span className="ml-2">pips</span>
+                <div className="flex flex-col space-y-2">
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="useTrailingStep"
+                      checked={!!settings.trailingStep && settings.trailingStep !== "0"}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSettings({ ...settings, trailingStep: "250" })
+                        } else {
+                          setSettings({ ...settings, trailingStep: undefined })
+                        }
+                      }}
+                      className="mr-2"
+                    />
+                    <label htmlFor="useTrailingStep" className="text-sm font-medium">
+                      Use Trailing Step
+                    </label>
+                  </div>
+
+                  {!!settings.trailingStep && settings.trailingStep !== "0" && (
+                    <div className="flex items-center">
+                      <label className="block text-sm font-medium mr-2">Trailing Step</label>
+                      <input
+                        type="text"
+                        value={settings.trailingStep}
+                        onChange={(e) => setSettings({ ...settings, trailingStep: e.target.value })}
+                        className="w-24 bg-[#2A2D42] px-3 py-2 rounded-md focus:outline-none"
+                      />
+                      <span className="ml-2">pips</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </>
@@ -542,16 +600,74 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                         <Trash2 size={16} />
                       </button>
                     </div>
+
                     <div className="mb-2">
-                      <label className="block text-xs mb-1">Price</label>
-                      <input
-                        type="text"
-                        value={level.Price}
-                        onChange={(e) => updatePartialTpLevel(index, "Price", e.target.value)}
-                        className="w-full bg-[#1E2132] px-3 py-2 rounded-md focus:outline-none"
-                        placeholder="Entry_Price + 200pips"
-                      />
+                      <label className="block text-xs mb-1">Type</label>
+                      <div className="flex gap-2">
+                        <button
+                          className={`px-3 py-1 rounded-md text-xs ${
+                            !level.name ? "bg-blue-600 text-white" : "bg-[#1E2132] text-gray-300"
+                          }`}
+                          onClick={() => {
+                            const newList = [...settings.partialTpList!]
+                            // Remove name and operator if they exist
+                            const { name, operator, ...rest } = newList[index]
+                            // Add Price if it doesn't exist
+                            newList[index] = {
+                              ...rest,
+                              Price: rest.Price || "Entry_Price + 200pips",
+                            }
+                            setSettings({ ...settings, partialTpList: newList })
+                          }}
+                        >
+                          Price-based
+                        </button>
+                        <button
+                          className={`px-3 py-1 rounded-md text-xs ${
+                            level.name === "Equity" ? "bg-blue-600 text-white" : "bg-[#1E2132] text-gray-300"
+                          }`}
+                          onClick={() => {
+                            const newList = [...settings.partialTpList!]
+                            // Add name and operator
+                            newList[index] = {
+                              ...newList[index],
+                              name: "Equity",
+                              operator: newList[index].operator || "moving_up 300pips",
+                            }
+                            // Remove Price if it exists
+                            delete newList[index].Price
+                            setSettings({ ...settings, partialTpList: newList })
+                          }}
+                        >
+                          Equity-based
+                        </button>
+                      </div>
                     </div>
+
+                    {!level.name ? (
+                      <div className="mb-2">
+                        <label className="block text-xs mb-1">Price</label>
+                        <input
+                          type="text"
+                          value={level.Price || ""}
+                          onChange={(e) => updatePartialTpLevel(index, "Price", e.target.value)}
+                          className="w-full bg-[#1E2132] px-3 py-2 rounded-md focus:outline-none"
+                          placeholder="Entry_Price + 200pips"
+                        />
+                      </div>
+                    ) : (
+                      <div className="mb-2">
+                        <label className="block text-xs mb-1">Condition</label>
+                        <input
+                          type="text"
+                          value={level.operator || ""}
+                          onChange={(e) => updatePartialTpLevel(index, "operator", e.target.value)}
+                          className="w-full bg-[#1E2132] px-3 py-2 rounded-md focus:outline-none"
+                          placeholder="moving_up 300pips"
+                        />
+                      </div>
+                    )}
+
                     <div className="mb-2">
                       <label className="block text-xs mb-1">Close Percentage</label>
                       <input
@@ -562,6 +678,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                         placeholder="50%"
                       />
                     </div>
+
                     <div>
                       <label className="block text-xs mb-1">Action (Optional)</label>
                       <input
