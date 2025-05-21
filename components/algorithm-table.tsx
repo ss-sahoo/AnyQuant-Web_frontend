@@ -1,10 +1,9 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { MoreVertical } from 'lucide-react'
+import { useRef, useState } from "react"
+import { MoreVertical } from "lucide-react"
 import type { Algorithm } from "@/lib/types"
 import { AlgorithmMenu } from "@/components/algorithm-menu"
-import { fetchStatement } from "@/app/AllApiCalls"
 
 interface AlgorithmTableProps {
   algorithms: Algorithm[]
@@ -14,42 +13,18 @@ interface AlgorithmTableProps {
   onEdit: (id: string, name: string, instrument: string) => void
 }
 
-export function AlgorithmTable({algorithms, onDelete, onDuplicate, onEdit ,loading}: AlgorithmTableProps) {
+export function AlgorithmTable({
+  algorithms,
+  onDelete,
+  onDuplicate,
+  onEdit,
+  loading,
+}: AlgorithmTableProps) {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const menuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
 
-  
   const toggleMenu = (id: string) => {
     setOpenMenuId(openMenuId === id ? null : id)
-  }
-
-  const handleDuplicate = (id: string, name: string, instrument: string) => {
-    if (onDuplicate) {
-      const algorithm = algorithms.find((algo) => algo.id === id)
-      if (algorithm) {
-        const duplicatedAlgorithm: Algorithm = {
-          ...algorithm,
-          id: `${algorithm.id}-duplicate-${Date.now()}`,
-          name,
-          instrument,
-        }
-        onDuplicate(duplicatedAlgorithm)
-      }
-    }
-  }
-
-  const handleEdit = (id: string, name: string, instrument: string) => {
-    if (onEdit) {
-      const algorithm = algorithms.find((algo) => algo.id === id)
-      if (algorithm) {
-        const updatedAlgorithm: Algorithm = {
-          ...algorithm,
-          name,
-          instrument,
-        }
-        onEdit(updatedAlgorithm)
-        
-      }
-    }
   }
 
   return (
@@ -74,33 +49,33 @@ export function AlgorithmTable({algorithms, onDelete, onDuplicate, onEdit ,loadi
             <div className="col-span-4">{algorithm.name}</div>
             <div className="col-span-4">{algorithm.instrument}</div>
             <div className="col-span-3">
-              {algorithm.strategy && typeof algorithm.strategy === 'object' && algorithm.strategy.timeframe 
-                ? algorithm.strategy.timeframe 
-                : '-----------'}
+              {algorithm.strategy?.timeframe || "-----------"}
             </div>
             <div className="col-span-1 relative">
               <button
+                ref={(el) => (menuButtonRefs.current[algorithm.id] = el)}
                 onClick={() => toggleMenu(algorithm.id)}
                 className="p-1 rounded-full hover:bg-gray-700 transition-colors"
                 aria-label="Menu"
               >
                 <MoreVertical className="w-5 h-5" />
               </button>
+            </div>
 
-              {openMenuId === algorithm.id && (
-                <AlgorithmMenu
+            {openMenuId === algorithm.id && (
+              <AlgorithmMenu
+                anchorRef={{ current: menuButtonRefs.current[algorithm.id] }}
                 algorithm={algorithm}
                 onClose={() => setOpenMenuId(null)}
                 onDelete={() => onDelete(algorithm.id)}
-                onEdit={(name, instrument) => {
-                  onEdit?.(algorithm.id, name, instrument)  // ✅ correct now
-                }}
-                onDuplicate={(name, instrument) => {
+                onEdit={(name, instrument) =>
+                  onEdit(algorithm.id, name, instrument)
+                }
+                onDuplicate={(name, instrument) =>
                   onDuplicate?.({ ...algorithm, name, instrument })
-                }}
+                }
               />
-              )}
-            </div>
+            )}
           </div>
         ))
       )}

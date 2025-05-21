@@ -4,8 +4,11 @@
 //   return <ResponsiveExpandedDashboard />
 // }
 
+import AuthGuard from "@/hooks/useAuthGuard"
 import DashboardClientPage from "./DashboardClientPage"
 
 export default function HomePage() {
+ 
   return <DashboardClientPage />
+  
 }

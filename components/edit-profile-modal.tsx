@@ -20,6 +20,7 @@ export function EditProfileModal({ userData, onClose, onSave }: EditProfileModal
   const [name, setName] = useState(userData.name)
   const [email, setEmail] = useState(userData.email)
   const [phone, setPhone] = useState(userData.phone)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const modalRef = useRef<HTMLDivElement>(null)
 
@@ -53,6 +54,7 @@ export function EditProfileModal({ userData, onClose, onSave }: EditProfileModal
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setIsSubmitting(true)
 
     try {
       const userId = localStorage.getItem("user_id")
@@ -61,13 +63,18 @@ export function EditProfileModal({ userData, onClose, onSave }: EditProfileModal
       const updatedData = {
         username: name,
         email: email,
+        phoneno: phone,
       }
 
       await updateUserProfile(userId, updatedData)
-      onSave(name, email, phone) // Update the parent UI
+
+      // Call onSave to notify parent component and trigger data refresh
+      await onSave(name, email, phone)
     } catch (err) {
       console.error("Profile update failed:", err)
       alert("Something went wrong while updating profile.")
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -90,6 +97,7 @@ export function EditProfileModal({ userData, onClose, onSave }: EditProfileModal
               onClose()
             }}
             className="text-[#1e1e1e] hover:bg-gray-200 rounded-full p-1"
+            disabled={isSubmitting}
           >
             <X className="w-6 h-6" />
           </button>
@@ -108,6 +116,7 @@ export function EditProfileModal({ userData, onClose, onSave }: EditProfileModal
               onChange={(e) => setName(e.target.value)}
               className="w-full p-3 border border-gray-300 rounded-lg text-[#1e1e1e] focus:outline-none focus:ring-2 focus:ring-[#6BCAE2]"
               required
+              disabled={isSubmitting}
             />
           </div>
 
@@ -122,6 +131,7 @@ export function EditProfileModal({ userData, onClose, onSave }: EditProfileModal
               onChange={(e) => setEmail(e.target.value)}
               className="w-full p-3 border border-gray-300 rounded-lg text-[#1e1e1e] focus:outline-none focus:ring-2 focus:ring-[#6BCAE2]"
               required
+              disabled={isSubmitting}
             />
           </div>
 
@@ -136,15 +146,17 @@ export function EditProfileModal({ userData, onClose, onSave }: EditProfileModal
               onChange={(e) => setPhone(e.target.value)}
               className="w-full p-3 border border-gray-300 rounded-lg text-[#1e1e1e] focus:outline-none focus:ring-2 focus:ring-[#6BCAE2]"
               required
+              disabled={isSubmitting}
             />
           </div>
 
           {/* Save Button */}
           <button
             type="submit"
-            className="w-full py-3 bg-[#6BCAE2] rounded-full text-[#1e1e1e] hover:bg-[#5AB9D1] transition-colors font-medium"
+            className="w-full py-3 bg-[#6BCAE2] rounded-full text-[#1e1e1e] hover:bg-[#5AB9D1] transition-colors font-medium disabled:opacity-70 disabled:cursor-not-allowed"
+            disabled={isSubmitting}
           >
-            Save
+            {isSubmitting ? "Saving..." : "Save"}
           </button>
         </form>
       </div>

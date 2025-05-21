@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/sidebar"
 import { MobileSidebar } from "@/components/mobile-sidebar"
 import { StrategyBuilder } from "@/components/strategy-builder"
 import { ComponentsSidebar } from "@/components/components-sidebar"
+import AuthGuard from "@/hooks/useAuthGuard"
 
 export default function StrategyBuilderPage() {
   const searchParams = useSearchParams()
@@ -22,6 +23,7 @@ export default function StrategyBuilderPage() {
   }, [searchParams])
 
   return (
+    <AuthGuard>
     <div className="flex min-h-screen bg-[#000000] text-white">
       {/* Desktop sidebar - hidden on mobile */}
       <Sidebar currentPage="home" />
@@ -74,5 +76,6 @@ export default function StrategyBuilderPage() {
         />
       </div>
     </div>
+    </AuthGuard>
   )
 }

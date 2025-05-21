@@ -22,27 +22,34 @@ export function ProfilePage() {
     connected: "Access Point NG 1",
   })
 
-  useEffect(() => {
+  // Function to fetch user profile data
+  const fetchUserProfile = async () => {
     const userId = localStorage.getItem("user_id")
     if (userId) {
-      getUserProfile(userId)
-        .then((data) => {
-          setUserData((prev) => ({
-            ...prev,
-            name: data.username,
-            email: data.email,
-            phone: data.phoneno || "Not Provided",
-          }))
-        })
-        .catch((err) => {
-          console.error("Failed to load profile", err)
-        })
+      try {
+        const data = await getUserProfile(userId)
+        setUserData((prev) => ({
+          ...prev,
+          name: data.username,
+          email: data.email,
+          phone: data.phoneno || "Not Provided",
+        }))
+      } catch (err) {
+        console.error("Failed to load profile", err)
+      }
     }
+  }
+
+  // Initial data load
+  useEffect(() => {
+    fetchUserProfile()
   }, [])
 
-  const handleSaveProfile = (name: string, email: string, phone: string) => {
+  const handleSaveProfile = async (name: string, email: string, phone: string) => {
     console.log("Saving profile:", { name, email, phone })
     setShowEditModal(false)
+    // Refresh user data after profile update
+    await fetchUserProfile()
   }
 
   const handleChangePassword = (oldPassword: string, newPassword: string) => {

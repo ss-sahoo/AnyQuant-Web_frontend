@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import { mockAlgorithms } from "@/lib/mock-data"
 import type { Algorithm } from "@/lib/types"
+import AuthGuard from "@/hooks/useAuthGuard"
 
 export function ResponsiveExpandedDashboard() {
   const [algorithms, setAlgorithms] = useState(mockAlgorithms)
@@ -23,6 +24,7 @@ export function ResponsiveExpandedDashboard() {
   }
 
   return (
+    <AuthGuard>
     <div className="flex min-h-screen bg-[#121420] text-white">
       {/* Desktop sidebar - hidden on mobile */}
       <div className="hidden md:block">
@@ -36,7 +38,7 @@ export function ResponsiveExpandedDashboard() {
         <div className="max-w-7xl mx-auto">
           {/* Navigation */}
           <div className="mb-4 flex justify-end">
-            <Link href="/">
+            <Link href="/home">
               <Button variant="outline" className="border-[#6BCAE2] text-[#6BCAE2] hover:bg-[#6BCAE2]/10">
                 Back to Home
               </Button>
@@ -74,5 +76,6 @@ export function ResponsiveExpandedDashboard() {
         </div>
       </main>
     </div>
+    </AuthGuard>
   )
 }
