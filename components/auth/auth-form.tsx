@@ -67,7 +67,9 @@ export function AuthForm({ activeTab, setActiveTab }: AuthFormProps) {
         router.push("/auth/verify")
         
       }
-    } catch (error) {
+    } catch (error: any) {
+      setLoading(false)
+      alert("Error: " + error.message)
       // setEmailError(error.message || "Something went wrong.")
     }
   }

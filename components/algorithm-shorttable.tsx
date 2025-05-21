@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { MoreVertical } from "lucide-react"
 import type { Algorithm } from "@/lib/types"
 import { AlgorithmMenu } from "@/components/algorithm-menu"
@@ -14,6 +14,7 @@ interface AlgorithmTableProps {
 
 export function AlgorithmShortTable({ algorithm, onDelete, onDuplicate, onEdit }: AlgorithmTableProps) {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const buttonRefs = useRef<Record<string, HTMLButtonElement>>({})
 
   const toggleMenu = (id: string) => {
     setOpenMenuId(openMenuId === id ? null : id)
@@ -57,34 +58,38 @@ export function AlgorithmShortTable({ algorithm, onDelete, onDuplicate, onEdit }
         <div className="col-span-1"></div>
       </div>
 
-      {algorithm.map((algorithm) => (
-        <div key={algorithm.id} className="grid grid-cols-12 p-4 border-b border-gray-800 last:border-0 items-center">
-          <div className="col-span-4">{algorithm.name}</div>
-          <div className="col-span-4">{algorithm.instrument}</div>
+      {algorithm.map((algo) => (
+        <div key={algo.id} className="grid grid-cols-12 p-4 border-b border-gray-800 last:border-0 items-center">
+          <div className="col-span-4">{algo.name}</div>
+          <div className="col-span-4">{algo.instrument}</div>
           <div className="col-span-3">-----------</div>
           <div className="col-span-1 relative">
             <button
-              onClick={() => toggleMenu(algorithm.id)}
+              ref={(el) => {
+                if (el) buttonRefs.current[algo.id] = el
+              }}
+              onClick={() => toggleMenu(algo.id)}
               className="p-1 rounded-full hover:bg-gray-700 transition-colors"
               aria-label="Menu"
             >
               <MoreVertical className="w-5 h-5" />
             </button>
 
-            {openMenuId === algorithm.id && (
+            {openMenuId === algo.id && buttonRefs.current[algo.id] && (
               <AlgorithmMenu
-                algorithm={algorithm}
+                anchorRef={{ current: buttonRefs.current[algo.id] }}
+                algorithm={algo}
                 onClose={() => setOpenMenuId(null)}
                 onDelete={() => {
-                  onDelete(algorithm.id)
+                  onDelete(algo.id)
                   setOpenMenuId(null)
                 }}
                 onDuplicate={(name, instrument) => {
-                  handleDuplicate(algorithm.id, name, instrument)
+                  handleDuplicate(algo.id, name, instrument)
                   setOpenMenuId(null)
                 }}
                 onEdit={(name, instrument) => {
-                  handleEdit(algorithm.id, name, instrument)
+                  handleEdit(algo.id, name, instrument)
                   setOpenMenuId(null)
                 }}
               />

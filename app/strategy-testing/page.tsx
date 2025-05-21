@@ -7,6 +7,7 @@ import { Sidebar } from "@/components/sidebar"
 import { MobileSidebar } from "@/components/mobile-sidebar"
 import { runBacktest, updateStrategy } from "../AllApiCalls"
 import { X } from "lucide-react"
+import AuthGuard from "@/hooks/useAuthGuard"
 
 export default function StrategyTestingPage() {
   const [activeTab, setActiveTab] = useState("strategy")
@@ -343,6 +344,7 @@ export default function StrategyTestingPage() {
   }
 
   return (
+    <AuthGuard>
     <div className="flex min-h-screen bg-[#121420] text-white">
       <div className="hidden md:block">
         <Sidebar currentPage="home" />
@@ -1174,5 +1176,6 @@ export default function StrategyTestingPage() {
         </div>
       )}
     </div>
+    </AuthGuard>
   )
 }

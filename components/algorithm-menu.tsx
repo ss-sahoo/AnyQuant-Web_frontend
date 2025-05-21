@@ -1,11 +1,15 @@
 "use client"
 
-import { useRef, useEffect, useState } from "react"
+import type React from "react"
+
+import { useEffect, useState } from "react"
 import { DuplicateStrategyModal } from "@/components/duplicate-strategy-modal"
 import { EditStrategyModal } from "@/components/edit-strategy-modal"
+import { MenuPortal } from "@/components/MenuPortal"
 import type { Algorithm } from "@/lib/types"
 
 interface AlgorithmMenuProps {
+  anchorRef: React.RefObject<HTMLElement>
   algorithm: Algorithm
   onClose: () => void
   onDelete: (id: string) => void
@@ -13,118 +17,87 @@ interface AlgorithmMenuProps {
   onEdit: (name: string, instrument: string) => void
 }
 
-export function AlgorithmMenu({ algorithm, onClose, onDelete, onDuplicate, onEdit }: AlgorithmMenuProps) {
+export function AlgorithmMenu({ anchorRef, algorithm, onClose, onDelete, onDuplicate, onEdit }: AlgorithmMenuProps) {
+  const [position, setPosition] = useState<"top" | "bottom">("bottom")
   const [showDuplicateModal, setShowDuplicateModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
-  const [menuPosition, setMenuPosition] = useState<"bottom" | "top">("bottom")
-  const menuRef = useRef<HTMLDivElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const [menuVisible, setMenuVisible] = useState(true)
 
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (showDuplicateModal || showEditModal) return
-      if (
-        menuRef.current &&
-        !menuRef.current.contains(event.target as Node) &&
-        containerRef.current &&
-        !containerRef.current.contains(event.target as Node)
-      ) {
-        onClose()
-      }
+    if (anchorRef.current) {
+      const rect = anchorRef.current.getBoundingClientRect()
+      const spaceBelow = window.innerHeight - rect.bottom
+      const spaceAbove = rect.top
+      setPosition(spaceBelow < 180 && spaceAbove > 180 ? "top" : "bottom")
     }
-
-    function updateMenuPosition() {
-      if (menuRef.current) {
-        const rect = menuRef.current.getBoundingClientRect()
-        const spaceBelow = window.innerHeight - rect.bottom
-        const spaceAbove = rect.top
-
-        if (spaceBelow < 200 && spaceAbove > 200) {
-          setMenuPosition("top")
-        } else {
-          setMenuPosition("bottom")
-        }
-      }
-    }
-
-    document.addEventListener("mousedown", handleClickOutside)
-    window.addEventListener("resize", updateMenuPosition)
-    setTimeout(updateMenuPosition, 0)
-
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside)
-      window.removeEventListener("resize", updateMenuPosition)
-    }
-  }, [showDuplicateModal, showEditModal, onClose])
+  }, [anchorRef])
 
   const getNumericId = () => algorithm.id.toString().split("-")[0]
 
+  const handleEditClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setShowEditModal(true)
+    setMenuVisible(false) // Hide the menu when modal opens
+  }
+
+  const handleDuplicateClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setShowDuplicateModal(true)
+    setMenuVisible(false) // Hide the menu when modal opens
+  }
+
+  const handleModalClose = () => {
+    setShowEditModal(false)
+    setShowDuplicateModal(false)
+    onClose() // Close the menu completely when modal is closed
+  }
+
+  const MenuContent = (
+    <div className="w-48 bg-white rounded-md shadow-lg z-[9999] text-sm text-gray-900">
+      <button className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={handleEditClick}>
+        Edit strategy
+      </button>
+      <button className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={handleDuplicateClick}>
+        Duplicate
+      </button>
+      <button
+        className="w-full text-left px-4 py-2 hover:bg-gray-100"
+        onClick={(e) => {
+          e.stopPropagation()
+          window.location.href = `/strategy-testing?id=${getNumericId()}`
+          onClose()
+        }}
+      >
+        Proceed to testing
+      </button>
+      <button
+        className="w-full text-left px-4 py-2 text-red-600 hover:bg-gray-100"
+        onClick={(e) => {
+          e.stopPropagation()
+          onDelete(getNumericId())
+          onClose()
+        }}
+      >
+        Delete
+      </button>
+    </div>
+  )
+
   return (
     <>
-      <div ref={containerRef} className="relative inline-block">
-        <div
-          ref={menuRef}
-          className="absolute w-48 bg-white rounded-md shadow-lg overflow-hidden z-50"
-          style={{
-            top: menuPosition === "bottom" ? "100%" : undefined,
-            bottom: menuPosition === "top" ? "100%" : undefined,
-            right: 0,
-            marginTop: menuPosition === "bottom" ? "8px" : undefined,
-            marginBottom: menuPosition === "top" ? "8px" : undefined,
-            marginRight: "12px", // ✅ right margin (gap from right edge)
-          }}
-        >
-          <div className="py-1 text-gray-900">
-            <button
-              className="w-full text-left px-4 py-2 hover:bg-gray-100 transition-colors"
-              onClick={(e) => {
-                e.stopPropagation()
-                setShowEditModal(true)
-              }}
-            >
-              Edit strategy
-            </button>
-            <button
-              className="w-full text-left px-4 py-2 hover:bg-gray-100 transition-colors"
-              onClick={(e) => {
-                e.stopPropagation()
-                setShowDuplicateModal(true)
-              }}
-            >
-              Duplicate
-            </button>
-            <button
-              className="w-full text-left px-4 py-2 hover:bg-gray-100 transition-colors"
-              onClick={(e) => {
-                e.stopPropagation()
-                window.location.href = `/strategy-testing?id=${getNumericId()}`
-                onClose()
-              }}
-            >
-              Proceed to testing
-            </button>
-            <button
-              className="w-full text-left px-4 py-2 text-red-600 hover:bg-gray-100 transition-colors"
-              onClick={(e) => {
-                e.stopPropagation()
-                onDelete(getNumericId())
-              }}
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-      </div>
+      {menuVisible && (
+        <MenuPortal anchorRef={anchorRef} position={position} onClose={onClose}>
+          {MenuContent}
+        </MenuPortal>
+      )}
 
       {showDuplicateModal && (
         <DuplicateStrategyModal
           strategy={algorithm}
-          onClose={() => {
-            setShowDuplicateModal(false)
-            onClose()
-          }}
+          onClose={handleModalClose}
           onSave={(name, instrument) => {
             onDuplicate(name, instrument)
+            handleModalClose()
           }}
         />
       )}
@@ -133,12 +106,10 @@ export function AlgorithmMenu({ algorithm, onClose, onDelete, onDuplicate, onEdi
         <EditStrategyModal
           strategy={algorithm}
           isEdit={true}
-          onClose={() => {
-            setShowEditModal(false)
-            onClose()
-          }}
+          onClose={handleModalClose}
           onSave={(name, instrument) => {
             onEdit(name, instrument)
+            handleModalClose()
           }}
         />
       )}

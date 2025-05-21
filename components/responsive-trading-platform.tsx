@@ -13,6 +13,7 @@ import { fetchStatement, editStrategy, deleteStatement } from "@/app/AllApiCalls
 import { useRouter } from "next/navigation"
 import { mockAlgorithms, mockShortlistedAlgorithms } from "@/lib/mock-data"
 import type { Algorithm } from "@/lib/types"
+import AuthGuard from "@/hooks/useAuthGuard"
 
 export function ResponsiveTradingPlatform() {
   const router = useRouter()
@@ -112,6 +113,7 @@ export function ResponsiveTradingPlatform() {
   }
 
   return (
+    <AuthGuard>
     <div className="flex min-h-screen bg-[#121420] text-white">
       {/* Desktop sidebar - hidden on mobile */}
       <div className="hidden md:block">
@@ -163,5 +165,6 @@ export function ResponsiveTradingPlatform() {
         </div>
       </main>
     </div>
+    </AuthGuard>
   )
 }
