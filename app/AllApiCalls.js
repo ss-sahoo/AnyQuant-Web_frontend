@@ -354,55 +354,34 @@ export const updateStatement = async (statement_id, updatedData) => {
  * @param {number} cash - Account deposit amount
  * @returns {Promise} - Promise with the API response
  */
-export const updateStrategy = async (
-  strategyId,
-  accountId,
-  side,
-  saveResult,
-  strID,
-  nTradeMax = 1,
-  margin = 0.02,
-  lot = "mini",
-  cash = 10000,
-) => {
+export async function updateStrategyTradingType(id, tradingtype) {
   try {
-    // Parse the strategy JSON if it's a string
-    let strategyData = typeof strID === "string" ? JSON.parse(strID) : strID
-
-    // Add TradingType to the strategy data
-    strategyData = {
-      ...strategyData,
-      TradingType: {
-        nTrade_max: nTradeMax,
-        margin: margin,
-        lot: lot,
-        cash: cash,
-      },
-    }
-
-    const response = await fetch(`http://127.0.0.1:8000/api/strategies/${strategyId}/edit/`, {
-      method: "PUT",
+    const response = await Fetch(`/api/strategies/${id}/edit/`, {
+      method: "PATCH",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        account: accountId,
-        side: side,
-        saveresult: saveResult,
-        strategy: strategyData,
+        TradingType: {
+          nTrade_max: tradingtype.nTrade_max,
+          margin: tradingtype.margin,
+          lot: tradingtype.lot,
+          cash: tradingtype.cash,
+        },
       }),
     })
 
     if (!response.ok) {
-      throw new Error(`API error: ${response.status}`)
+      throw new Error(`Failed to update tradingtype: ${response.status}`)
     }
 
     return await response.json()
   } catch (error) {
-    console.error("Error updating strategy:", error)
+    console.error("Error updating tradingtype:", error)
     throw error
   }
 }
+
 
 /**
  * Updates a strategy with new name and instrument
@@ -429,4 +408,21 @@ export async function editStrategy(id, data) {
     console.error("Error updating strategy:", error)
     throw error
   }
+}
+export const changePassword = async (old_password, new_password,user_id) => {
+
+  const response = await Fetch(`/api/change-password/${user_id}/`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    
+    },
+    body: JSON.stringify({ old_password, new_password }),
+  })
+
+  if (!response.ok) {
+    throw new Error("Failed to change password")
+  }
+
+  return response.json()
 }

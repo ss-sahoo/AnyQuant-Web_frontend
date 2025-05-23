@@ -10,11 +10,11 @@ interface RsiSettingsModalProps {
 
 export function RsiSettingsModal({ onClose, onSave }: RsiSettingsModalProps) {
   const [indicatorType, setIndicatorType] = useState("rsi")
-  const [rsiLength, setRsiLength] = useState("12")
-  const [source, setSource] = useState("close")
-  const [maLength, setMaLength] = useState("12")
-  const [maType, setMaType] = useState("close")
-  const [bbStdDev, setBbStdDev] = useState("9")
+  const [rsiLength, setRsiLength] = useState("14")
+  const [source, setSource] = useState("Close")
+  const [maLength, setMaLength] = useState("14")
+  const [maType, setMaType] = useState("SMA")
+  const [bbStdDev, setBbStdDev] = useState("2.0")
 
   const [showSourceDropdown, setShowSourceDropdown] = useState(false)
   const [showMaTypeDropdown, setShowMaTypeDropdown] = useState(false)
@@ -72,7 +72,7 @@ export function RsiSettingsModal({ onClose, onSave }: RsiSettingsModalProps) {
     })
   }
 
-  const sources = ["close", "open", "high", "low", "hl2", "hlc3", "ohlc4"]
+  const sources = ["Close", "Open", "High", "Low", "HL2", "HLC3", "OHLC4"]
   const maTypes = ["SMA", "EMA", "WMA", "VWMA", "TEMA", "DEMA"]
 
   return (
@@ -87,7 +87,7 @@ export function RsiSettingsModal({ onClose, onSave }: RsiSettingsModalProps) {
 
         <div className="px-6 pb-6">
           <div className="mb-6">
-            <label className="block text-lg font-medium text-gray-800 mb-2">Indicator Type</label>
+            <label className="block text-lg font-medium text-black mb-2">Indicator Type</label>
             <div className="grid grid-cols-2 gap-0 border border-gray-300 rounded-md overflow-hidden">
               <button
                 className={`py-3 px-4 text-center ${
