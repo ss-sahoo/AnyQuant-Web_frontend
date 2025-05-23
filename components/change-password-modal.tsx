@@ -4,6 +4,7 @@ import type React from "react"
 
 import { useState, useRef, useEffect } from "react"
 import { X, Eye, EyeOff } from "lucide-react"
+import { changePassword } from "@/app/AllApiCalls"
 
 interface ChangePasswordModalProps {
   onClose: () => void
@@ -17,6 +18,8 @@ export function ChangePasswordModal({ onClose, onSave }: ChangePasswordModalProp
   const [showOldPassword, setShowOldPassword] = useState(false)
   const [showNewPassword, setShowNewPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [loading, setLoading] = useState(false)
+
   const [error, setError] = useState("")
 
   const modalRef = useRef<HTMLDivElement>(null)
@@ -49,17 +52,28 @@ export function ChangePasswordModal({ onClose, onSave }: ChangePasswordModalProp
     }
   }, [onClose])
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setError("")
 
-    // Validate passwords match
     if (newPassword !== confirmPassword) {
       setError("New passwords do not match")
       return
     }
+    const userId = localStorage.getItem("user_id")
 
-    onSave(oldPassword, newPassword)
+    try {
+      setLoading(true)
+      await changePassword(oldPassword, newPassword, userId)
+      alert("Password changed successfully")
+      onClose()
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
   }
+
 
   return (
     <div
@@ -162,10 +176,12 @@ export function ChangePasswordModal({ onClose, onSave }: ChangePasswordModalProp
 
           {/* Save Button */}
           <button
+          disabled={loading}
+          onClick={handleSubmit}
             type="submit"
             className="w-full py-3 bg-[#6BCAE2] rounded-full text-[#1e1e1e] hover:bg-[#5AB9D1] transition-colors font-medium"
           >
-            Save
+           {loading? "saving..." : "Save "}
           </button>
         </form>
       </div>

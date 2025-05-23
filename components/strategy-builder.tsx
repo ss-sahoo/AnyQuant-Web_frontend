@@ -13,13 +13,15 @@ import { ChannelSettingsModal } from "@/components/modals/channel-settings-modal
 import { SLTPSettingsModal, type SLTPSettings } from "@/components/modals/sl-tp-settings-modal"
 import { PriceSettingsModal } from "@/components/modals/price-settings-modal"
 import { AtCandleModal } from "@/components/modals/at-candle-modal"
+import { DerivativeSettingsModal } from "@/components/modals/derivative-settings-modal"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { createStatement } from "@/app/AllApiCalls"
 import type { JSX } from "react/jsx-runtime"
 import { PipsSettingsModal } from "@/components/modals/pips-settings-modal"
 import { SaveStrategyModal } from "@/components/modals/save-strategy-modal"
-
+// Add the import for the CustomTimeframeModal
+import { CustomTimeframeModal } from "@/components/modals/custom-timeframe-modal"
 interface StrategyBuilderProps {
   initialName: string
   initialInstrument: string
@@ -39,6 +41,9 @@ interface IndicatorInput {
   timeframe: string
   input_params?: IndicatorParams
   wait?: string
+  Derivative?: {
+    order: number
+  }
 }
 
 // Update the StrategyCondition interface to support inp2 and more complex structures
@@ -120,6 +125,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     show: false,
     type: "SL",
   })
+  const [showDerivativeModal, setShowDerivativeModal] = useState(false)
 
   const [showSaveStrategyModal, setShowSaveStrategyModal] = useState(false)
   const [strategyName, setStrategyName] = useState(initialName || "")
@@ -165,6 +171,10 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
 
   const [isSavingDraft, setIsSavingDraft] = useState(false)
   const [isProceeding, setIsProceeding] = useState(false)
+
+  // Add these new state variables inside the StrategyBuilder component
+  const [showCustomTimeframeModal, setShowCustomTimeframeModal] = useState(false)
+  const [customTimeframes, setCustomTimeframes] = useState<string[]>([])
 
   // Add this function to handle search input
   const handleSearchInput = (statementIndex: number, value: string) => {
@@ -223,6 +233,9 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     { id: "price", label: "Price" },
     { id: "stochastic", label: "Stochastic" },
     { id: "atr", label: "ATR" },
+    { id: "general-pa", label: "GENERAL PA" },
+    { id: "gradient", label: "Gradient" },
+    { id: "derivative", label: "Derivative" },
   ]
 
   // Update the extraIndicators array to include Volume_MA and RSI_MA
@@ -230,6 +243,9 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     { id: "ma", label: "MA" },
     { id: "volume-ma", label: "Volume_MA" },
     { id: "rsi-ma", label: "RSI_MA" },
+    { id: "general-pa", label: "GENERAL PA" },
+    { id: "gradient", label: "Gradient" },
+    { id: "derivative", label: "Derivative" },
   ]
 
   // Update the behaviours array to include crossabove and crossbelow
@@ -306,6 +322,54 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     if (behavior.toLowerCase() === "at most above pips") return "atmost_above_pips"
     if (behavior.toLowerCase() === "at most below pips") return "atmost_below_pips"
     return behavior.toLowerCase()
+  }
+
+  // Handle derivative settings
+  const handleDerivativeSettings = (settings: any) => {
+    const newStatements = [...statements]
+    const currentStatement = newStatements[activeStatementIndex]
+    const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+    // Get the timeframe from the condition or use the selected timeframe
+    const timeframe = lastCondition.timeframe || selectedTimeframe
+
+    // Create the derivative indicator with the selected indicator's parameters
+    if (settings.selectedIndicator === "RSI_MA") {
+      lastCondition.inp1 = {
+        type: "CUSTOM_I",
+        name: "RSI_MA",
+        timeframe: timeframe,
+        input_params: settings.input_params,
+        Derivative: {
+          order: settings.order,
+        },
+      }
+    } else if (settings.selectedIndicator === "GENERAL_PA") {
+      lastCondition.inp1 = {
+        type: "CUSTOM_I",
+        name: "GENERAL_PA",
+        timeframe: timeframe,
+        Derivative: {
+          order: settings.order,
+        },
+      }
+    } else {
+      // Handle other indicators
+      lastCondition.inp1 = {
+        type: "CUSTOM_I",
+        name: settings.selectedIndicator,
+        timeframe: timeframe,
+        input_params: settings.input_params || {},
+        Derivative: {
+          order: settings.order,
+        },
+      }
+    }
+
+    // Remove the timeframe from the condition since it's now in inp1
+    delete lastCondition.timeframe
+
+    setStatements(newStatements)
   }
 
   // Update the handleSLTPSettings function to handle all the different equity formats
@@ -584,12 +648,25 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
             lastCondition.inp2 = {
               type: "CUSTOM_I",
               name: "RSI_MA",
-              timeframe: timeframe,
+              timeframe: "36min",
               input_params: {
                 rsi_length: 14,
+                rsi_source: "Close",
+                ma_type: "SMA",
                 ma_length: 14,
+                bb_stddev: 2.0,
               },
             }
+          } else if (component.toLowerCase() === "general pa" || component.toLowerCase() === "general-pa") {
+            lastCondition.inp2 = {
+              type: "CUSTOM_I",
+              name: "GENERAL_PA",
+              timeframe: timeframe,
+            }
+          } else if (component.toLowerCase() === "gradient" || component.toLowerCase() === "derivative") {
+            // Show the Derivative Settings modal
+            setActiveStatementIndex(statementIndex)
+            setShowDerivativeModal(true)
           } else if (component.includes("MA") || component.includes("_MA")) {
             lastCondition.inp2 = {
               type: "CUSTOM_I",
@@ -647,12 +724,25 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
             lastCondition.inp1 = {
               type: "CUSTOM_I",
               name: "RSI_MA",
-              timeframe: timeframe,
+              timeframe: "36min",
               input_params: {
                 rsi_length: 14,
+                rsi_source: "Close",
+                ma_type: "SMA",
                 ma_length: 14,
+                bb_stddev: 2.0,
               },
             }
+          } else if (component.toLowerCase() === "general pa" || component.toLowerCase() === "general-pa") {
+            lastCondition.inp1 = {
+              type: "CUSTOM_I",
+              name: "GENERAL_PA",
+              timeframe: timeframe,
+            }
+          } else if (component.toLowerCase() === "gradient" || component.toLowerCase() === "derivative") {
+            // Show the Derivative Settings modal
+            setActiveStatementIndex(statementIndex)
+            setShowDerivativeModal(true)
           } else if (component.includes("MA") || component.includes("_MA")) {
             // Format for custom indicators like Volume_MA
             lastCondition.inp1 = {
@@ -823,26 +913,38 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     searchInputRefs.current[statementIndex]?.focus()
   }
 
-  // Update the handleTimeframeSelect function to update the timeframe in inp1 if it exists
-  const handleTimeframeSelect = (timeframe: string) => {
+  const handleSaveCustomTimeframe = (timeframe: string) => {
+    setCustomTimeframes((prev) => (prev.includes(timeframe) ? prev : [...prev, timeframe]))
+
     setSelectedTimeframe(timeframe)
+    setShowCustomTimeframeModal(false)
+    setShowTimeframeDropdown(false)
+  }
 
-    // If we have an active condition, update its timeframe
-    if (activeConditionIndex !== null) {
-      const newStatements = [...statements]
-      const currentStatement = newStatements[activeStatementIndex]
-      const condition = currentStatement.strategy[activeConditionIndex]
+  // Modify the handleTimeframeSelect function to handle the "Add Custom" option
+  const handleTimeframeSelect = (timeframe: string) => {
+    if (timeframe === "add-custom") {
+      setShowCustomTimeframeModal(true)
+    } else {
+      setSelectedTimeframe(timeframe)
 
-      if (condition) {
-        // If the condition has an indicator, update its timeframe
-        if (condition.inp1 && "timeframe" in condition.inp1) {
-          condition.inp1.timeframe = timeframe
-        } else {
-          // Otherwise, update the condition's timeframe
-          condition.timeframe = timeframe
+      // If we have an active condition, update its timeframe
+      if (activeConditionIndex !== null) {
+        const newStatements = [...statements]
+        const currentStatement = newStatements[activeStatementIndex]
+        const condition = currentStatement.strategy[activeConditionIndex]
+
+        if (condition) {
+          // If the condition has an indicator, update its timeframe
+          if (condition.inp1 && "timeframe" in condition.inp1) {
+            condition.inp1.timeframe = timeframe
+          } else {
+            // Otherwise, update the condition's timeframe
+            condition.timeframe = timeframe
+          }
+
+          setStatements(newStatements)
         }
-
-        setStatements(newStatements)
       }
     }
 
@@ -1135,6 +1237,11 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
               : condition.inp1.name || condition.inp1.input?.toUpperCase() || ""
         }
 
+        // Add "Derivative" label if it has a Derivative property
+        if (condition.inp1.Derivative) {
+          displayName = `${displayName} (Derivative)`
+        }
+
         components.push(
           <div key={`inp1-${index}`} className="flex items-center relative group">
             <div className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2">{displayName}</div>
@@ -1217,9 +1324,15 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
             )
           }
         } else if ("name" in condition.inp2) {
+          // Add "Derivative" label if it has a Derivative property
+          let displayName = condition.inp2.name
+          if (condition.inp2.Derivative) {
+            displayName = `${displayName} (Derivative)`
+          }
+
           components.push(
             <div key={`inp2-${index}`} className="flex items-center relative group">
-              <div className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2">{condition.inp2.name}</div>
+              <div className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2">{displayName}</div>
               <button
                 onClick={() => removeComponent(activeStatementIndex, index, "inp2")}
                 className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
@@ -1340,8 +1453,8 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
                 <div className="flex items-center">
                   <h2 className="text-xl font-medium">{statement.saveresult}</h2>
                   {/* <span className="ml-3 px-3 py-1 bg-[#2A2D42] rounded-full text-sm">
-                    {statement.side === "B" ? "Long " : "Short"}
-                  </span> */}
+                  {statement.side === "B" ? "Long " : "Short"}
+                </span> */}
                 </div>
                 <div className="relative flex items-center gap-4">
                   <button
@@ -1442,7 +1555,9 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           <button className="px-8 py-3 bg-[#151718] rounded-full text-white hover:bg-gray-700">Cancel</button>
         </Link>
         <div className="flex gap-3">
-          <button onClick={handleContinue} className="px-8 py-3 bg-[#151718] rounded-full text-white hover:bg-gray-700">Save</button>
+          <button onClick={handleContinue} className="px-8 py-3 bg-[#151718] rounded-full text-white hover:bg-gray-700">
+            Save
+          </button>
           <button
             className="px-8 py-3 bg-[#85e1fe] rounded-full text-black hover:bg-[#5AB9D1]"
             onClick={handleContinue}
@@ -1455,7 +1570,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
       {showTimeframeDropdown && (
         <div className="fixed inset-0 z-50" onClick={() => setShowTimeframeDropdown(false)}>
           <div
-            className="absolute bg-white rounded-md shadow-lg overflow-hidden max-h-60 w-[160px] border border-[#2A2D42]"
+            className="absolute bg-white rounded-md shadow-lg w-[160px] border border-[#2A2D42]"
             style={{
               top:
                 activeConditionIndex !== null
@@ -1472,20 +1587,45 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="overflow-auto">
-              {["15min", "20min", "30min", "45min", "1h", "3h", "4h", "1 day"].map((timeframe) => (
+            {/* Scrollable area */}
+            <div className="max-h-48 overflow-y-auto">
+              {["15min", "20min", "30min", "45min", "1h", "3h"].map((timeframe) => (
                 <button
                   key={timeframe}
-                  className="w-full text-left px-4 py-2 text-black hover:bg-gray-100"
+                  className={`w-full text-left px-4 py-2 text-black hover:bg-gray-100 ${
+                    selectedTimeframe === timeframe ? "bg-gray-200 font-semibold" : ""
+                  }`}
+                  onClick={() => handleTimeframeSelect(timeframe)}
+                >
+                  {timeframe}
+                </button>
+              ))}
+
+              {customTimeframes.map((timeframe) => (
+                <button
+                  key={timeframe}
+                  className={`w-full text-left px-4 py-2 text-black hover:bg-gray-100 ${
+                    selectedTimeframe === timeframe ? "bg-gray-200 font-semibold" : ""
+                  }`}
                   onClick={() => handleTimeframeSelect(timeframe)}
                 >
                   {timeframe}
                 </button>
               ))}
             </div>
+
+            {/* Divider and Add Custom always visible */}
+            <div className="border-t border-gray-200" />
+            <button
+              className="w-full text-left px-4 py-2 text-black hover:bg-gray-100 font-medium"
+              onClick={() => handleTimeframeSelect("add-custom")}
+            >
+              Add Custom
+            </button>
           </div>
         </div>
       )}
+
       {/* Modals */}
       {showStochasticModal && (
         <StochasticSettingsModal
@@ -1593,10 +1733,13 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
                 lastCondition.inp1 = {
                   type: "CUSTOM_I",
                   name: "RSI_MA",
-                  timeframe: lastCondition.inp1.timeframe,
+                  timeframe: "36min",
                   input_params: {
                     rsi_length: Number(settings.rsiLength),
+                    rsi_source: settings.source || "Close",
+                    ma_type: settings.maType || "SMA",
                     ma_length: Number(settings.maLength),
+                    bb_stddev: Number(settings.bbStdDev) || 2.0,
                   },
                 }
               } else {
@@ -1741,6 +1884,16 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           }}
         />
       )}
+      {/* Derivative Settings Modal */}
+      {showDerivativeModal && (
+        <DerivativeSettingsModal
+          onClose={() => setShowDerivativeModal(false)}
+          onSave={(settings) => {
+            handleDerivativeSettings(settings)
+            setShowDerivativeModal(false)
+          }}
+        />
+      )}
       {/* SL/TP Settings Modal */}
       {showSLTPSettings.show && (
         <SLTPSettingsModal
@@ -1791,6 +1944,16 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           initialValue={selectedCandleNumber || 1}
           onClose={() => setShowAtCandleModal(false)}
           onSave={handleAtCandleSelection}
+        />
+      )}
+      {/* Add the CustomTimeframeModal to the JSX, right before the closing div of the component */}
+      {showCustomTimeframeModal && (
+        <CustomTimeframeModal
+          handleTimeframeSelect={handleTimeframeSelect}
+          onClose={() => setShowCustomTimeframeModal(false)}
+          setSelectedTimeframe={setSelectedTimeframe}
+          selectedTimeframe={selectedTimeframe}
+          onSave={handleSaveCustomTimeframe}
         />
       )}
     </div>
