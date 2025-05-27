@@ -99,12 +99,12 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-[#1E2132] rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+      <div className="bg-white text-black rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-medium">
             {type === "SL" ? "Stop Loss" : type === "TP" ? "Take Profit" : "Partial Take Profit"} Settings
           </h2>
-          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded-full">
+          <button onClick={onClose} className="p-1 hover:bg-gray-200 rounded-full">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -115,7 +115,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
             <div className="flex flex-wrap gap-2">
               <button
                 className={`px-3 py-1 rounded-md ${
-                  formatType === "simple" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                  formatType === "simple" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
                 }`}
                 onClick={() => setFormatType("simple")}
               >
@@ -123,7 +123,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
               </button>
               <button
                 className={`px-3 py-1 rounded-md ${
-                  formatType === "advanced" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                  formatType === "advanced" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
                 }`}
                 onClick={() => setFormatType("advanced")}
               >
@@ -131,7 +131,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
               </button>
               <button
                 className={`px-3 py-1 rounded-md ${
-                  formatType === "trailing" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                  formatType === "trailing" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
                 }`}
                 onClick={() => setFormatType("trailing")}
               >
@@ -139,7 +139,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
               </button>
               <button
                 className={`px-3 py-1 rounded-md ${
-                  formatType === "indicator" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                  formatType === "indicator" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
                 }`}
                 onClick={() => setFormatType("indicator")}
               >
@@ -147,7 +147,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
               </button>
               <button
                 className={`px-3 py-1 rounded-md ${
-                  formatType === "fixed" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                  formatType === "fixed" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
                 }`}
                 onClick={() => setFormatType("fixed")}
               >
@@ -156,7 +156,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
               {type === "TP" && (
                 <button
                   className={`px-3 py-1 rounded-md ${
-                    formatType === "partial" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                    formatType === "partial" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
                   }`}
                   onClick={() => setFormatType("partial")}
                 >
@@ -173,7 +173,9 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                 <div className="flex gap-2">
                   <button
                     className={`px-3 py-1 rounded-md ${
-                      settings.valueType === "pips" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                      settings.valueType === "pips"
+                        ? "bg-blue-600 text-white"
+                        : "bg-gray-100 text-black hover:bg-gray-200"
                     }`}
                     onClick={() => setSettings({ ...settings, valueType: "pips" })}
                   >
@@ -181,7 +183,9 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                   </button>
                   <button
                     className={`px-3 py-1 rounded-md ${
-                      settings.valueType === "percentage" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                      settings.valueType === "percentage"
+                        ? "bg-blue-600 text-white"
+                        : "bg-gray-100 text-black hover:bg-gray-200"
                     }`}
                     onClick={() =>
                       setSettings({
@@ -195,7 +199,9 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                   </button>
                   <button
                     className={`px-3 py-1 rounded-md ${
-                      settings.valueType === "close" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                      settings.valueType === "close"
+                        ? "bg-blue-600 text-white"
+                        : "bg-gray-100 text-black hover:bg-gray-200"
                     }`}
                     onClick={() =>
                       setSettings({
@@ -217,7 +223,9 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                     <>
                       <button
                         className={`px-3 py-1 rounded-md ${
-                          settings.direction === "+" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                          settings.direction === "+"
+                            ? "bg-blue-600 text-white"
+                            : "bg-gray-100 text-black hover:bg-gray-200"
                         }`}
                         onClick={() => setSettings({ ...settings, direction: "+" })}
                       >
@@ -225,7 +233,9 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                       </button>
                       <button
                         className={`px-3 py-1 rounded-md ${
-                          settings.direction === "-" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                          settings.direction === "-"
+                            ? "bg-blue-600 text-white"
+                            : "bg-gray-100 text-black hover:bg-gray-200"
                         }`}
                         onClick={() => setSettings({ ...settings, direction: "-" })}
                       >
@@ -236,7 +246,9 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                     <>
                       <button
                         className={`px-3 py-1 rounded-md ${
-                          settings.direction === "*" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                          settings.direction === "*"
+                            ? "bg-blue-600 text-white"
+                            : "bg-gray-100 text-black hover:bg-gray-200"
                         }`}
                         onClick={() => setSettings({ ...settings, direction: "*" })}
                       >
@@ -253,7 +265,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                   type="text"
                   value={settings.value}
                   onChange={(e) => setSettings({ ...settings, value: e.target.value })}
-                  className="w-full bg-[#2A2D42] px-3 py-2 rounded-md focus:outline-none"
+                  className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
               {settings.valueType === "close" && (
@@ -263,7 +275,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                     type="text"
                     value={settings.value}
                     onChange={(e) => setSettings({ ...settings, value: e.target.value })}
-                    className="w-full bg-[#2A2D42] px-3 py-2 rounded-md focus:outline-none"
+                    className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="e.g. 1.02 for SL, 0.96 for TP"
                   />
                   <p className="text-xs text-gray-400 mt-1">{settings.type} will be set to Close * multiplier</p>
@@ -280,7 +292,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                   type="text"
                   value={settings.inp1 || settings.type}
                   onChange={(e) => setSettings({ ...settings, inp1: e.target.value })}
-                  className="w-full bg-[#2A2D42] px-3 py-2 rounded-md focus:outline-none"
+                  className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
@@ -289,7 +301,9 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                 <div className="flex gap-2">
                   <button
                     className={`px-3 py-1 rounded-md ${
-                      settings.inp2 === "Entry_Price" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                      settings.inp2 === "Entry_Price"
+                        ? "bg-blue-600 text-white"
+                        : "bg-gray-100 text-black hover:bg-gray-200"
                     }`}
                     onClick={() => setSettings({ ...settings, inp2: "Entry_Price" })}
                   >
@@ -297,7 +311,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                   </button>
                   <button
                     className={`px-3 py-1 rounded-md ${
-                      settings.inp2 === "Close" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                      settings.inp2 === "Close" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
                     }`}
                     onClick={() => setSettings({ ...settings, inp2: "Close" })}
                   >
@@ -311,7 +325,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                 <div className="flex gap-2">
                   <button
                     className={`px-3 py-1 rounded-md ${
-                      settings.direction === "+" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                      settings.direction === "+" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
                     }`}
                     onClick={() => setSettings({ ...settings, direction: "+" })}
                   >
@@ -319,7 +333,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                   </button>
                   <button
                     className={`px-3 py-1 rounded-md ${
-                      settings.direction === "-" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                      settings.direction === "-" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
                     }`}
                     onClick={() => setSettings({ ...settings, direction: "-" })}
                   >
@@ -327,7 +341,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                   </button>
                   <button
                     className={`px-3 py-1 rounded-md ${
-                      settings.direction === "*" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                      settings.direction === "*" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
                     }`}
                     onClick={() => setSettings({ ...settings, direction: "*" })}
                   >
@@ -343,7 +357,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                     type="text"
                     value={settings.value}
                     onChange={(e) => setSettings({ ...settings, value: e.target.value })}
-                    className="w-full bg-[#2A2D42] px-3 py-2 rounded-md focus:outline-none"
+                    className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <span className="ml-2">pips</span>
                 </div>
@@ -366,7 +380,9 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                   <div className="flex gap-2">
                     <button
                       className={`px-3 py-1 rounded-md ${
-                        settings.direction === "+" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                        settings.direction === "+"
+                          ? "bg-blue-600 text-white"
+                          : "bg-gray-100 text-black hover:bg-gray-200"
                       }`}
                       onClick={() => setSettings({ ...settings, direction: "+" })}
                     >
@@ -374,7 +390,9 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                     </button>
                     <button
                       className={`px-3 py-1 rounded-md ${
-                        settings.direction === "-" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                        settings.direction === "-"
+                          ? "bg-blue-600 text-white"
+                          : "bg-gray-100 text-black hover:bg-gray-200"
                       }`}
                       onClick={() => setSettings({ ...settings, direction: "-" })}
                     >
@@ -389,7 +407,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                     type="text"
                     value={settings.value}
                     onChange={(e) => setSettings({ ...settings, value: e.target.value })}
-                    className="w-24 bg-[#2A2D42] px-3 py-2 rounded-md focus:outline-none"
+                    className="w-24 bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <span className="ml-2">pips</span>
                 </div>
@@ -421,7 +439,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                         type="text"
                         value={settings.trailingStep}
                         onChange={(e) => setSettings({ ...settings, trailingStep: e.target.value })}
-                        className="w-24 bg-[#2A2D42] px-3 py-2 rounded-md focus:outline-none"
+                        className="w-24 bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                       <span className="ml-2">pips</span>
                     </div>
@@ -436,7 +454,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
               <div>
                 <label className="block text-sm font-medium mb-1">Indicator Type</label>
                 <select
-                  className="w-full bg-[#2A2D42] px-3 py-2 rounded-md focus:outline-none"
+                  className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
                   value={settings.indicatorParams?.name || "nperiod_hl"}
                   onChange={(e) =>
                     setSettings({
@@ -463,7 +481,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                         className={`px-3 py-1 rounded-md ${
                           (settings.indicatorParams?.side || "low") === "low"
                             ? "bg-blue-600 text-white"
-                            : "bg-[#2A2D42] text-gray-300"
+                            : "bg-gray-100 text-black hover:bg-gray-200"
                         }`}
                         onClick={() =>
                           setSettings({
@@ -481,7 +499,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                         className={`px-3 py-1 rounded-md ${
                           (settings.indicatorParams?.side || "low") === "high"
                             ? "bg-blue-600 text-white"
-                            : "bg-[#2A2D42] text-gray-300"
+                            : "bg-gray-100 text-black hover:bg-gray-200"
                         }`}
                         onClick={() =>
                           setSettings({
@@ -512,7 +530,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                           },
                         })
                       }
-                      className="w-full bg-[#2A2D42] px-3 py-2 rounded-md focus:outline-none"
+                      className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
                     />
                   </div>
                 </>
@@ -521,7 +539,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
               <div>
                 <label className="block text-sm font-medium mb-1">Timeframe</label>
                 <select
-                  className="w-full bg-[#2A2D42] px-3 py-2 rounded-md focus:outline-none"
+                  className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
                   value={settings.indicatorParams?.timeframe || "1h"}
                   onChange={(e) =>
                     setSettings({
@@ -547,7 +565,9 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                   <div className="flex gap-2 mr-2">
                     <button
                       className={`px-3 py-1 rounded-md ${
-                        settings.direction === "+" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                        settings.direction === "+"
+                          ? "bg-blue-600 text-white"
+                          : "bg-gray-100 text-black hover:bg-gray-200"
                       }`}
                       onClick={() => setSettings({ ...settings, direction: "+" })}
                     >
@@ -555,7 +575,9 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                     </button>
                     <button
                       className={`px-3 py-1 rounded-md ${
-                        settings.direction === "-" ? "bg-blue-600 text-white" : "bg-[#2A2D42] text-gray-300"
+                        settings.direction === "-"
+                          ? "bg-blue-600 text-white"
+                          : "bg-gray-100 text-black hover:bg-gray-200"
                       }`}
                       onClick={() => setSettings({ ...settings, direction: "-" })}
                     >
@@ -566,7 +588,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                     type="text"
                     value={settings.value}
                     onChange={(e) => setSettings({ ...settings, value: e.target.value })}
-                    className="w-24 bg-[#2A2D42] px-3 py-2 rounded-md focus:outline-none"
+                    className="w-24 bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <span className="ml-2">pips</span>
                 </div>
@@ -582,7 +604,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                   type="text"
                   value={settings.value}
                   onChange={(e) => setSettings({ ...settings, value: e.target.value, valueType: "fixed" })}
-                  className="w-full bg-[#2A2D42] px-3 py-2 rounded-md focus:outline-none"
+                  className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
             </>
@@ -593,7 +615,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
               <div>
                 <label className="block text-sm font-medium mb-2">Partial Take Profit Levels</label>
                 {settings.partialTpList?.map((level, index) => (
-                  <div key={index} className="mb-4 p-3 bg-[#2A2D42] rounded-md">
+                  <div key={index} className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-md">
                     <div className="flex justify-between items-center mb-2">
                       <span className="text-sm font-medium">Level {index + 1}</span>
                       <button onClick={() => removePartialTpLevel(index)} className="text-red-400 hover:text-red-300">
@@ -606,7 +628,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                       <div className="flex gap-2">
                         <button
                           className={`px-3 py-1 rounded-md text-xs ${
-                            !level.name ? "bg-blue-600 text-white" : "bg-[#1E2132] text-gray-300"
+                            !level.name ? "bg-blue-600 text-white" : "bg-gray-100 text-black"
                           }`}
                           onClick={() => {
                             const newList = [...settings.partialTpList!]
@@ -624,7 +646,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                         </button>
                         <button
                           className={`px-3 py-1 rounded-md text-xs ${
-                            level.name === "Equity" ? "bg-blue-600 text-white" : "bg-[#1E2132] text-gray-300"
+                            level.name === "Equity" ? "bg-blue-600 text-white" : "bg-gray-100 text-black"
                           }`}
                           onClick={() => {
                             const newList = [...settings.partialTpList!]
@@ -651,7 +673,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                           type="text"
                           value={level.Price || ""}
                           onChange={(e) => updatePartialTpLevel(index, "Price", e.target.value)}
-                          className="w-full bg-[#1E2132] px-3 py-2 rounded-md focus:outline-none"
+                          className="w-full bg-white border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
                           placeholder="Entry_Price + 200pips"
                         />
                       </div>
@@ -662,7 +684,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                           type="text"
                           value={level.operator || ""}
                           onChange={(e) => updatePartialTpLevel(index, "operator", e.target.value)}
-                          className="w-full bg-[#1E2132] px-3 py-2 rounded-md focus:outline-none"
+                          className="w-full bg-white border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
                           placeholder="moving_up 300pips"
                         />
                       </div>
@@ -674,7 +696,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                         type="text"
                         value={level.Close}
                         onChange={(e) => updatePartialTpLevel(index, "Close", e.target.value)}
-                        className="w-full bg-[#1E2132] px-3 py-2 rounded-md focus:outline-none"
+                        className="w-full bg-white border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
                         placeholder="50%"
                       />
                     </div>
@@ -685,7 +707,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                         type="text"
                         value={level.Action || ""}
                         onChange={(e) => updatePartialTpLevel(index, "Action", e.target.value)}
-                        className="w-full bg-[#1E2132] px-3 py-2 rounded-md focus:outline-none"
+                        className="w-full bg-white border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
                         placeholder="SL = Entry_Price"
                       />
                     </div>
@@ -693,7 +715,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                 ))}
                 <button
                   onClick={addPartialTpLevel}
-                  className="flex items-center justify-center w-full py-2 bg-[#2A2D42] hover:bg-[#3A3D52] rounded-md"
+                  className="flex items-center justify-center w-full py-2 bg-gray-100 hover:bg-gray-200 rounded-md"
                 >
                   <Plus size={16} className="mr-1" /> Add Level
                 </button>
@@ -702,7 +724,7 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
           )}
 
           <div className="flex justify-end gap-3 mt-6">
-            <button onClick={onClose} className="px-4 py-2 bg-[#2A2D42] rounded-md hover:bg-gray-700">
+            <button onClick={onClose} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-md">
               Cancel
             </button>
             <button onClick={handleSave} className="px-4 py-2 bg-blue-600 rounded-md hover:bg-blue-700">

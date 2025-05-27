@@ -35,7 +35,7 @@ export default function StrategyTestingPage() {
   const [accountId, setAccountId] = useState(45)
   const [side, setSide] = useState("buy")
   const [saveResult, setSaveResult] = useState("true")
-  const [nTradeMax, setNTradeMax] = useState('CLOSE & OPEN')
+  const [nTradeMax, setNTradeMax] = useState(2)
   const [assetType, setAssetType] = useState("currency")
   const [lot, setLot] = useState("mini")
   const [parsedStatement, setParsedStatement] = useState<any>(null)
@@ -286,7 +286,10 @@ export default function StrategyTestingPage() {
   // Get margin value from leverage string
   const getLeverageMargin = (leverageStr: string): number => {
     const ratio = Number.parseInt(leverageStr.split(":")[1])
-    return ratio ? 1 / ratio : 0.09 // Default to 0.09 if parsing fails
+    // For 1:1 leverage, margin should be 1.0 (100%)
+    // For 1:2 leverage, margin should be 0.5 (50%)
+    // For 1:10 leverage, margin should be 0.1 (10%)
+    return ratio ? 1.0 / ratio : 0.09 // Default to 0.09 if parsing fails
   }
 
   // Handle leverage change
@@ -350,6 +353,8 @@ export default function StrategyTestingPage() {
         lot: "mini",
         cash: cash,
       }
+
+      console.log("Saving with margin:", margin, "from leverage:", leverage)
 
       // Call the API
       await updateStrategyTradingType(Number.parseInt(strategy_id), tradingtype)

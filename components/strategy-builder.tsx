@@ -1,5 +1,7 @@
 "use client"
 
+import type React from "react"
+
 import { useState, useRef, useEffect } from "react"
 import { Edit, MoreVertical, Plus, ChevronDown, X } from "lucide-react"
 import { StochasticSettingsModal } from "@/components/modals/stochastic-settings-modal"
@@ -16,15 +18,20 @@ import { AtCandleModal } from "@/components/modals/at-candle-modal"
 import { DerivativeSettingsModal } from "@/components/modals/derivative-settings-modal"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { createStatement } from "@/app/AllApiCalls"
+import { createStatement, editStrategy } from "@/app/AllApiCalls"
 import type { JSX } from "react/jsx-runtime"
 import { PipsSettingsModal } from "@/components/modals/pips-settings-modal"
 import { SaveStrategyModal } from "@/components/modals/save-strategy-modal"
-// Add the import for the CustomTimeframeModal
 import { CustomTimeframeModal } from "@/components/modals/custom-timeframe-modal"
+import { CrossingDownSettingsModal } from "./modals/crossing-down-settings-modal"
+import { AboveSettingsModal } from "@/components/modals/above-settings-modal"
+import { BelowSettingsModal } from "@/components/modals/below-settings-modal"
+
 interface StrategyBuilderProps {
-  initialName: string
-  initialInstrument: string
+  initialName?: string
+  initialInstrument?: string
+  strategyData?: any
+  strategyId?: string | null
 }
 
 // Define the structure for our strategy statements
@@ -110,11 +117,14 @@ interface StrategyStatement {
   }
 }
 
-export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuilderProps) {
+export function StrategyBuilder({ initialName, initialInstrument, strategyData, strategyId }: StrategyBuilderProps) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState("create")
   const [showStochasticModal, setShowStochasticModal] = useState(false)
   const [showCrossingUpModal, setShowCrossingUpModal] = useState(false)
+  const [showCrossingDownModal, setShowCrossingDownModal] = useState(false)
+  const [showAboveModal, setShowAboveModal] = useState(false)
+  const [showBelowModal, setShowBelowModal] = useState(false)
   const [showBollingerModal, setShowBollingerModal] = useState(false)
   const [showVolumeModal, setShowVolumeModal] = useState(false)
   const [showAtrModal, setShowAtrModal] = useState(false)
@@ -176,6 +186,56 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
   const [showCustomTimeframeModal, setShowCustomTimeframeModal] = useState(false)
   const [customTimeframes, setCustomTimeframes] = useState<string[]>([])
 
+  // Add this after the existing state declarations
+  const [hoveredComponent, setHoveredComponent] = useState<{
+    show: boolean
+    content: any
+    position: { x: number; y: number }
+  }>({
+    show: false,
+    content: null,
+    position: { x: 0, y: 0 },
+  })
+
+  // Load strategy data if strategyId is provided
+  useEffect(() => {
+    if (strategyData && strategyId) {
+      try {
+        console.log("Loading strategy data:", strategyData)
+
+        // If strategyData has the expected structure, use it
+        if (strategyData.strategy) {
+          setStatements([
+            {
+              side: strategyData.side || "S",
+              saveresult: strategyData.saveresult || strategyData.name || "Statement 1",
+              strategy: strategyData.strategy || [
+                {
+                  statement: "if",
+                  timeframe: "3h",
+                },
+              ],
+              Equity: strategyData.Equity || [],
+              TradingType: strategyData.TradingType || undefined,
+            },
+          ])
+        }
+
+        // Set strategy name if available
+        if (strategyData.name) {
+          setStrategyName(strategyData.name)
+        }
+
+        // Set instrument if available
+        if (strategyData.instrument) {
+          // You can add logic here to update instrument if needed
+        }
+      } catch (error) {
+        console.error("Error loading strategy data:", error)
+      }
+    }
+  }, [strategyData, strategyId])
+
   // Add this function to handle search input
   const handleSearchInput = (statementIndex: number, value: string) => {
     setSearchTerm(value)
@@ -200,6 +260,53 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     const results = allComponents.filter((component) => component.toLowerCase().includes(value.toLowerCase()))
 
     setSearchResults(results)
+  }
+
+  // Add function to handle backspace removal
+  const handleKeyDown = (statementIndex: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Backspace" && searchTerm === "") {
+      e.preventDefault()
+
+      const currentStatement = statements[statementIndex]
+      const strategy = currentStatement.strategy
+
+      if (strategy.length === 0) return
+
+      // Find the last condition that has removable components
+      for (let i = strategy.length - 1; i >= 0; i--) {
+        const condition = strategy[i]
+
+        // Remove inp2 first if it exists
+        if (condition.inp2) {
+          removeComponent(statementIndex, i, "inp2")
+          return
+        }
+
+        // Then remove operator if it exists
+        if (condition.operator_name) {
+          removeComponent(statementIndex, i, "operator")
+          return
+        }
+
+        // Then remove inp1 if it exists
+        if (condition.inp1) {
+          removeComponent(statementIndex, i, "inp1")
+          return
+        }
+
+        // Then remove timeframe if it exists and it's not the first condition
+        if (i > 0 && (condition.timeframe || (condition.inp1 && "timeframe" in condition.inp1))) {
+          removeComponent(statementIndex, i, "timeframe")
+          return
+        }
+
+        // Finally remove the entire condition if it's not the first "if" statement
+        if (i > 0 && condition.statement && condition.statement.toLowerCase() !== "if") {
+          removeComponent(statementIndex, i, "statement")
+          return
+        }
+      }
+    }
   }
 
   // Component lists for search functionality
@@ -238,7 +345,6 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     { id: "derivative", label: "Derivative" },
   ]
 
-  // Update the extraIndicators array to include Volume_MA and RSI_MA
   const extraIndicators = [
     { id: "ma", label: "MA" },
     { id: "volume-ma", label: "Volume_MA" },
@@ -319,6 +425,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     if (behavior.toLowerCase() === "less than") return "less_than"
     if (behavior.toLowerCase() === "inside channel") return "inside_channel"
     if (behavior.toLowerCase() === "above") return "above"
+    if (behavior.toLowerCase() === "below") return "below"
     if (behavior.toLowerCase() === "at most above pips") return "atmost_above_pips"
     if (behavior.toLowerCase() === "at most below pips") return "atmost_below_pips"
     return behavior.toLowerCase()
@@ -840,19 +947,24 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
                   ? 60
                   : lastCondition.operator_name === "crossbelow"
                     ? 40
-                    : 50,
+                    : lastCondition.operator_name === "above"
+                      ? 70
+                      : lastCondition.operator_name === "below"
+                        ? 30
+                        : 50,
             }
           }
         }
 
         // Show the appropriate settings modal
-        if (
-          component === "Crossing up" ||
-          component === "Crossing down" ||
-          component === "Cross Above" ||
-          component === "Cross Below"
-        ) {
+        if (component === "Crossing up" || component === "Cross Above" || component === "Cross Below") {
           setShowCrossingUpModal(true)
+        } else if (component === "Crossing down") {
+          setShowCrossingDownModal(true)
+        } else if (component === "Above") {
+          setShowAboveModal(true)
+        } else if (component === "Below") {
+          setShowBelowModal(true)
         } else if (component === "Inside Channel") {
           setShowChannelModal(true)
         } else if (component === "At most above pips" || component === "At most below pips") {
@@ -912,6 +1024,181 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     setSearchResults([])
     searchInputRefs.current[statementIndex]?.focus()
   }
+
+  // Add this function after the existing helper functions
+  const getTooltipContent = (
+    condition: StrategyCondition,
+    componentType: "inp1" | "inp2" | "timeframe" | "operator",
+    index: number,
+  ) => {
+    // if (componentType === "timeframe") {
+    //   const timeframeValue =
+    //     condition.inp1 && "timeframe" in condition.inp1 ? condition.inp1.timeframe : condition.timeframe
+    //   return {
+    //     title: "Timeframe",
+    //     details: { timeframe: timeframeValue },
+    //   }
+    // }
+
+    if (componentType === "operator" && condition.operator_name) {
+      const details: any = {
+        operator: condition.operator_name.replace("_", " "),
+      }
+
+      if (condition.inp2) {
+        if ("type" in condition.inp2 && condition.inp2.type === "value") {
+          details.value = condition.inp2.value
+          if (condition.pips) {
+            details.pips = condition.pips
+          }
+        } else if ("name" in condition.inp2) {
+          details.indicator = condition.inp2.name
+          if (condition.inp2.timeframe) {
+            details.timeframe = condition.inp2.timeframe
+          }
+        }
+      }
+
+      return {
+        title: "Behavior",
+        details,
+      }
+    }
+
+    if (componentType === "inp1" && condition.inp1) {
+      const inp1 = condition.inp1
+
+      // Handle different indicator types
+      if ("name" in inp1) {
+        if (inp1.name === "RSI") {
+          return {
+            title: "RSI",
+            details: {
+              timeframe: inp1.timeframe,
+              rsi_length: inp1.input_params?.timeperiod || 14,
+            },
+          }
+        } else if (inp1.name === "RSI_MA") {
+          return {
+            title: "RSI MA",
+            details: {
+              timeframe: inp1.timeframe,
+              rsi_length: inp1.input_params?.rsi_length || 14,
+              ma_length: inp1.input_params?.ma_length || 14,
+              rsi_source: inp1.input_params?.rsi_source || "Close",
+              ma_type: inp1.input_params?.ma_type || "SMA",
+              bb_stddev: inp1.input_params?.bb_stddev || 2.0,
+            },
+          }
+        } else if (inp1.name === "BBANDS") {
+          return {
+            title: "Bollinger Bands",
+            details: {
+              timeframe: inp1.timeframe,
+              timeperiod: inp1.input_params?.timeperiod || 17,
+              input: inp1.input || "upperband",
+            },
+          }
+        } else if (inp1.name === "MACD") {
+          return {
+            title: "MACD",
+            details: {
+              timeframe: inp1.timeframe,
+              fastperiod: inp1.input_params?.fastperiod || 12,
+              slowperiod: inp1.input_params?.slowperiod || 26,
+              signalperiod: inp1.input_params?.signalperiod || 9,
+            },
+          }
+        } else if (inp1.name === "Volume_MA") {
+          return {
+            title: "Volume MA",
+            details: {
+              timeframe: inp1.timeframe,
+              ma_length: inp1.input_params?.ma_length || 20,
+            },
+          }
+        } else if (inp1.name === "GENERAL_PA") {
+          return {
+            title: "General PA",
+            details: {
+              timeframe: inp1.timeframe,
+              ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
+            },
+          }
+        }
+      } else if ("input" in inp1) {
+        // Handle OHLC and other input-based indicators
+        if (["open", "close", "high", "low"].includes(inp1.input?.toLowerCase() || "")) {
+          return {
+            title: "Price",
+            details: {
+              input: inp1.input,
+              timeframe: inp1.timeframe,
+            },
+          }
+        } else if (inp1.input === "volume") {
+          return {
+            title: "Volume",
+            details: {
+              input: inp1.input,
+              timeframe: inp1.timeframe,
+            },
+          }
+        }
+      }
+    }
+
+    if (componentType === "inp2" && condition.inp2) {
+      const inp2 = condition.inp2
+
+      if ("type" in inp2 && inp2.type === "value") {
+        return {
+          title: "Value",
+          details: {
+            value: inp2.value,
+            ...(condition.pips && { pips: condition.pips }),
+          },
+        }
+      } else if ("name" in inp2) {
+        // Handle inp2 indicators similar to inp1
+        if (inp2.name === "RSI") {
+          return {
+            title: "RSI",
+            details: {
+              timeframe: inp2.timeframe,
+              rsi_length: inp2.input_params?.timeperiod || 14,
+            },
+          }
+        }
+      }
+    }
+
+    return null
+  }
+
+  // Add these functions after the getTooltipContent function
+  const handleMouseEnter = (e: React.MouseEvent, condition: StrategyCondition, componentType: 'inp1' | 'inp2' | 'timeframe', index: number) => {
+    const content = getTooltipContent(condition, componentType, index);
+    if (content) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      setHoveredComponent({
+        show: true,
+        content,
+        position: {
+          x: rect.left + rect.width / 2,
+          y: rect.top -3
+        }
+      });
+    }
+  };
+
+  const handleMouseLeave = () => {
+    setHoveredComponent({
+      show: false,
+      content: null,
+      position: { x: 0, y: 0 }
+    });
+  };
 
   const handleSaveCustomTimeframe = (timeframe: string) => {
     setCustomTimeframes((prev) => (prev.includes(timeframe) ? prev : [...prev, timeframe]))
@@ -985,25 +1272,34 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
         apiStatement.TradingType = currentStatement.TradingType
       }
 
-      const account = localStorage.getItem("user_id")
+      let result
 
-      if (!account) {
-        throw new Error("No account found in localStorage")
+      // Check if we're editing an existing strategy
+      if (strategyId && strategyData) {
+        console.log("Updating existing strategy:", apiStatement)
+        // Call editStrategy for existing strategies
+        result = await editStrategy(strategyId, apiStatement)
+        console.log("Strategy updated successfully:", result)
+      } else {
+        // Call createStatement for new strategies
+        const account = localStorage.getItem("user_id")
+
+        if (!account) {
+          throw new Error("No account found in localStorage")
+        }
+
+        console.log("Creating new strategy:", apiStatement)
+        result = await createStatement({
+          account,
+          statement: apiStatement,
+        })
+        console.log("Strategy created successfully:", result)
       }
 
-      console.log("Saving draft to API:", apiStatement)
-
-      // Call the API with the structured data
-      const result = await createStatement({
-        account,
-        statement: apiStatement,
-      })
-
-      console.log("Draft saved successfully:", result)
       setIsSavingDraft(false)
       setShowSaveStrategyModal(false)
     } catch (error) {
-      console.error("Error saving draft:", error)
+      console.error("Error saving strategy:", error)
       setIsSavingDraft(false)
     }
   }
@@ -1033,40 +1329,51 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
         apiStatement.TradingType = currentStatement.TradingType
       }
 
-      const account = localStorage.getItem("user_id")
-
       // Save the complete statement for local use
       localStorage.setItem("savedStrategy", JSON.stringify(apiStatement))
 
-      if (!account) {
-        throw new Error("No account found in localStorage")
-      }
+      let result
 
-      console.log("Sending to API:", apiStatement)
+      // Check if we're editing an existing strategy
+      if (strategyId && strategyData) {
+        console.log("Updating existing strategy for testing:", apiStatement)
+        // Call editStrategy for existing strategies
+        result = await editStrategy(strategyId, apiStatement)
+        console.log("Strategy updated successfully:", result)
 
-      // Call the API with the structured data
-      const result = await createStatement({
-        account,
-        statement: apiStatement,
-      })
+        // Store the existing strategy ID
+        localStorage.setItem("strategy_id", strategyId)
+      } else {
+        // Call createStatement for new strategies
+        const account = localStorage.getItem("user_id")
 
-      console.log("Statement created successfully:", result)
+        if (!account) {
+          throw new Error("No account found in localStorage")
+        }
 
-      // Store the strategy ID in localStorage if it exists in the response
-      if (result) {
-        if (result.id) {
+        console.log("Creating new strategy for testing:", apiStatement)
+        result = await createStatement({
+          account,
+          statement: apiStatement,
+        })
+        console.log("Strategy created successfully:", result)
+
+        // Store the new strategy ID if it exists in the response
+        if (result && result.id) {
           localStorage.setItem("strategy_id", result.id)
         }
-        if (result.timeframes_required) {
-          localStorage.setItem("timeframes_required", JSON.stringify(result.timeframes_required))
-        }
+      }
+
+      // Store timeframes_required if it exists in the response
+      if (result && result.timeframes_required) {
+        localStorage.setItem("timeframes_required", JSON.stringify(result.timeframes_required))
       }
 
       setIsProceeding(false)
       setShowSaveStrategyModal(false)
       router.push("/strategy-testing")
     } catch (error) {
-      console.error("Error creating statement:", error)
+      console.error("Error processing strategy:", error)
       setIsProceeding(false)
     }
   }
@@ -1130,10 +1437,6 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
     setStatements(newStatements)
   }
 
-  // Update the timeframe button styling to match the design
-  // Replace the timeframe component in renderStrategyConditions function
-  // Replace the timeframe component in renderStrategyConditions function with this:
-
   const renderStrategyConditions = (statement: StrategyStatement) => {
     const components: JSX.Element[] = []
 
@@ -1170,7 +1473,9 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
             <div className="text-xs text-gray-400 mb-1">Timeframe</div>
             <button
               onClick={() => openTimeframeDropdown(activeStatementIndex, index)}
-              className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[160px] border border-[#2A2D42]"
+              onMouseEnter={(e) => handleMouseEnter(e, condition, "timeframe", index)}
+              onMouseLeave={handleMouseLeave}
+              className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[160px] border border-[#2A2D42] transition-all duration-200 hover:border-[#4A4D62]"
               data-timeframe-index={index}
             >
               <span className="text-gray-400">{timeframeValue || "Select timeframe"}</span>
@@ -1178,7 +1483,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
             </button>
             <button
               onClick={() => removeComponent(activeStatementIndex, index, "timeframe")}
-              className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+              className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
             >
               <X className="w-3 h-3" />
             </button>
@@ -1209,7 +1514,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
                 setStatements(newStatements)
                 setSelectedCandleNumber(null)
               }}
-              className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+              className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
             >
               <X className="w-3 h-3" />
             </button>
@@ -1244,13 +1549,19 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
 
         components.push(
           <div key={`inp1-${index}`} className="flex items-center relative group">
-            <div className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2">{displayName}</div>
+            <div
+              className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2 transition-all duration-200 hover:bg-[#D5D5D5] cursor-pointer"
+              onMouseEnter={(e) => handleMouseEnter(e, condition, "inp1", index)}
+              onMouseLeave={handleMouseLeave}
+            >
+              {displayName}
+            </div>
             {"wait" in condition.inp1 && condition.inp1.wait && (
               <div className="ml-1 px-2 py-1 rounded-md text-xs text-white">Wait: Yes</div>
             )}
             <button
               onClick={() => removeComponent(activeStatementIndex, index, "inp1")}
-              className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+              className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
             >
               <X className="w-3 h-3" />
             </button>
@@ -1263,12 +1574,14 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
         components.push(
           <div
             key={`operator-${index}`}
-            className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2 relative group"
+            className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2 relative group transition-all duration-200 hover:bg-[#D5D5D5] cursor-pointer"
+            onMouseEnter={(e) => handleMouseEnter(e, condition, "operator", index)}
+            onMouseLeave={handleMouseLeave}
           >
             {condition.operator_name.replace("_", " ")}
             <button
               onClick={() => removeComponent(activeStatementIndex, index, "operator")}
-              className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+              className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
             >
               <X className="w-3 h-3" />
             </button>
@@ -1287,7 +1600,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
             components.push(
               <div key={`inp2-${index}`} className="flex items-center relative group">
                 <button
-                  className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2 flex items-center"
+                  className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2 flex items-center transition-all duration-200 hover:bg-[#D5D5D5]"
                   onClick={() =>
                     setShowPipsModal({
                       show: true,
@@ -1295,6 +1608,8 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
                       conditionIndex: index,
                     })
                   }
+                  onMouseEnter={(e) => handleMouseEnter(e, condition, "inp2", index)}
+                  onMouseLeave={handleMouseLeave}
                 >
                   <span>{condition.pips || 500}</span>
                   <span className="ml-1">pips</span>
@@ -1302,7 +1617,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
                 {condition.inp2.wait && <div className="ml-1 px-2 py-1 rounded-md text-xs text-white">Wait: Yes</div>}
                 <button
                   onClick={() => removeComponent(activeStatementIndex, index, "inp2")}
-                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                  className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -1312,11 +1627,17 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
             // Rest of the existing code for non-editable values
             components.push(
               <div key={`inp2-${index}`} className="flex items-center relative group">
-                <div className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2">{condition.inp2.value}</div>
+                <div
+                  className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2 transition-all duration-200 hover:bg-[#D5D5D5] cursor-pointer"
+                  onMouseEnter={(e) => handleMouseEnter(e, condition, "inp2", index)}
+                  onMouseLeave={handleMouseLeave}
+                >
+                  {condition.inp2.value}
+                </div>
                 {condition.inp2.wait && <div className="ml-1 px-2 py-1 rounded-md text-xs text-white">Wait: Yes</div>}
                 <button
                   onClick={() => removeComponent(activeStatementIndex, index, "inp2")}
-                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                  className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -1335,7 +1656,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
               <div className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2">{displayName}</div>
               <button
                 onClick={() => removeComponent(activeStatementIndex, index, "inp2")}
-                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -1379,9 +1700,6 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
   }
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
-  const toggleDropdown = () => {
-    setIsDropdownOpen(!isDropdownOpen)
-  }
 
   const handleDeleteStatement = (index: number) => {
     // If there's only one statement, navigate to home
@@ -1426,7 +1744,11 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
         {/* Header */}
         <div className="flex justify-between items-center mb-6">
           <div className="flex items-center">
-            <h1 className="text-2xl font-medium">Building algorithm for {initialInstrument}</h1>
+            <h1 className="text-2xl font-medium">
+              {strategyId
+                ? `Editing Strategy: ${strategyName || strategyId}`
+                : `Building algorithm for ${initialInstrument || "XAU/USD"}`}
+            </h1>
             <button className="ml-2 p-1 hover:bg-gray-700 rounded-full">
               <Edit className="w-5 h-5" />
             </button>
@@ -1452,9 +1774,6 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
               <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center">
                   <h2 className="text-xl font-medium">{statement.saveresult}</h2>
-                  {/* <span className="ml-3 px-3 py-1 bg-[#2A2D42] rounded-full text-sm">
-                  {statement.side === "B" ? "Long " : "Short"}
-                </span> */}
                 </div>
                 <div className="relative flex items-center gap-4">
                   <button
@@ -1513,6 +1832,7 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
                       className="w-full bg-transparent border-b border-white pb-1 outline-none focus:border-white"
                       value={activeStatementIndex === index ? searchTerm : ""}
                       onChange={(e) => handleSearchInput(index, e.target.value)}
+                      onKeyDown={(e) => handleKeyDown(index, e)}
                       onClick={() => setActiveStatementIndex(index)}
                     />
 
@@ -1633,6 +1953,9 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           onSave={(settings) => {
             // Update stochastic settings
             setShowStochasticModal(false)
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
           }}
         />
       )}
@@ -1715,6 +2038,266 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
 
             setStatements(newStatements)
             setShowCrossingUpModal(false)
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
+          }}
+        />
+      )}
+      {showCrossingDownModal && (
+        <CrossingDownSettingsModal
+          onClose={() => setShowCrossingDownModal(false)}
+          onSave={(settings) => {
+            // Update crossing down settings with the custom value
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+            if (lastCondition.operator_name === "crossabove" || lastCondition.operator_name === "crossbelow") {
+              // Update the inp2 value with the settings from the modal
+              if (settings.valueType === "value" && settings.customValue) {
+                lastCondition.inp2 = {
+                  type: "value",
+                  value: Number(settings.customValue),
+                }
+              } else if (settings.valueType === "other" && settings.indicator) {
+                // Handle indicator type for "other" option
+                if (settings.indicator === "bollinger") {
+                  lastCondition.inp2 = {
+                    type: "I",
+                    name: "BBANDS",
+                    timeframe: settings.timeframe || "3h",
+                    input: settings.band || "upperband",
+                    input_params: {
+                      timeperiod: settings.timeperiod || 17,
+                    },
+                  }
+                } else if (settings.indicator === "rsi") {
+                  lastCondition.inp2 = {
+                    type: "I",
+                    name: "RSI",
+                    timeframe: settings.timeframe || "3h",
+                    input_params: {
+                      timeperiod: settings.timeperiod || 14,
+                    },
+                  }
+                } else {
+                  // For other indicators like price, close, open, etc.
+                  lastCondition.inp2 = {
+                    type: "C",
+                    input: settings.indicator,
+                    timeframe: settings.timeframe || "3h",
+                  }
+                }
+              } else if (settings.valueType === "indicator" && settings.indicator) {
+                // Handle existing indicator selection
+                if (settings.indicator === "bollinger") {
+                  lastCondition.inp2 = {
+                    type: "I",
+                    name: "BBANDS",
+                    timeframe: settings.timeframe || "3h",
+                    input: settings.band || "upperband",
+                    input_params: {
+                      timeperiod: settings.timeperiod || 17,
+                    },
+                  }
+                } else if (settings.indicator === "rsi") {
+                  lastCondition.inp2 = {
+                    type: "I",
+                    name: "RSI",
+                    timeframe: settings.timeframe || "3h",
+                    input_params: {
+                      timeperiod: settings.timeperiod || 14,
+                    },
+                  }
+                } else {
+                  // For other indicators
+                  lastCondition.inp2 = {
+                    type: "C",
+                    input: settings.indicator,
+                    timeframe: settings.timeframe || "3h",
+                  }
+                }
+              }
+            }
+
+            setStatements(newStatements)
+            setShowCrossingDownModal(false)
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
+          }}
+        />
+      )}
+      {/* Above Settings Modal */}
+      {showAboveModal && (
+        <AboveSettingsModal
+          onClose={() => setShowAboveModal(false)}
+          onSave={(settings) => {
+            // Update above settings with the custom value
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+            if (lastCondition.operator_name === "above") {
+              // Update the inp2 value with the settings from the modal
+              if (settings.valueType === "value" && settings.customValue) {
+                lastCondition.inp2 = {
+                  type: "value",
+                  value: Number(settings.customValue),
+                }
+              } else if (settings.valueType === "other" && settings.indicator) {
+                // Handle indicator type for "other" option
+                if (settings.indicator === "bollinger") {
+                  lastCondition.inp2 = {
+                    type: "I",
+                    name: "BBANDS",
+                    timeframe: settings.timeframe || "3h",
+                    input: settings.band || "upperband",
+                    input_params: {
+                      timeperiod: settings.timeperiod || 17,
+                    },
+                  }
+                } else if (settings.indicator === "rsi") {
+                  lastCondition.inp2 = {
+                    type: "I",
+                    name: "RSI",
+                    timeframe: settings.timeframe || "3h",
+                    input_params: {
+                      timeperiod: settings.timeperiod || 14,
+                    },
+                  }
+                } else {
+                  // For other indicators like price, close, open, etc.
+                  lastCondition.inp2 = {
+                    type: "C",
+                    input: settings.indicator,
+                    timeframe: settings.timeframe || "3h",
+                  }
+                }
+              } else if (settings.valueType === "indicator" && settings.indicator) {
+                // Handle existing indicator selection
+                if (settings.indicator === "bollinger") {
+                  lastCondition.inp2 = {
+                    type: "I",
+                    name: "BBANDS",
+                    timeframe: settings.timeframe || "3h",
+                    input: settings.band || "upperband",
+                    input_params: {
+                      timeperiod: settings.timeperiod || 17,
+                    },
+                  }
+                } else if (settings.indicator === "rsi") {
+                  lastCondition.inp2 = {
+                    type: "I",
+                    name: "RSI",
+                    timeframe: settings.timeframe || "3h",
+                    input_params: {
+                      timeperiod: settings.timeperiod || 14,
+                    },
+                  }
+                } else {
+                  // For other indicators
+                  lastCondition.inp2 = {
+                    type: "C",
+                    input: settings.indicator,
+                    timeframe: settings.timeframe || "3h",
+                  }
+                }
+              }
+            }
+
+            setStatements(newStatements)
+            setShowAboveModal(false)
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
+          }}
+        />
+      )}
+      {/* Below Settings Modal */}
+      {showBelowModal && (
+        <BelowSettingsModal
+          onClose={() => setShowBelowModal(false)}
+          onSave={(settings) => {
+            // Update below settings with the custom value
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+            if (lastCondition.operator_name === "below") {
+              // Update the inp2 value with the settings from the modal
+              if (settings.valueType === "value" && settings.customValue) {
+                lastCondition.inp2 = {
+                  type: "value",
+                  value: Number(settings.customValue),
+                }
+              } else if (settings.valueType === "other" && settings.indicator) {
+                // Handle indicator type for "other" option
+                if (settings.indicator === "bollinger") {
+                  lastCondition.inp2 = {
+                    type: "I",
+                    name: "BBANDS",
+                    timeframe: settings.timeframe || "3h",
+                    input: settings.band || "lowerband",
+                    input_params: {
+                      timeperiod: settings.timeperiod || 17,
+                    },
+                  }
+                } else if (settings.indicator === "rsi") {
+                  lastCondition.inp2 = {
+                    type: "I",
+                    name: "RSI",
+                    timeframe: settings.timeframe || "3h",
+                    input_params: {
+                      timeperiod: settings.timeperiod || 14,
+                    },
+                  }
+                } else {
+                  // For other indicators like price, close, open, etc.
+                  lastCondition.inp2 = {
+                    type: "C",
+                    input: settings.indicator,
+                    timeframe: settings.timeframe || "3h",
+                  }
+                }
+              } else if (settings.valueType === "indicator" && settings.indicator) {
+                // Handle existing indicator selection
+                if (settings.indicator === "bollinger") {
+                  lastCondition.inp2 = {
+                    type: "I",
+                    name: "BBANDS",
+                    timeframe: settings.timeframe || "3h",
+                    input: settings.band || "lowerband",
+                    input_params: {
+                      timeperiod: settings.timeperiod || 17,
+                    },
+                  }
+                } else if (settings.indicator === "rsi") {
+                  lastCondition.inp2 = {
+                    type: "I",
+                    name: "RSI",
+                    timeframe: settings.timeframe || "3h",
+                    input_params: {
+                      timeperiod: settings.timeperiod || 14,
+                    },
+                  }
+                } else {
+                  // For other indicators
+                  lastCondition.inp2 = {
+                    type: "C",
+                    input: settings.indicator,
+                    timeframe: settings.timeframe || "3h",
+                  }
+                }
+              }
+            }
+
+            setStatements(newStatements)
+            setShowBelowModal(false)
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
           }}
         />
       )}
@@ -1757,6 +2340,9 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
 
             setStatements(newStatements)
             setShowRsiModal(false)
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
           }}
         />
       )}
@@ -1778,6 +2364,9 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
 
             setStatements(newStatements)
             setShowBollingerModal(false)
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
           }}
         />
       )}
@@ -1813,6 +2402,9 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
 
             setStatements(newStatements)
             setShowVolumeModal(false)
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
           }}
         />
       )}
@@ -1835,6 +2427,9 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
 
             setStatements(newStatements)
             setShowAtrModal(false)
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
           }}
         />
       )}
@@ -1857,6 +2452,9 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
 
             setStatements(newStatements)
             setShowMacdModal(false)
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
           }}
         />
       )}
@@ -1881,6 +2479,9 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
 
             setStatements(newStatements)
             setShowChannelModal(false)
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
           }}
         />
       )}
@@ -1891,6 +2492,9 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           onSave={(settings) => {
             handleDerivativeSettings(settings)
             setShowDerivativeModal(false)
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
           }}
         />
       )}
@@ -1902,6 +2506,9 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           onSave={(settings) => {
             handleSLTPSettings(settings)
             setShowSLTPSettings({ show: false, type: "SL" })
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
           }}
         />
       )}
@@ -1921,6 +2528,9 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
 
             setStatements(newStatements)
             setShowPipsModal({ show: false, statementIndex: 0, conditionIndex: 0 })
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
           }}
         />
       )}
@@ -1955,6 +2565,32 @@ export function StrategyBuilder({ initialName, initialInstrument }: StrategyBuil
           selectedTimeframe={selectedTimeframe}
           onSave={handleSaveCustomTimeframe}
         />
+      )}
+      {/* Tooltip */}
+      {hoveredComponent.show && hoveredComponent.content && (
+        <div
+          className="fixed z-50 pointer-events-none "
+          style={{
+            left: hoveredComponent.position.x,
+            top: hoveredComponent.position.y,
+            transform: "translate(-50%, -100%)", // Position above the element
+          }}
+        >
+          <div className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2  px-3 py-2 rounded-lg shadow-lg border border-[#4A4D62] animate-in fade-in-0 zoom-in-95 duration-200">
+            <div className="text-xs space-y-1">
+              {Object.entries(hoveredComponent.content.details).map(([key, value]) => (
+                <div key={key} className="flex justify-between gap-2">
+                  <span className=" text-black capitalize">{key.replace("_", " ")}:</span>
+                  <span className=" text-black">{String(value)}</span>
+                </div>
+              ))}
+            </div>
+            {/* Tooltip arrow pointing downward */}
+            <div className="absolute top-full left-1/2 transform -translate-x-1/2">
+              <div className="w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-[#2A2D42]"></div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
