@@ -289,21 +289,21 @@ export const fetchStatement = async () => {
   return filteredData
 }
 
-export const fetchStatementDetail = async (statement_id) => {
-  const response = await Fetch(`/api/strategies/${statement_id}/`, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-    },
-  })
+  export const fetchStatementDetail = async (id) => {
+    const response = await Fetch(`/api/strategies/${id}/`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    })
 
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error?.detail || "Failed to fetch statement detail")
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error?.detail || "Failed to fetch statement detail")
+    }
+
+    return response.json()
   }
-
-  return response.json()
-}
 
 export const deleteStatement = async (statement_id) => {
   const response = await Fetch(`/api/strategies/${statement_id}/delete/`, {
@@ -426,3 +426,4 @@ export const changePassword = async (old_password, new_password,user_id) => {
 
   return response.json()
 }
+

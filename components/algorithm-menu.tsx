@@ -111,6 +111,7 @@ export function AlgorithmMenu({ anchorRef, algorithm, onClose, onDelete, onDupli
             onEdit(name, instrument)
             handleModalClose()
           }}
+          
         />
       )}
     </>

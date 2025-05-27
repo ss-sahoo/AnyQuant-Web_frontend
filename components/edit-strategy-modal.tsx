@@ -70,6 +70,8 @@ export function EditStrategyModal({ strategy, onClose, onSave, isEdit = false }:
   const handleProceedToBuilder = (e: React.MouseEvent) => {
     e.stopPropagation()
     onSave(strategyName, instrument) // ✅ Only send name and instrument
+    const id = strategy.id.toString().split("-")[0]
+    router.push(`/strategy-builder/${id}/`)
     onClose()
   }
 
