@@ -23,7 +23,7 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
   const allBasicComponents = [
     "If",
     "Unless",
-    "Then",
+    // "Then",
     "Timeframe",
     "Duration",
     "When",
@@ -94,6 +94,8 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
     "Below",
     "At most above pips",
     "At most below pips",
+    "Accumulate",
+    "Then",
     // "Rising",
    
     // "Equal to",

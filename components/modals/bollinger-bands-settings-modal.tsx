@@ -10,11 +10,11 @@ interface BollingerBandsSettingsModalProps {
 
 export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsSettingsModalProps) {
   const [level, setLevel] = useState("lower")
-  const [length, setLength] = useState("17")
-  // const [maType, setMaType] = useState("SMA")
-  // const [source, setSource] = useState("close")
-  // const [stdDev, setStdDev] = useState("2")
-  // const [offset, setOffset] = useState("2")
+  const [length, setLength] = useState("20")
+  const [maType, setMaType] = useState("SMA")
+  const [source, setSource] = useState("close")
+  const [stdDev, setStdDev] = useState("2")
+  const [offset, setOffset] = useState("2")
   const [showMaTypeDropdown, setShowMaTypeDropdown] = useState(false)
   const [showSourceDropdown, setShowSourceDropdown] = useState(false)
 
@@ -62,8 +62,43 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
   }, [])
 
   const handleSave = () => {
+    const timeperiod = Number.parseInt(length, 10) || 20
+    const stdDevValue = Number.parseFloat(stdDev) || 2.0
+
+    // Determine input based on level
+    let input = "lowerband"
+    if (level === "upper") {
+      input = "upperband"
+    } else if (level === "basis") {
+      input = "middleband"
+    }
+
+    // Build input_params based on band selection
+    const inputParams: any = {
+      timeperiod: timeperiod,
+      source: source,
+    }
+
+    // Add deviation parameters based on band selection
+    if (level === "upper") {
+      inputParams.nbdevup = stdDevValue
+    } else if (level === "lower") {
+      inputParams.nbdevdn = stdDevValue
+    } else if (level === "basis") {
+      // For basis, send both with default values
+      inputParams.nbdevup = 2.0
+      inputParams.nbdevdn = 2.0
+    }
+
     onSave({
-      timeperiod: Number.parseInt(length, 10) || 17,
+      timeperiod: timeperiod,
+      input: input,
+      input_params: inputParams,
+      level: level,
+      maType: maType,
+      source: source,
+      stdDev: stdDevValue,
+      offset: Number.parseFloat(offset) || 2,
     })
   }
 
@@ -72,15 +107,17 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div ref={modalRef} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md">
-        <div className="flex justify-between items-center p-6">
+      <div ref={modalRef} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md max-h-[90vh] flex flex-col">
+        {/* Fixed Header */}
+        <div className="flex justify-between items-center p-6 border-b border-gray-200 flex-shrink-0">
           <h2 className="text-2xl font-bold text-black">Bollinger Bands Settings</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
             <X className="w-6 h-6" />
           </button>
         </div>
 
-        <div className="px-6 pb-6">
+        {/* Scrollable Content */}
+        <div className="px-6 py-4 overflow-y-auto flex-1">
           <div className="mb-6">
             <label className="block text-lg font-medium text-gray-800 mb-2">Bollinger Bands level</label>
             <div className="grid grid-cols-3 gap-0 border border-gray-300 rounded-md overflow-hidden">
@@ -118,7 +155,7 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
 
             <div className="space-y-4">
               <div>
-                <label className="block text-base font-medium text-gray-700 mb-2">Time Period</label>
+                <label className="block text-base font-medium text-gray-700 mb-2">Length</label>
                 <input
                   type="text"
                   value={length}
@@ -127,7 +164,7 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
                 />
               </div>
 
-              {/* <div>
+              <div>
                 <label className="block text-base font-medium text-gray-700 mb-2">Basis MA Type</label>
                 <div className="relative" ref={maTypeDropdownRef}>
                   <button
@@ -155,14 +192,14 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
                     </div>
                   )}
                 </div>
-              </div> */}
+              </div>
 
-              {/* <div>
+              <div>
                 <label className="block text-base font-medium text-gray-700 mb-2">Source</label>
                 <div className="relative" ref={sourceDropdownRef}>
                   <button
                     className="w-full p-3 border border-gray-300 rounded text-gray-700 bg-white flex justify-between items-center"
-                    onClick={()={() => setShowSourceDropdown(!showSourceDropdown)}
+                    onClick={() => setShowSourceDropdown(!showSourceDropdown)}
                   >
                     {source}
                     <span className="ml-2">▼</span>
@@ -185,9 +222,9 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
                     </div>
                   )}
                 </div>
-              </div> */}
+              </div>
 
-              {/* <div>
+              <div>
                 <label className="block text-base font-medium text-gray-700 mb-2">Std Dev</label>
                 <input
                   type="text"
@@ -205,21 +242,22 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
                   onChange={(e) => setOffset(e.target.value)}
                   className="w-full p-3 border border-gray-300 rounded text-gray-700"
                 />
-              </div> */}
+              </div>
             </div>
           </div>
+        </div>
 
-          <div className="flex justify-end space-x-3 mt-8">
-            <button
-              onClick={onClose}
-              className="px-6 py-3 border border-gray-300 rounded-full text-gray-700 hover:bg-gray-100"
-            >
-              Cancel
-            </button>
-            <button onClick={handleSave} className="px-6 py-3 bg-[#85e1fe] rounded-full text-black hover:bg-[#6bcae2]">
-              Save
-            </button>
-          </div>
+        {/* Fixed Footer */}
+        <div className="flex justify-end space-x-3 p-6 border-t border-gray-200 flex-shrink-0">
+          <button
+            onClick={onClose}
+            className="px-6 py-3 border border-gray-300 rounded-full text-gray-700 hover:bg-gray-100"
+          >
+            Cancel
+          </button>
+          <button onClick={handleSave} className="px-6 py-3 bg-[#85e1fe] rounded-full text-black hover:bg-[#6bcae2]">
+            Save
+          </button>
         </div>
       </div>
     </div>
