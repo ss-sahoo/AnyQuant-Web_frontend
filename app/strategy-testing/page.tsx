@@ -54,6 +54,10 @@ export default function StrategyTestingPage() {
   const [mutationRate, setMutationRate] = useState("0.2")
   const [tournamentSize, setTournamentSize] = useState("5")
 
+  // Add new state variables for trading modes
+  const [selectedTradingMode, setSelectedTradingMode] = useState("OOTAAT")
+  const [maxTrades, setMaxTrades] = useState("2")
+
   useEffect(() => {
     if (typeof window !== "undefined") {
       const savedStrategy = localStorage.getItem("savedStrategy")
@@ -346,15 +350,22 @@ export default function StrategyTestingPage() {
       const cash = Number.parseFloat(accountDeposit.replace(/,/g, ""))
       const margin = getLeverageMargin(leverage)
 
-      // Create the data object with hardcoded values
-      const tradingtype = {
-        nTrade_max: nTradeMax,
+      // Create the data object with trading mode consideration
+      const tradingtype: any = {
         margin: margin,
         lot: "mini",
         cash: cash,
+        NewTrade: selectedTradingMode, // Add the selected trading mode
+      }
+
+      // Only add nTrade_max for MTOOTAAT mode
+      if (selectedTradingMode === "MTOOTAAT") {
+        tradingtype.nTrade_max = Number.parseInt(maxTrades)
       }
 
       console.log("Saving with margin:", margin, "from leverage:", leverage)
+      console.log("Trading mode:", selectedTradingMode)
+      console.log("Trading type data:", tradingtype)
 
       // Call the API
       await updateStrategyTradingType(Number.parseInt(strategy_id), tradingtype)
@@ -519,7 +530,7 @@ export default function StrategyTestingPage() {
 
                 <div className="border-t border-[#2b2e38] my-6"></div>
 
-                <div className="flex justify-between items-start">
+                <div className="flex justify-between items-start mb-6">
                   {/* Account Deposit */}
                   <div className="w-[30%]">
                     <label className="block text-sm text-gray-400 mb-2">Account Deposit</label>
@@ -591,6 +602,71 @@ export default function StrategyTestingPage() {
                     </div>
                     <div className="mt-2 text-center">
                       <span className="text-sm text-[#85e1fe] font-medium">{leverage}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-[#2b2e38] my-6"></div>
+
+                {/* Trading Mode Section */}
+                <div className="mb-6">
+                  <label className="block text-sm text-gray-400 mb-4">Trading Mode</label>
+                  <div className="flex flex-wrap gap-3 mb-4">
+                    {[
+                      { value: "OOTAAT", label: "OOTAAT" },
+                      { value: "CLOSE_AND_OPEN", label: "CLOSE & OPEN" },
+                      { value: "MTOOTAAT", label: "MTOOTAAT" },
+                    ].map((mode) => (
+                      <button
+                        key={mode.value}
+                        onClick={() => setSelectedTradingMode(mode.value)}
+                        className={`px-4 py-2 rounded-md transition-colors ${
+                          selectedTradingMode === mode.value
+                            ? "bg-[#85e1fe] text-black"
+                            : "bg-[#141721] text-white border border-[#2b2e38] hover:border-[#85e1fe]"
+                        }`}
+                      >
+                        {mode.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Max Trades Input for MTOOTAAT */}
+                  {selectedTradingMode === "MTOOTAAT" && (
+                    <div className="w-[30%]">
+                      <label className="block text-sm text-gray-400 mb-2">Max parallel trades</label>
+                      <input
+                        type="number"
+                        value={maxTrades}
+                        onChange={(e) => setMaxTrades(e.target.value)}
+                        placeholder="e.g., 2"
+                        min="1"
+                        className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
+                      />
+                    </div>
+                  )}
+
+                  {/* Trading Mode Descriptions */}
+                  <div className="mt-4 p-3 bg-[#141721] rounded-md border border-[#2b2e38]">
+                    <div className="text-xs text-gray-400">
+                      {selectedTradingMode === "OOTAAT" && (
+                        <p>
+                          <strong>OOTAAT:</strong> One Order Type At A Time mode - Only one position can be open at any
+                          given time.
+                        </p>
+                      )}
+                      {selectedTradingMode === "CLOSE_AND_OPEN" && (
+                        <p>
+                          <strong>CLOSE & OPEN:</strong> Allows closing existing and opening new positions
+                          simultaneously.
+                        </p>
+                      )}
+                      {selectedTradingMode === "MTOOTAAT" && (
+                        <p>
+                          <strong>MTOOTAAT:</strong> Multiple 'One Order Type At A Time' mode - System enforces the
+                          maximum number of parallel trades based on your input or margin requirements.
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>

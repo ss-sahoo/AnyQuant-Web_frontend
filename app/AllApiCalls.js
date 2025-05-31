@@ -356,18 +356,27 @@ export const updateStatement = async (statement_id, updatedData) => {
  */
 export async function updateStrategyTradingType(id, tradingtype) {
   try {
+    // Create the base trading type object
+    const tradingTypeObj = {
+      NewTrade: tradingtype.NewTrade,
+      commission: 0.0002,
+      margin: tradingtype.margin,
+      lot: tradingtype.lot,
+      cash: tradingtype.cash,
+    }
+
+    // Only include nTrade_max if it exists in the tradingtype object
+    if (tradingtype.nTrade_max !== undefined) {
+      tradingTypeObj.nTrade_max = tradingtype.nTrade_max
+    }
+
     const response = await Fetch(`/api/strategies/${id}/edit/`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        TradingType: {
-          nTrade_max: tradingtype.nTrade_max,
-          margin: tradingtype.margin,
-          lot: tradingtype.lot,
-          cash: tradingtype.cash,
-        },
+        TradingType: tradingTypeObj,
       }),
     })
 
