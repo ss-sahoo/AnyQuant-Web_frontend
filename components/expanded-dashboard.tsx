@@ -41,9 +41,11 @@ export function ExpandedDashboard() {
             <div className="lg:col-span-2">
               <div className="flex justify-between items-center mb-4">
                 {/* <h1 className="text-2xl font-normal">Draft algorithms</h1> */}
+                <Link href="/strategy-builder">
                 <button className="bg-[#6BCAE2] hover:bg-[#5AB9D1] text-black rounded-full px-6 py-2 text-sm">
                   Create Strategy
                 </button>
+                </Link>
               </div>
 
               <AlgorithmTable algorithms={algorithms} onDelete={handleDeleteAlgorithm} />
