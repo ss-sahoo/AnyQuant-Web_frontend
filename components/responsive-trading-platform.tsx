@@ -21,33 +21,37 @@ export function ResponsiveTradingPlatform() {
   const [shortlistedAlgorithms, setShortlistedAlgorithms] = useState(mockShortlistedAlgorithms)
   const [algorithms, setAlgorithms] = useState<Algorithm[]>([])
   const [loading, setLoading] = useState(true)
+  const [page, setPage] = useState(1)
+const [totalCount, setTotalCount] = useState(0)
+const pageSize = 10
 
-  const refreshAlgorithms = async () => {
-    setLoading(true)
-    try {
-      const data = await fetchStatement()
-      const sortedData = data
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-        .slice(0, 10)
-      const mapped = sortedData.map((item, index) => ({
-        ...item,
-        id: item.id ? `${item.id}-${index}` : `strategy-${index}`,
-        name: item.name || item.saveresult || "Unnamed Strategy",
-        instrument: item.instrument || "Unknown",
-      }))
-      setAlgorithms(mapped)
-    } catch (err) {
-      console.error("Error fetching:", err)
-      setAlgorithms([])
-    } finally {
-      setLoading(false)
-    }
+const refreshAlgorithms = async (pageToFetch = page) => {
+  setLoading(true)
+  try {
+    const { strategies, total } = await fetchStatement(pageToFetch, pageSize)
+
+    const mapped = strategies.map((item, index) => ({
+      ...item,
+      id: item.id ? `${item.id}-${index}` : `strategy-${index}`,
+      name: item.name || item.saveresult || "Unnamed Strategy",
+      instrument: item.instrument || "Unknown",
+    }))
+
+    setAlgorithms(mapped)
+    setTotalCount(total)
+  } catch (err) {
+    console.error("Error fetching:", err)
+    setAlgorithms([])
+  } finally {
+    setLoading(false)
   }
+}
+
 
   
   useEffect(() => {
     refreshAlgorithms()
-  }, [])
+  }, [page])
 
   const handleDeleteAlgorithm = async (id: string) => {
     try {
@@ -80,13 +84,7 @@ export function ResponsiveTradingPlatform() {
   
   
   const user_id = localStorage.getItem("user_id")
-  // const handleDeleteAlgorithm = (id: string, isShortlisted: boolean) => {
-  //   if (isShortlisted) {
-  //     setShortlistedAlgorithms(shortlistedAlgorithms.filter((algo) => algo.id !== id))
-  //   } else {
-  //     setAlgorithm(algorithm.filter((algo) => algo.id !== id))
-  //   }
-  // }
+
 
   const handleDuplicateAlgorithm = (duplicatedAlgorithm: Algorithm, isShortlisted: boolean) => {
     if (isShortlisted) {
@@ -96,15 +94,7 @@ export function ResponsiveTradingPlatform() {
     }
   }
 
-  // const handleEditAlgorithm = (updatedAlgorithm: Algorithm, isShortlisted: boolean) => {
-  //   if (isShortlisted) {
-  //     setShortlistedAlgorithms(
-  //       shortlistedAlgorithms.map((algo) => (algo.id === updatedAlgorithm.id ? updatedAlgorithm : algo)),
-  //     )
-  //   } else {
-  //     setAlgorithm(algorithm.map((algo) => (algo.id === updatedAlgorithm.id ? updatedAlgorithm : algo)))
-  //   }
-  // }
+ 
   const handleCreateAlgorithm = () => {
     router.push("/strategy-builder")
   }
@@ -112,12 +102,10 @@ export function ResponsiveTradingPlatform() {
   return (
     <AuthGuard>
     <div className="flex min-h-screen bg-[#121420] text-white">
-      {/* Desktop sidebar - hidden on mobile */}
       <div className="hidden md:block">
         <Sidebar currentPage="home" />
       </div>
 
-      {/* Mobile sidebar */}
       <MobileSidebar currentPage="home" />
 
       <main className="flex-1 p-4 md:p-8 w-full">
@@ -149,6 +137,37 @@ export function ResponsiveTradingPlatform() {
               onEdit={(id, name, instrument) => handleEditAlgorithm(id, name, instrument)}
               onDuplicate={(algorithm) => handleDuplicateAlgorithm(algorithm, false)}
               />
+              {totalCount > pageSize && (
+  <div className="flex justify-center items-center mt-6 gap-4">
+    <Button
+      onClick={() => {
+        if (page > 1) {
+          setPage((prev) => prev - 1)
+          refreshAlgorithms(page - 1)
+        }
+      }}
+      disabled={page === 1}
+      variant="outline"
+      className="text-[#6BCAE2] border-[#6BCAE2]"
+    >
+      Previous
+    </Button>
+    <span className="text-sm text-gray-300">Page {page}</span>
+    <Button
+      onClick={() => {
+        if (page * pageSize < totalCount) {
+          setPage((prev) => prev + 1)
+          refreshAlgorithms(page + 1)
+        }
+      }}
+      disabled={page * pageSize >= totalCount}
+      className="bg-[#6BCAE2] text-black"
+    >
+      Next
+    </Button>
+  </div>
+)}
+
 
 
           <h1 className="text-2xl md:text-3xl font-normal mt-8 md:mt-12 mb-6 md:mb-8">shortlisted strategy variants</h1>

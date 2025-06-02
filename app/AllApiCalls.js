@@ -264,30 +264,33 @@ export const createStatement = async ({ account, statement }) => {
 
 
 
-export const fetchStatement = async () => {
+export const fetchStatement = async (page = 1, pageSize = 10) => {
   const accountId = localStorage.getItem("user_id")
+  if (!accountId) throw new Error("Account ID not found")
 
-  if (!accountId) {
-    throw new Error("Account ID not found")
-  }
+  const response = await Fetch(
+    `/api/strategies/?page=${page}&page_size=${pageSize}&account=${accountId}`,
+    {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    }
+  )
 
-  const response = await Fetch(`/api/strategies/`, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-    },
-  })
-
-  if (!response.ok) {
-    throw new Error("Failed to fetch strategy")
-  }
+  if (!response.ok) throw new Error("Failed to fetch strategies")
 
   const data = await response.json()
 
-  const filteredData = data.filter((strategy) => strategy.account == accountId)
-
-  return filteredData
+  return {
+    total: data.count,
+    next: data.next,
+    previous: data.previous,
+    strategies: data.results,
+  }
 }
+
+
 
   export const fetchStatementDetail = async (id) => {
     const response = await Fetch(`/api/strategies/${id}/`, {
