@@ -39,7 +39,6 @@ interface CrossingUpSettingsModalProps {
 }
 
 export function CrossingUpSettingsModal({ onClose, currentInp1, onSave }: CrossingUpSettingsModalProps) {
-  console.log("Current inp1:", currentInp1)
   const [valueType, setValueType] = useState("value")
   const [customValue, setCustomValue] = useState("50")
   const [indicator, setIndicator] = useState("")

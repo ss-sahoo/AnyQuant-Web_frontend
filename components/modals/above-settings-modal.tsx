@@ -40,7 +40,6 @@ interface AboveSettingsModalProps {
 }
 
 export function AboveSettingsModal({ onClose, currentInp1, onSave }: AboveSettingsModalProps) {
-  console.log("Current inp1:", currentInp1)
   const [valueType, setValueType] = useState("value")
   const [customValue, setCustomValue] = useState("70")
   const [indicator, setIndicator] = useState("")

@@ -43,7 +43,6 @@ export function ResponsiveTradingPlatform() {
       setLoading(false)
     }
   }
-  console.log("Fetched algorithms:", algorithms)
 
   
   useEffect(() => {
@@ -68,7 +67,6 @@ export function ResponsiveTradingPlatform() {
         instrument: String(instrument),
       }
   
-      console.log("Sending payload to editStrategy:", payload)
   
       await editStrategy(numericId, payload)
       await refreshAlgorithms()
@@ -82,7 +80,6 @@ export function ResponsiveTradingPlatform() {
   
   
   const user_id = localStorage.getItem("user_id")
-  console.log("user id ", user_id)
   // const handleDeleteAlgorithm = (id: string, isShortlisted: boolean) => {
   //   if (isShortlisted) {
   //     setShortlistedAlgorithms(shortlistedAlgorithms.filter((algo) => algo.id !== id))

@@ -5,7 +5,7 @@ import type React from "react"
 import { useRef, useState, useEffect } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { MobileSidebar } from "@/components/mobile-sidebar"
-import { runBacktest, updateStrategyTradingType } from "../AllApiCalls"
+import { fetchStatementDetail, runBacktest, updateStrategyTradingType } from "../AllApiCalls"
 import { X } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
 
@@ -76,6 +76,44 @@ export default function StrategyTestingPage() {
         }
       }
     }
+  }, [])
+
+  useEffect(() => {
+    const checkQueryParams = async () => {
+      if (typeof window !== "undefined") {
+        const urlParams = new URLSearchParams(window.location.search)
+        const id = urlParams.get("id")
+
+        if (id) {
+          try {
+            const strategyData = await fetchStatementDetail(id)
+
+            // Store the fetched data in localStorage
+            localStorage.setItem("savedStrategy", JSON.stringify(strategyData))
+
+            // Check if timeframes_required exists in the response and store it
+            if (strategyData.timeframes_required) {
+              localStorage.setItem("timeframes_required", JSON.stringify(strategyData.timeframes_required))
+              setRequiredTimeframes(strategyData.timeframes_required)
+            }
+            if( strategyData.id) {
+              localStorage.setItem("strategy_id", strategyData.id)
+              
+            }
+
+            // Update component state
+            setStrID(JSON.stringify(strategyData))
+            setStrategy(JSON.stringify(strategyData))
+            setParsedStatement(strategyData)
+
+          } catch (error) {
+            alert("Failed to fetch strategy details: " + error.message)
+          }
+        }
+      }
+    }
+
+    checkQueryParams()
   }, [])
 
   // Add this function to handle expanding/collapsing the chart
@@ -154,7 +192,6 @@ export default function StrategyTestingPage() {
     const lowerFilename = filename.toLowerCase()
     const lowerTimeframe = timeframe.toLowerCase()
 
-    console.log(`Checking if "${lowerFilename}" matches timeframe "${lowerTimeframe}"`)
 
     // Direct matching (e.g., "3h" in filename)
     if (lowerFilename.includes(lowerTimeframe)) {
@@ -185,19 +222,16 @@ export default function StrategyTestingPage() {
 
     // Extract the minute value for the timeframe
     const minutes = timeframeToMinutes[lowerTimeframe]
-    console.log(`Minutes value for ${lowerTimeframe}: ${minutes}`)
 
     if (minutes) {
       // Check if the filename contains the minute value
       const minutesStr = minutes.toString()
       const containsMinutes = lowerFilename.includes(minutesStr)
-      console.log(`Checking if filename contains "${minutesStr}": ${containsMinutes}`)
 
       // Additional check: Make sure it's not part of another number
       // For example, "20" in "120" should not match "20m"
       const regex = new RegExp(`\\b${minutesStr}\\b`)
       const isStandaloneNumber = regex.test(lowerFilename)
-      console.log(`Is "${minutesStr}" a standalone number: ${isStandaloneNumber}`)
 
       return containsMinutes
     }
@@ -250,7 +284,6 @@ export default function StrategyTestingPage() {
       }
     } catch (error: any) {
       alert("Backtest Error: " + (error.message || "Unknown error"))
-      console.error("Backtest API error:", error)
     } finally {
       setIsLoading(false)
     }
@@ -363,11 +396,8 @@ export default function StrategyTestingPage() {
         tradingtype.nTrade_max = Number.parseInt(maxTrades)
       }
 
-      console.log("Saving with margin:", margin, "from leverage:", leverage)
-      console.log("Trading mode:", selectedTradingMode)
-      console.log("Trading type data:", tradingtype)
 
-      // Call the API
+    
       await updateStrategyTradingType(Number.parseInt(strategy_id), tradingtype)
 
       // Show success message
