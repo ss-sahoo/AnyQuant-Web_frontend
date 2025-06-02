@@ -242,7 +242,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   useEffect(() => {
     if (strategyData && strategyId) {
       try {
-        console.log("Loading strategy data:", strategyData)
 
         // If strategyData has the expected structure, use it
         if (strategyData.strategy) {
@@ -1229,7 +1228,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   // Add this function after the existing helper functions
   const getTooltipContent = (
     condition: StrategyCondition,
-    componentType: "inp1" | "inp2" | "timeframe" | "operator" | "then",
+    componentType: "inp1" | "inp2" | "timeframe" | "operator" | "then" |"accumulate",
     index: number,
   ) => {
     // Handle "Then" component tooltip
@@ -1375,6 +1374,27 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         }
       }
     }
+    if (
+      componentType === "operator" &&
+      ["atmost_above_pips", "atmost_below_pips"].includes(condition.operator_name) &&
+      condition.pips
+    ) {
+      return {
+        title: "Pips Condition",
+        details: {
+          pips: condition.pips,
+        },
+      }
+    }
+    if (componentType === "accumulate" && condition.Accumulate?.forPeriod) {
+      return {
+        title: "Accumulate Condition",
+        details: {
+          forPeriod: condition.Accumulate.forPeriod,
+        },
+      };
+    }
+
 
     return null
   }
@@ -1519,10 +1539,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
       // Check if we're editing an existing strategy
       if (strategyId && strategyData) {
-        console.log("Updating existing strategy:", apiStatement)
         // Call editStrategy for existing strategies
         result = await editStrategy(strategyId, apiStatement)
-        console.log("Strategy updated successfully:", result)
       } else {
         // Call createStatement for new strategies
         const account = localStorage.getItem("user_id")
@@ -1531,12 +1549,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           throw new Error("No account found in localStorage")
         }
 
-        console.log("Creating new strategy:", apiStatement)
         result = await createStatement({
           account,
           statement: apiStatement,
         })
-        console.log("Strategy created successfully:", result)
       }
 
       setIsSavingDraft(false)
@@ -1579,10 +1595,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
       // Check if we're editing an existing strategy
       if (strategyId && strategyData) {
-        console.log("Updating existing strategy for testing:", apiStatement)
         // Call editStrategy for existing strategies
         result = await editStrategy(strategyId, apiStatement)
-        console.log("Strategy updated successfully:", result)
 
         // Store the existing strategy ID
         localStorage.setItem("strategy_id", strategyId)
@@ -1594,12 +1608,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           throw new Error("No account found in localStorage")
         }
 
-        console.log("Creating new strategy for testing:", apiStatement)
         result = await createStatement({
           account,
           statement: apiStatement,
         })
-        console.log("Strategy created successfully:", result)
 
         // Store the new strategy ID if it exists in the response
         if (result && result.id) {
@@ -1951,7 +1963,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               components.push(
                 <div key={`inp2-${index}`} className="flex items-center relative group">
                   <button
-                    className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2 flex items-center transition-all duration-200 hover:bg-[#D5D5D5]"
+                    className="bg-[#C5C5C5] text-black px-3 py-2 mt-3 rounded-md mr-2 mb-2 flex items-center transition-all duration-200 hover:bg-[#D5D5D5]"
                     onClick={() =>
                       setShowPipsModal({
                         show: true,
@@ -2067,7 +2079,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
           components.push(
             <div key={`inp2-${index}`} className="flex items-center relative group">
-              <div className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2">{displayName}</div>
+              <div className="bg-[#C5C5C5] text-black px-3 py-2 mt-3 rounded-md mr-2 mb-2">{displayName}</div>
               <button
                 onClick={() => removeComponent(activeStatementIndex, index, "inp2")}
                 className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
@@ -2083,8 +2095,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       if (condition.Accumulate) {
         components.push(
           <div key={`accumulator-${index}`} className="flex items-center relative group">
-            <div className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2 transition-all duration-200  cursor-pointer">
-              {condition.Accumulate.forPeriod}
+            <div className="bg-[#C5C5C5] text-black px-3 py-2 mt-3 rounded-md mr-2 mb-2 transition-all duration-200  cursor-pointer">
+              Accumulate
             </div>
             <button
               onClick={() => {
@@ -3218,29 +3230,138 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       )}
       {/* Pips Settings Modal */}
       {showPipsModal.show && (
-        <PipsSettingsModal
-          initialValue={statements[showPipsModal.statementIndex]?.strategy[showPipsModal.conditionIndex]?.pips || 500}
-          onClose={() => setShowPipsModal({ show: false, statementIndex: 0, conditionIndex: 0 })}
-          currentInp1={
-            statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]?.inp1
+  <PipsSettingsModal
+    initialValue={
+      statements[showPipsModal.statementIndex]?.strategy[showPipsModal.conditionIndex]?.pips || 500
+    }
+    onClose={() =>
+      setShowPipsModal({ show: false, statementIndex: 0, conditionIndex: 0 })
+    }
+    currentInp1={
+      statements[showPipsModal.statementIndex]?.strategy[showPipsModal.conditionIndex]?.inp1
+    }
+    onSave={(settings) => {
+      const newStatements = [...statements]
+      const currentStatement = newStatements[showPipsModal.statementIndex]
+      const currentCondition = currentStatement.strategy[showPipsModal.conditionIndex]
+
+      if (
+        currentCondition.operator_name === "atmost_above_pips" ||
+        currentCondition.operator_name === "atmost_below_pips"
+      ) {
+        const tf = settings.timeframe || "3h"
+
+        if (settings.valueType === "value" && settings.customValue) {
+          currentCondition.inp2 = {
+            type: "value",
+            value: Number(settings.customValue),
           }
-          onSave={(value) => {
-            const newStatements = [...statements]
-            const condition = newStatements[showPipsModal.statementIndex].strategy[showPipsModal.conditionIndex]
+        } else if (
+          (settings.valueType === "indicator" || settings.valueType === "other") &&
+          settings.indicator
+        ) {
+          switch (settings.indicator) {
+            case "rsi":
+              currentCondition.inp2 = {
+                type: "I",
+                name: "RSI",
+                timeframe: tf,
+                input_params: {
+                  timeperiod: settings.rsiLength || 14,
+                  source: settings.rsiSource?.toLowerCase() || "close",
+                },
+              }
+              break
 
-            // Update the pips property directly
-            if (condition.operator_name === "atmost_above_pips" || condition.operator_name === "atmost_below_pips") {
-              condition.pips = value
-            }
+            case "rsi-ma":
+              currentCondition.inp2 = {
+                type: "CUSTOM_I",
+                name: "RSI_MA",
+                timeframe: tf,
+                input_params: {
+                  rsi_length: settings.rsiMaLength || 14,
+                  rsi_source: settings.rsiSource || "Close",
+                  ma_type: settings.maType || "SMA",
+                  ma_length: settings.maLength || 14,
+                  bb_stddev: settings.bbStdDev || 2.0,
+                },
+              }
+              break
 
-            setStatements(newStatements)
-            setShowPipsModal({ show: false, statementIndex: 0, conditionIndex: 0 })
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-        />
-      )}
+            case "volume-ma":
+              currentCondition.inp2 = {
+                type: "CUSTOM_I",
+                name: "Volume_MA",
+                timeframe: tf,
+                input_params: {
+                  ma_length: settings.volumeMaLength || 20,
+                },
+              }
+              break
+
+            case "bollinger":
+              currentCondition.inp2 = {
+                type: "I",
+                name: "BBANDS",
+                timeframe: tf,
+                input: settings.band || "lowerband",
+                input_params: {
+                  timeperiod: settings.timeperiod || 17,
+                  source: settings.bbSource || "close",
+                  ...(settings.band === "upperband"
+                    ? { nbdevup: settings.bbStdDev || 2.0 }
+                    : {}),
+                  ...(settings.band === "lowerband"
+                    ? { nbdevdn: settings.bbStdDev || 2.0 }
+                    : {}),
+                  ...(settings.band === "middleband"
+                    ? { nbdevup: 2.0, nbdevdn: 2.0 }
+                    : {}),
+                },
+              }
+              break
+
+            case "volume":
+              currentCondition.inp2 = {
+                type: "C",
+                input: "volume",
+                timeframe: tf,
+              }
+              break
+
+            case "open":
+            case "high":
+            case "low":
+            case "close":
+              currentCondition.inp2 = {
+                type: "C",
+                input: settings.indicator,
+                timeframe: tf,
+              }
+              break
+
+            default:
+              currentCondition.inp2 = {
+                type: "C",
+                input: settings.indicator,
+                timeframe: tf,
+              }
+              break
+          }
+        }
+
+        currentCondition.pips = Number(settings.pips || 500)
+      }
+
+      setStatements(newStatements)
+      setShowPipsModal({ show: false, statementIndex: 0, conditionIndex: 0 })
+
+      setTimeout(() => {
+        searchInputRefs.current[activeStatementIndex]?.focus()
+      }, 100)
+    }}
+  />
+)}
       {/* Save Strategy Modal */}
       {showSaveStrategyModal && (
         <SaveStrategyModal
@@ -3305,7 +3426,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             transform: "translate(-50%, -100%)", // Position above the element
           }}
         >
-          <div className="bg-[#C5C5C5] text-black px-3 py-1 rounded-md mr-2 mb-2  px-3 py-2 rounded-lg shadow-lg border border-[#4A4D62] animate-in fade-in-0 zoom-in-95 duration-200">
+          <div className="bg-[#C5C5C5] text-black px-3 py-2 mt-3 rounded-md mr-2 mb-2  px-3 py-2 rounded-lg shadow-lg border border-[#4A4D62] animate-in fade-in-0 zoom-in-95 duration-200">
             <div className="text-xs space-y-1">
               {Object.entries(hoveredComponent.content.details).map(([key, value]) => (
                 <div key={key} className="flex justify-between gap-2">

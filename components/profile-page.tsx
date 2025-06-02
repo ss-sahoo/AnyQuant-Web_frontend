@@ -46,9 +46,7 @@ export function ProfilePage() {
   }, [])
 
   const handleSaveProfile = async (name: string, email: string, phone: string) => {
-    console.log("Saving profile:", { name, email, phone })
     setShowEditModal(false)
-    // Refresh user data after profile update
     await fetchUserProfile()
   }
 

@@ -33,7 +33,6 @@ interface BelowSettingsModalProps {
 }
 
 export function BelowSettingsModal({ onClose, currentInp1, onSave }: BelowSettingsModalProps) {
-  console.log("Current inp1:", currentInp1)
   const [valueType, setValueType] = useState("value")
   const [customValue, setCustomValue] = useState("30")
   const [indicator, setIndicator] = useState("")
