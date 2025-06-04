@@ -327,7 +327,7 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave }: Cros
     <Dialog open={true} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[425px] bg-white p-0 border border-gray-200 shadow-lg rounded-lg overflow-hidden">
         <div className="flex justify-between items-center p-4 border-b border-gray-200">
-          <DialogTitle className="text-lg font-medium text-black">Crossing Down Settings</DialogTitle>
+          <DialogTitle className="text-lg font-medium text-black">Crossing Below Settings</DialogTitle>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
             <X className="h-4 w-4" />
           </button>

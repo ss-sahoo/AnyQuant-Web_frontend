@@ -51,10 +51,7 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
     "Price",
     "Stochastic",
     // "ATR",
-    "High",
-    "Low",
-    "Open",
-    "Close",
+   
     "GENERAL PA",
     "Gradient",
     // "EMA",
