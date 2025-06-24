@@ -266,7 +266,13 @@ export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalPr
                   value={settings.value}
                   onChange={(e) => setSettings({ ...settings, value: e.target.value })}
                   className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder={settings.valueType === "percentage" ? "e.g. 1.10 for +10%, 0.90 for -10%" : ""}
                 />
+                {settings.valueType === "percentage" && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    Enter a multiplier. For example, 1.10 for a 10% increase, or 0.90 for a 10% decrease.
+                  </p>
+                )}
               </div>
               {settings.valueType === "close" && (
                 <div>

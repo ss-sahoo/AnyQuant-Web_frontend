@@ -224,6 +224,39 @@ export const runBacktest = async ({ statement, files }) => {
 
   return response.json()
 }
+export const runOptimisation = async ({ statement, files }) => {
+  const formData = new FormData()
+
+  // Attach the statement JSON as a string
+  formData.append("statement", JSON.stringify(statement))
+
+  // Attach each file using its timeframe key
+  // Example: files = { "3h": File, "15min": File }
+  for (const [timeframe, file] of Object.entries(files)) {
+    formData.append(timeframe, file)
+  }
+  try {
+
+  const response = await Fetch("/api/run-optimisation/", {
+    method: "POST",
+    body: formData,
+  })  
+
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error?.error || "Failed to start backtest")
+  }
+  const data = await response.json();
+    console.log("Optimisation response:", data); // <-- ✅ Helps you inspect large responses
+    return data;
+  } catch (err) {
+    console.error("Optimisation request failed:", err);
+    throw err;
+  }
+
+  return response.json()
+}
 
 
 // AllApiCalls.ts
@@ -438,4 +471,20 @@ export const changePassword = async (old_password, new_password,user_id) => {
 
   return response.json()
 }
+export const saveOptimisationInput = async (jsonSt, ui_data) => {
+  const response = await Fetch("/api/optimisation/save/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ jsonSt, ui_data }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to save optimisation input");
+  }
+
+  return response.json();
+};
 
