@@ -61,7 +61,11 @@ export function RsiSettingsModal({ onClose, onSave }: RsiSettingsModalProps) {
     }
   }, [])
 
+  // Always allow editing MA settings, regardless of indicatorType
+  // (No need for isRSIMA disabling logic)
+
   const handleSave = () => {
+    // Always save all fields, but only use MA settings for RSI MA in parent logic
     onSave({
       indicatorType,
       rsiLength,

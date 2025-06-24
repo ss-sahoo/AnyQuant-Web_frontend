@@ -5,13 +5,24 @@ import type React from "react"
 import { useRef, useState, useEffect } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { MobileSidebar } from "@/components/mobile-sidebar"
-import { fetchStatementDetail, runBacktest, updateStrategyTradingType } from "../AllApiCalls"
+import {
+  fetchStatementDetail,
+  runBacktest,
+  runOptimisation,
+  updateStrategyTradingType,
+  saveOptimisationInput,
+} from "../AllApiCalls" // Import saveOptimisationInput
 import { X } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
+import { StrategyTab } from "@/components/strategy-tab"
+import { BacktestTab } from "@/components/backtest-tab"
+import { OptimisationTab } from "@/components/optimisation-tab"
+import { PropertiesTab } from "@/components/properties-tab"
+import { AdvancedSettingsModalContent } from "@/components/advanced-settings-modal-content"
 
 export default function StrategyTestingPage() {
   const [activeTab, setActiveTab] = useState("strategy")
-  const [showIframe, setShowIframe] = useState(false)
+  const [showIframe, setShowIframe] = useState(false) // This state is not used in the provided code, keeping it for consistency.
 
   const [selectedStrategy, setSelectedStrategy] = useState("xauscalper.py")
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([])
@@ -23,6 +34,7 @@ export default function StrategyTestingPage() {
   const [plotHtml, setPlotHtml] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [isLoading2, setIsLoading2] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
 
   const [isDragging, setIsDragging] = useState(false)
@@ -31,7 +43,7 @@ export default function StrategyTestingPage() {
   const [strategy, setStrategy] = useState<string | null>(null)
   const [strategy_id, setStrategyId] = useState<string | null>(null)
 
-  // API call related states
+  // API call related states (some are not used in the provided code, keeping for consistency)
   const [accountId, setAccountId] = useState(45)
   const [side, setSide] = useState("buy")
   const [saveResult, setSaveResult] = useState("true")
@@ -43,7 +55,7 @@ export default function StrategyTestingPage() {
   // Add a state for tracking if the chart is expanded
   const [isChartExpanded, setIsChartExpanded] = useState(false)
 
-  const [isLimitationsCollapsed, setIsLimitationsCollapsed] = useState(false)
+  const [isLimitationsCollapsed, setIsLimitationsCollapsed] = useState(true)
 
   // Add a new state variable for showing/hiding the Advanced Settings modal:
   const [showAdvancedSettingsModal, setShowAdvancedSettingsModal] = useState(false)
@@ -57,6 +69,15 @@ export default function StrategyTestingPage() {
   // Add new state variables for trading modes
   const [selectedTradingMode, setSelectedTradingMode] = useState("OOTAAT")
   const [maxTrades, setMaxTrades] = useState("2")
+
+  // New states for OptimisationTab
+  const [selectedMaximiseOption, setSelectedMaximiseOption] = useState<string>("")
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState<string>("")
+
+  // Add new states for optimisation result and heatmap
+  const [optimisationResult, setOptimisationResult] = useState<any>(null)
+  const [plotHeatmapHtml, setPlotHeatmapHtml] = useState<string | null>(null)
+  const [showOptimisationResults, setShowOptimisationResults] = useState(false)
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -73,6 +94,22 @@ export default function StrategyTestingPage() {
           setParsedStatement(parsed)
         } catch (err) {
           console.error("Error parsing saved strategy:", err)
+        }
+      }
+
+      // Initialize optimisation settings from localStorage
+      const optimisationFormString = localStorage.getItem("optimisation_form")
+      if (optimisationFormString) {
+        try {
+          const optimisationForm = JSON.parse(optimisationFormString)
+          setSelectedMaximiseOption(optimisationForm.maximise_options[0] || "")
+          setSelectedAlgorithm(optimisationForm.default_algorithm || "")
+          setPopulationSize(optimisationForm.algorithm_defaults.population_size.toString())
+          setGenerations(optimisationForm.algorithm_defaults.generations.toString())
+          setMutationRate(optimisationForm.algorithm_defaults.mutation_rate.toString())
+          setTournamentSize(optimisationForm.algorithm_defaults.tournament_size.toString())
+        } catch (error) {
+          console.error("Error parsing optimisation_form from localStorage:", error)
         }
       }
     }
@@ -96,9 +133,11 @@ export default function StrategyTestingPage() {
               localStorage.setItem("timeframes_required", JSON.stringify(strategyData.timeframes_required))
               setRequiredTimeframes(strategyData.timeframes_required)
             }
-            if( strategyData.id) {
+            if (strategyData.optimisation_form) {
+              localStorage.setItem("optimisation_form", JSON.stringify(strategyData.optimisation_form))
+            }
+            if (strategyData.id) {
               localStorage.setItem("strategy_id", strategyData.id)
-              
             }
 
             // Update component state
@@ -106,7 +145,17 @@ export default function StrategyTestingPage() {
             setStrategy(JSON.stringify(strategyData))
             setParsedStatement(strategyData)
 
-          } catch (error) {
+            if (strategyData.optimisation_form) {
+              localStorage.setItem("optimisation_form", JSON.stringify(strategyData.optimisation_form))
+              const optimisationForm = strategyData.optimisation_form
+              setSelectedMaximiseOption(optimisationForm.maximise_options[0] || "")
+              setSelectedAlgorithm(optimisationForm.default_algorithm || "")
+              setPopulationSize(optimisationForm.algorithm_defaults.population_size.toString())
+              setGenerations(optimisationForm.algorithm_defaults.generations.toString())
+              setMutationRate(optimisationForm.algorithm_defaults.mutation_rate.toString())
+              setTournamentSize(optimisationForm.algorithm_defaults.tournament_size.toString())
+            }
+          } catch (error: any) {
             alert("Failed to fetch strategy details: " + error.message)
           }
         }
@@ -161,12 +210,6 @@ export default function StrategyTestingPage() {
     }
   }
 
-  const handleFileUpload = (fileName: string) => {
-    setCurrentFile(fileName)
-    setUploadedFiles([...uploadedFiles, fileName])
-    setShowSuccessModal(true)
-  }
-
   const handleTabChange = (tab: string) => {
     setActiveTab(tab)
   }
@@ -179,7 +222,7 @@ export default function StrategyTestingPage() {
     }
   }
 
-  const [requiredTimeframes, setRequiredTimeframes] = useState([])
+  const [requiredTimeframes, setRequiredTimeframes] = useState<string[]>([])
 
   useEffect(() => {
     const tf = JSON.parse(localStorage.getItem("timeframes_required") || "[]")
@@ -187,11 +230,10 @@ export default function StrategyTestingPage() {
   }, [])
 
   // Helper function to match timeframes with filenames
-  function matchesTimeframe(filename, timeframe) {
+  function matchesTimeframe(filename: string, timeframe: string) {
     // Convert filename to lowercase for case-insensitive matching
     const lowerFilename = filename.toLowerCase()
     const lowerTimeframe = timeframe.toLowerCase()
-
 
     // Direct matching (e.g., "3h" in filename)
     if (lowerFilename.includes(lowerTimeframe)) {
@@ -201,7 +243,7 @@ export default function StrategyTestingPage() {
 
     // Handle numeric equivalents
     // Map common timeframes to their minute equivalents
-    const timeframeToMinutes = {
+    const timeframeToMinutes: { [key: string]: number } = {
       "1min": 1,
       "5min": 5,
       "15min": 15,
@@ -277,8 +319,8 @@ export default function StrategyTestingPage() {
         files: timeframeFiles,
       })
 
-      if (result?.plot_html) {
-        setPlotHtml(result.plot_html)
+      if (result?.plot_trades_html) {
+        setPlotHtml(result.plot_trades_html)
       } else {
         alert("Backtest failed or no chart returned")
       }
@@ -286,6 +328,84 @@ export default function StrategyTestingPage() {
       alert("Backtest Error: " + (error.message || "Unknown error"))
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleOptimisation = async () => {
+    if (!parsedStatement) {
+      alert("Strategy statement is missing or not parsed!")
+      return
+    }
+
+    if (requiredTimeframes.length > uploadedFiles.length) {
+      alert("Not enough files uploaded for the required timeframes")
+      return
+    }
+
+    try {
+      setIsLoading2(true)
+
+      const timeframeFiles: Record<string, File> = {}
+
+      // Directly map each required timeframe to the uploaded file in order
+      requiredTimeframes.forEach((timeframe, index) => {
+        const filename = uploadedFiles[index]
+        if (filename && fileObjects[filename]) {
+          timeframeFiles[timeframe] = fileObjects[filename]
+        }
+      })
+
+      // Add unmatched remaining files to the form with filename as key (optional fallback)
+      uploadedFiles.forEach((filename) => {
+        if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
+          const key = filename.split(".")[0]
+          timeframeFiles[key] = fileObjects[filename]
+        }
+      })
+
+      // Construct Hyper-parameters from state
+      const hyperParameters = {
+        population_size: Number(populationSize),
+        generations: Number(generations),
+        mutation_rate: Number(mutationRate),
+        tournament_size: Number(tournamentSize),
+      }
+
+      // Construct Misc object
+      const misc = {
+        Algorithm: selectedAlgorithm,
+        Maximise: selectedMaximiseOption,
+        "Hyper-parameters": hyperParameters,
+      }
+
+      // Merge misc into statement for the API call
+      const optimisationStatement = {
+        ...parsedStatement,
+        optimisation_misc: misc,
+      }
+
+      const result = await runOptimisation({
+        statement: optimisationStatement,
+        files: timeframeFiles,
+      })
+
+      // Store the result and heatmap
+      setOptimisationResult(result)
+      setShowOptimisationResults(true)
+      setActiveTab("optimisation")
+      if (result?.plot_heatmap_html) {
+        setPlotHeatmapHtml(result.plot_heatmap_html)
+      } else {
+        setPlotHeatmapHtml(null)
+      }
+      // Optionally, also set plotHtml if you want to show the main plot elsewhere
+      if (result?.plot_trades_html) {
+        setPlotHtml(result.plot_trades_html)
+      }
+    } catch (error: any) {
+      alert("Optimisation Error: " + (error.message || "Unknown error"))
+    } finally {
+      setIsLoading2(false)
     }
   }
 
@@ -396,26 +516,35 @@ export default function StrategyTestingPage() {
         tradingtype.nTrade_max = Number.parseInt(maxTrades)
       }
 
-
-    
       await updateStrategyTradingType(Number.parseInt(strategy_id), tradingtype)
 
       // Show success message
-      const successMessage = document.createElement("div")
-      successMessage.className =
-        "fixed bottom-20 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-md shadow-lg z-50"
-      successMessage.textContent = "Backtest settings saved successfully"
-      document.body.appendChild(successMessage)
+      // const successMessage = document.createElement("div")
+      // successMessage.className =
+      //   "fixed bottom-20 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-md shadow-lg z-50"
+      // successMessage.textContent = "Backtest settings saved successfully"
+      // document.body.appendChild(successMessage)
 
-      setTimeout(() => {
-        document.body.removeChild(successMessage)
-      }, 3000)
+      // setTimeout(() => {
+      //   document.body.removeChild(successMessage)
+      // }, 3000)
     } catch (error) {
       console.error("Error saving backtest settings:", error)
       alert("Failed to save backtest settings")
     } finally {
       setIsSaving(false)
     }
+  }
+
+  const handleSaveAdvancedSettings = () => {
+    // Implement saving logic for advanced settings here
+    console.log("Saving advanced settings:", {
+      populationSize,
+      generations,
+      mutationRate,
+      tournamentSize,
+    })
+    setShowAdvancedSettingsModal(false)
   }
 
   return (
@@ -495,723 +624,129 @@ export default function StrategyTestingPage() {
 
           {/* Content area with overflow to allow scrolling */}
           <div className="flex-1 overflow-y-auto pb-[160px] bg-[#000000] ml-[63px]">
+            {activeTab === "strategy" && (
+              <StrategyTab
+                selectedStrategy={selectedStrategy}
+                setSelectedStrategy={setSelectedStrategy}
+                requiredTimeframes={requiredTimeframes}
+                uploadedFiles={uploadedFiles}
+                matchesTimeframe={matchesTimeframe}
+                handleFileChange={handleFileChange}
+                handleDeleteFile={handleDeleteFile}
+                fileInputRef={fileInputRef}
+                handleClick={handleClick}
+                isDragging={isDragging}
+                handleDragOver={handleDragOver}
+                handleDragLeave={handleDragLeave}
+                handleDrop={handleDrop}
+                setShowSuccessModal={setShowSuccessModal}
+                currentFile={currentFile}
+              />
+            )}
+
             {activeTab === "backtest" && (
-              <div className="p-6 ml-[63px]">
-                <div className="flex justify-between items-start mb-6">
-                  {/* Left side - Dates */}
-                  <div className="w-[30%]">
-                    <label className="block text-sm text-gray-400 mb-2">Dates</label>
-                    <div className="flex items-center">
-                      <input
-                        type="text"
-                        value={dateRange}
-                        onChange={(e) => setDateRange(e.target.value)}
-                        className="flex-1 bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
-                      />
-                      <button className="ml-2 bg-[#141721] p-3 rounded-md border border-[#2b2e38]">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <rect x="3" y="6" width="18" height="15" rx="2" stroke="white" strokeWidth="2" />
-                          <path d="M3 10H21" stroke="white" strokeWidth="2" />
-                          <path d="M8 3V7" stroke="white" strokeWidth="2" strokeLinecap="round" />
-                          <path d="M16 3V7" stroke="white" strokeWidth="2" strokeLinecap="round" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
+              <BacktestTab
+                dateRange={dateRange}
+                setDateRange={setDateRange}
+                selectedInstruments={selectedInstruments}
+                toggleInstrument={toggleInstrument}
+                instruments={instruments}
+                accountDeposit={accountDeposit}
+                handleAccountDepositChange={handleAccountDepositChange}
+                currency={currency}
+                setCurrency={setCurrency}
+                leverage={leverage}
+                leverageSliderValue={leverageSliderValue}
+                handleSliderChange={handleSliderChange}
+                getThumbPosition={getThumbPosition}
+                selectedTradingMode={selectedTradingMode}
+                setSelectedTradingMode={setSelectedTradingMode}
+                maxTrades={maxTrades}
+                setMaxTrades={setMaxTrades}
+                saveBacktestSettings={saveBacktestSettings}
+                isSaving={isSaving}
+              />
+            )}
 
-                  {/* Right side - Instruments */}
-                  <div className="w-[65%]">
-                    <label className="block text-sm text-gray-400 mb-2">Instruments</label>
-                    <div className="flex flex-wrap gap-2">
-                      {instruments.map((instrument) => (
-                        <button
-                          key={instrument}
-                          onClick={() => toggleInstrument(instrument)}
-                          className={`px-4 py-2 rounded-md ${
-                            selectedInstruments.includes(instrument)
-                              ? "bg-[#85e1fe] text-black"
-                              : "bg-[#141721] text-white border border-[#2b2e38]"
-                          }`}
-                        >
-                          {instrument}
-                        </button>
+            {activeTab === "optimisation" && showOptimisationResults && optimisationResult && (
+              <div className="p-6 bg-[#000000] text-white min-h-[600px]">
+                {/* Results Table */}
+                <div className="overflow-x-auto mb-8">
+                  <table className="min-w-full text-xs border-separate border-spacing-y-2">
+                    <thead>
+                      <tr className="bg-[#1A1D2D] text-white">
+                        <th className="px-2 py-2">Pass</th>
+                        <th className="px-2 py-2">Profit</th>
+                        <th className="px-2 py-2">Total trades</th>
+                        <th className="px-2 py-2">Profit factor</th>
+                        <th className="px-2 py-2">Expected Pay</th>
+                        <th className="px-2 py-2">Drawdown $</th>
+                        <th className="px-2 py-2">Drawdown %</th>
+                        <th className="px-2 py-2">Inputs</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {optimisationResult?.table?.map((row: any, idx: number) => (
+                        <tr key={idx} className="bg-[#141721] text-white">
+                          <td className="px-2 py-2">{row.pass || idx + 1}</td>
+                          <td className="px-2 py-2">{row.profit}</td>
+                          <td className="px-2 py-2">{row.total_trades}</td>
+                          <td className="px-2 py-2">{row.profit_factor}</td>
+                          <td className="px-2 py-2">{row.expected_pay}</td>
+                          <td className="px-2 py-2">{row.drawdown_dollar}</td>
+                          <td className="px-2 py-2">{row.drawdown_percent}</td>
+                          <td className="px-2 py-2 max-w-[200px] truncate" title={row.inputs}>{row.inputs}</td>
+                        </tr>
                       ))}
-                      <button className="px-4 py-2 rounded-md bg-[#141721] text-white border border-[#2b2e38]">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <path
-                            d="M12 5V19"
-                            stroke="white"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                          <path
-                            d="M5 12H19"
-                            stroke="white"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
+                    </tbody>
+                  </table>
                 </div>
-
-                <div className="border-t border-[#2b2e38] my-6"></div>
-
-                <div className="flex justify-between items-start mb-6">
-                  {/* Account Deposit */}
-                  <div className="w-[30%]">
-                    <label className="block text-sm text-gray-400 mb-2">Account Deposit</label>
-                    <input
-                      type="text"
-                      value={accountDeposit}
-                      onChange={handleAccountDepositChange}
-                      className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
+                {/* Scatter Plot (if available) */}
+                {optimisationResult?.plot_heatmap_html && (
+                  <div className="mb-8">
+                    <h3 className="mb-2 text-lg font-semibold text-white">Scatter Plot</h3>
+                    <iframe
+                      title="Scatter Plot"
+                      style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#f8f8f8" }}
+                      srcDoc={optimisationResult.plot_heatmap_html}
                     />
                   </div>
-
-                  {/* Currency */}
-                  <div className="w-[30%]">
-                    <label className="block text-sm text-gray-400 mb-2">Currency</label>
-                    <div className="relative">
-                      <select
-                        value={currency}
-                        onChange={(e) => setCurrency(e.target.value)}
-                        className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 pr-10 appearance-none focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
-                      >
-                        <option value="USD">USD</option>
-                        <option value="EUR">EUR</option>
-                        <option value="GBP">GBP</option>
-                        <option value="JPY">JPY</option>
-                      </select>
-                      <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
-                        <svg
-                          className="w-5 h-5 text-gray-400"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                          xmlns="http://www.w3.org/2000/svg"
-                        >
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path>
-                        </svg>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Leverage/Margin Assumptions */}
-                  <div className="w-[35%]">
-                    <label className="block text-sm text-gray-400 mb-2">Leverage/Margin Assumptions</label>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs text-white">1:1</span>
-                      <span className="text-xs text-white">1:2</span>
-                      <span className="text-xs text-white">1:5</span>
-                      <span className="text-xs text-white">1:10</span>
-                      <span className="text-xs text-white">1:20</span>
-                      <span className="text-xs text-white">1:25</span>
-                      <span className="text-xs text-white">1:30</span>
-                      <span className="text-xs text-white">1:50</span>
-                      <span className="text-xs text-white">1:75</span>
-                      <span className="text-xs text-white">1:100</span>
-                    </div>
-                    <div className="relative w-full h-1 bg-[#2b2e38] rounded-full">
-                      <input
-                        type="range"
-                        min="1"
-                        max="10"
-                        step="1"
-                        value={leverageSliderValue}
-                        onChange={handleSliderChange}
-                        className="absolute w-full h-1 opacity-0 cursor-pointer"
-                      />
-                      <div
-                        className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-[#85e1fe] rounded-full transition-all duration-200 ease-out"
-                        style={{ left: `calc(${getThumbPosition()}% - 6px)` }}
-                      ></div>
-                    </div>
-                    <div className="mt-2 text-center">
-                      <span className="text-sm text-[#85e1fe] font-medium">{leverage}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="border-t border-[#2b2e38] my-6"></div>
-
-                {/* Trading Mode Section */}
-                <div className="mb-6">
-                  <label className="block text-sm text-gray-400 mb-4">Trading Mode</label>
-                  <div className="flex flex-wrap gap-3 mb-4">
-                    {[
-                      { value: "OOTAAT", label: "OOTAAT" },
-                      { value: "CLOSE_AND_OPEN", label: "CLOSE & OPEN" },
-                      { value: "MTOOTAAT", label: "MTOOTAAT" },
-                    ].map((mode) => (
-                      <button
-                        key={mode.value}
-                        onClick={() => setSelectedTradingMode(mode.value)}
-                        className={`px-4 py-2 rounded-md transition-colors ${
-                          selectedTradingMode === mode.value
-                            ? "bg-[#85e1fe] text-black"
-                            : "bg-[#141721] text-white border border-[#2b2e38] hover:border-[#85e1fe]"
-                        }`}
-                      >
-                        {mode.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Max Trades Input for MTOOTAAT */}
-                  {selectedTradingMode === "MTOOTAAT" && (
-                    <div className="w-[30%]">
-                      <label className="block text-sm text-gray-400 mb-2">Max parallel trades</label>
-                      <input
-                        type="number"
-                        value={maxTrades}
-                        onChange={(e) => setMaxTrades(e.target.value)}
-                        placeholder="e.g., 2"
-                        min="1"
-                        className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
-                      />
-                    </div>
-                  )}
-
-                  {/* Trading Mode Descriptions */}
-                  <div className="mt-4 p-3 bg-[#141721] rounded-md border border-[#2b2e38]">
-                    <div className="text-xs text-gray-400">
-                      {selectedTradingMode === "OOTAAT" && (
-                        <p>
-                          <strong>OOTAAT:</strong> One Order Type At A Time mode - Only one position can be open at any
-                          given time.
-                        </p>
-                      )}
-                      {selectedTradingMode === "CLOSE_AND_OPEN" && (
-                        <p>
-                          <strong>CLOSE & OPEN:</strong> Allows closing existing and opening new positions
-                          simultaneously.
-                        </p>
-                      )}
-                      {selectedTradingMode === "MTOOTAAT" && (
-                        <p>
-                          <strong>MTOOTAAT:</strong> Multiple 'One Order Type At A Time' mode - System enforces the
-                          maximum number of parallel trades based on your input or margin requirements.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Save Button */}
-                <div className="w-full mt-6 flex justify-end">
-                  <button
-                    className="bg-[#85e1fe] hover:bg-[#6bcae2] text-black rounded-full px-8 py-3 text-sm font-medium flex items-center"
-                    onClick={saveBacktestSettings}
-                    disabled={isSaving}
-                  >
-                    {isSaving ? (
-                      <>
-                        <div className="w-4 h-4 mr-2 border-2 border-black border-t-transparent rounded-full animate-spin"></div>
-                        Saving...
-                      </>
-                    ) : (
-                      <>
-                        <svg
-                          className="w-4 h-4 mr-2"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          xmlns="http://www.w3.org/2000/svg"
-                        >
-                          <path
-                            d="M19 21H5C3.89543 21 3 20.1046 3 19V5C3 3.89543 3.89543 3 5 3H16L21 8V19C21 20.1046 20.1046 21 19 21Z"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                          <path
-                            d="M17 21V13H7V21"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                          <path
-                            d="M7 3V8H15"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                        Save Settings
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {/* Required Timeframes Upload Section */}
-              </div>
-            )}
-
-            {activeTab === "optimisation" && (
-              <div className="p-4 bg-[#000000]">
-                <div className="ml-[63px]">
-                  {/* Defaults Section */}
-                  <div className="mb-6">
-                    <h3 className="text-white text-base font-medium mb-4">Defaults</h3>
-
-                    <div className="flex justify-between items-center mb-4">
-                      <div className="text-white">Optimized parameter</div>
-                      <div className="relative">
-                        <select
-                          className="appearance-none bg-transparent text-white pr-8 focus:outline-none"
-                          defaultValue="Balance"
-                        >
-                          <option value="Balance">Balance</option>
-                          <option value="Profit">Profit</option>
-                          <option value="Drawdown">Drawdown</option>
-                        </select>
-                        <div className="absolute inset-y-0 right-0 flex items-center pointer-events-none">
-                          <svg
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            xmlns="http://www.w3.org/2000/svg"
-                          >
-                            <path
-                              d="M6 9l6 6 6-6"
-                              stroke="white"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex justify-between items-center mb-4">
-                      <div className="flex items-center">
-                        <input type="checkbox" id="genetic-algorithm" className="mr-2" />
-                        <label htmlFor="genetic-algorithm" className="text-white">
-                          Genetic algorithm
-                        </label>
-                      </div>
-                      <button
-                        className="bg-transparent border border-[#2b2e38] text-white rounded-full px-4 py-2 text-sm"
-                        onClick={() => setShowAdvancedSettingsModal(true)}
-                      >
-                        Advanced Settings
-                      </button>
-                    </div>
-
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center">
-                        <input type="checkbox" id="duration-limit" className="mr-2" />
-                        <label htmlFor="duration-limit" className="text-white">
-                          Duration Limit
-                        </label>
-                      </div>
-                      <div className="flex items-center">
-                        <input
-                          type="text"
-                          value="5h 30m"
-                          className="bg-transparent border border-[#2b2e38] text-white rounded-md px-3 py-2 w-24 text-center"
-                          readOnly
-                        />
-                        <button className="ml-2 bg-transparent border border-[#2b2e38] text-white rounded-md p-2">
-                          <svg
-                            width="20"
-                            height="20"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            xmlns="http://www.w3.org/2000/svg"
-                          >
-                            <rect x="3" y="6" width="18" height="15" rx="2" stroke="white" strokeWidth="2" />
-                            <path d="M3 10H21" stroke="white" strokeWidth="2" />
-                            <path d="M8 3V7" stroke="white" strokeWidth="2" strokeLinecap="round" />
-                            <path d="M16 3V7" stroke="white" strokeWidth="2" strokeLinecap="round" />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Limitations Section - Only show when not collapsed */}
-                  {!isLimitationsCollapsed && (
-                    <div className="mb-6">
-                      <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-white text-base font-medium">Limitations</h3>
-                        <h3 className="text-white text-base font-medium">Value</h3>
-                      </div>
-
-                      <div className="space-y-4">
-                        <div className="flex justify-between items-center">
-                          <div className="flex items-center">
-                            <input type="checkbox" id="balance-minimum" className="mr-2" />
-                            <label htmlFor="balance-minimum" className="text-white">
-                              Balance minimum
-                            </label>
-                          </div>
-                          <div className="text-white">200</div>
-                        </div>
-
-                        <div className="flex justify-between items-center">
-                          <div className="flex items-center">
-                            <input type="checkbox" id="profit-maximum" className="mr-2" />
-                            <label htmlFor="profit-maximum" className="text-white">
-                              Profit maximum
-                            </label>
-                          </div>
-                          <div className="text-white">10000</div>
-                        </div>
-
-                        <div className="flex justify-between items-center">
-                          <div className="flex items-center">
-                            <input type="checkbox" id="minimal-margin" className="mr-2" />
-                            <label htmlFor="minimal-margin" className="text-white">
-                              Minimal margin level %
-                            </label>
-                          </div>
-                          <div className="text-white">30</div>
-                        </div>
-
-                        <div className="flex justify-between items-center">
-                          <div className="flex items-center">
-                            <input type="checkbox" id="maximal-drawdown" className="mr-2" />
-                            <label htmlFor="maximal-drawdown" className="text-white">
-                              Maximal drawdown
-                            </label>
-                          </div>
-                          <div className="text-white">70</div>
-                        </div>
-
-                        <div className="flex justify-between items-center">
-                          <div className="flex items-center">
-                            <input type="checkbox" id="consecutive-loss" className="mr-2" />
-                            <label htmlFor="consecutive-loss" className="text-white">
-                              Consecutive loss
-                            </label>
-                          </div>
-                          <div className="text-white">500</div>
-                        </div>
-
-                        <div className="flex justify-between items-center">
-                          <div className="flex items-center">
-                            <input type="checkbox" id="consecutive-loss-trades" className="mr-2" />
-                            <label htmlFor="consecutive-loss-trades" className="text-white">
-                              Consecutive loss trades
-                            </label>
-                          </div>
-                          <div className="text-white">10</div>
-                        </div>
-
-                        <div className="flex justify-between items-center">
-                          <div className="flex items-center">
-                            <input type="checkbox" id="consecutive-win" className="mr-2" />
-                            <label htmlFor="consecutive-win" className="text-white">
-                              Consecutive win
-                            </label>
-                          </div>
-                          <div className="text-white">1000</div>
-                        </div>
-
-                        <div className="flex justify-between items-center">
-                          <div className="flex items-center">
-                            <input type="checkbox" id="consecutive-win-trades" className="mr-2" />
-                            <label htmlFor="consecutive-win-trades" className="text-white">
-                              Consecutive win trades
-                            </label>
-                          </div>
-                          <div className="text-white">30</div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex justify-between items-center mb-6">
-                    <button
-                      className="text-white hover:text-gray-300"
-                      onClick={() => setIsLimitationsCollapsed(!isLimitationsCollapsed)}
-                    >
-                      {isLimitationsCollapsed ? "Expand" : "Collapse"}
-                    </button>
-                    <div className="flex space-x-2">
-                      <button className="bg-transparent border border-[#2b2e38] text-white rounded-full px-6 py-2">
-                        Reset
-                      </button>
-                      <button className="bg-[#85e1fe] text-black rounded-full px-6 py-2">Save</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeTab !== "backtest" && activeTab !== "optimisation" && (
-              <div className="p-4">
-                {/* Strategy Selection */}
-                <div className="p-4 bg-black">
-                  <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-4">
-                    <div className="mb-2 md:mb-0">
-                      <label className="block text-sm text-gray-400 mb-2">Select Strategy</label>
-                      <div className="relative">
-                        <select
-                          value={selectedStrategy}
-                          onChange={(e) => setSelectedStrategy(e.target.value)}
-                          className="w-full md:w-64 bg-[#1E2132] border border-gray-800 rounded-md p-3 pr-10 appearance-none focus:outline-none focus:ring-1 focus:ring-[#85e1fe]"
-                        >
-                          <option value="xauscalper.py">xauscalper.py</option>
-                          <option value="strategy2.py">strategy2.py</option>
-                          <option value="strategy3.py">strategy3.py</option>
-                        </select>
-                        <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
-                          <svg
-                            className="w-5 h-5 text-gray-400"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                            xmlns="http://www.w3.org/2000/svg"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth="2"
-                              d="M19 9l-7 7-7-7"
-                            ></path>
-                          </svg>
-                        </div>
-                      </div>
-                    </div>
-                    <button className="bg-[#85e1fe] hover:bg-[#6bcae2] text-black rounded-full px-8 py-3 text-sm font-medium">
-                      Load
-                    </button>
-                  </div>
-                </div>
-
-                {/* File Upload Area */}
-                <div className="p-4 bg-black">
-                  {/* Required Timeframes Section */}
-                  {requiredTimeframes.length > 0 && (
-                    <div className="mb-4 p-3 bg-[#1E2132] rounded-md">
-                      <h3 className="text-md font-medium mb-2 flex items-center">
-                        <svg
-                          className="w-5 h-5 mr-2"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                          xmlns="http://www.w3.org/2000/svg"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                          ></path>
-                        </svg>
-                        Required Timeframes
-                      </h3>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mb-3">
-                        {requiredTimeframes.map((timeframe, index) => {
-                          // Check if this timeframe has been uploaded
-                          const isUploaded = uploadedFiles.some((file) => matchesTimeframe(file, timeframe))
-
-                          return (
-                            <div
-                              key={index}
-                              className={`p-2 rounded-md border flex items-center ${
-                                isUploaded
-                                  ? "bg-green-500/20 border-green-500/30 text-green-200"
-                                  : "bg-blue-500/20 border-blue-500/30 text-blue-200"
-                              }`}
-                            >
-                              <span className="mr-2">{index + 1}.</span>
-                              <span className="font-medium">{timeframe}</span>
-                              {isUploaded && (
-                                <svg
-                                  className="w-4 h-4 ml-auto text-green-400"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  viewBox="0 0 24 24"
-                                  xmlns="http://www.w3.org/2000/svg"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth="2"
-                                    d="M5 13l4 4L19 7"
-                                  ></path>
-                                </svg>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                      <p className="text-xs text-gray-400">
-                        Please upload data files for all required timeframes. Each filename should include the timeframe
-                        (e.g., "data_3h.csv") or its minute equivalent (e.g., "180" for 3h).
-                      </p>
-                    </div>
-                  )}
-
-                  <div
-                    className={`border-2 border-dashed ${
-                      isDragging ? "border-[#85e1fe] bg-[#85e1fe]/10" : "border-gray-700"
-                    } rounded-lg p-8 text-center cursor-pointer transition-colors`}
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                    onClick={handleClick}
-                  >
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      onChange={handleFileChange}
-                      accept=".py,.csv"
-                      className="hidden"
+                )}
+                {/* Heatmap Plot (if available) */}
+                {/* {plotHeatmapHtml && (
+                  <div className="mb-8">
+                    <h3 className="mb-2 text-lg font-semibold text-[#85e1fe]">Optimisation Heatmap</h3>
+                    <iframe
+                      title="Optimisation Heatmap"
+                      style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#f8f8f8" }}
+                      srcDoc={plotHeatmapHtml}
                     />
-                    <div className="flex flex-col items-center">
-                      <div className="w-16 h-16 bg-[#1E2132] rounded-full flex items-center justify-center mb-4">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <path
-                            d="M12 15V3M12 3L7 8M12 3L17 8"
-                            stroke="white"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                          <path
-                            d="M3 15V19C3 20.1046 3.89543 21 5 21H19C20.1046 21 21 20.1046 21 19V15"
-                            stroke="white"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      </div>
-                      <p className="text-lg font-medium mb-2">Click here to upload a file or drag and drop</p>
-                      <p className="text-sm text-gray-400 mb-2">Supported format: .py, .csv</p>
-                      {requiredTimeframes.length > 0 && (
-                        <div className="mt-2 flex flex-wrap justify-center gap-2">
-                          {requiredTimeframes.map((tf, idx) => (
-                            <span key={idx} className="text-xs bg-[#1E2132] text-[#85e1fe] px-2 py-1 rounded-full">
-                              {tf}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
                   </div>
-
-                  {/* Uploaded Files List with Timeframe Matching */}
-                  {uploadedFiles.length > 0 && (
-                    <div className="mt-4">
-                      <h3 className="text-md font-medium mb-2">Uploaded Files</h3>
-                      <div className="bg-[#1E2132] rounded-md overflow-hidden">
-                        {uploadedFiles.map((file, index) => {
-                          // Check if this file matches a required timeframe
-                          const matchingTimeframe = requiredTimeframes.find((tf) => matchesTimeframe(file, tf))
-
-                          return (
-                            <div
-                              key={index}
-                              className={`flex justify-between items-center py-3 px-4 ${
-                                index !== uploadedFiles.length - 1 ? "border-b border-gray-800" : ""
-                              }`}
-                            >
-                              <div className="flex items-center">
-                                <svg
-                                  className="w-5 h-5 mr-2 text-gray-400"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  viewBox="0 0 24 24"
-                                  xmlns="http://www.w3.org/2000/svg"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth="2"
-                                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                                  ></path>
-                                </svg>
-                                <div className="flex flex-col">
-                                  <span className="text-sm">{file}</span>
-                                  {matchingTimeframe ? (
-                                    <span className="text-xs text-green-400">
-                                      Matches required timeframe: {matchingTimeframe}
-                                    </span>
-                                  ) : (
-                                    requiredTimeframes.length > 0 && (
-                                      <span className="text-xs text-yellow-400">
-                                        Doesn't match any required timeframe
-                                      </span>
-                                    )
-                                  )}
-                                </div>
-                              </div>
-                              <button
-                                className="text-red-500 hover:text-red-400"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleDeleteFile(file)
-                                }}
-                              >
-                                <svg
-                                  className="w-5 h-5"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  viewBox="0 0 24 24"
-                                  xmlns="http://www.w3.org/2000/svg"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth="2"
-                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                                  ></path>
-                                </svg>
-                              </button>
-                            </div>
-                          )
-                        })}
-                      </div>
-
-                      {/* Upload Progress */}
-                      {requiredTimeframes.length > 0 && (
-                        <div className="mt-3">
-                          <div className="flex justify-between items-center mb-1">
-                            <span className="text-sm text-gray-400">Upload Progress</span>
-                            <span className="text-sm text-gray-400">
-                              {
-                                uploadedFiles.filter((file) =>
-                                  requiredTimeframes.some((tf) => matchesTimeframe(file, tf)),
-                                ).length
-                              }{" "}
-                              / {requiredTimeframes.length}
-                            </span>
-                          </div>
-                          <div className="w-full bg-gray-700 h-2 rounded-full overflow-hidden">
-                            <div
-                              className="bg-[#85e1fe] h-full transition-all duration-500 ease-out"
-                              style={{
-                                width: `${
-                                  requiredTimeframes.length
-                                    ? (
-                                        uploadedFiles.filter((file) =>
-                                          requiredTimeframes.some((tf) => matchesTimeframe(file, tf)),
-                                        ).length / requiredTimeframes.length
-                                      ) * 100
-                                    : 0
-                                }%`,
-                              }}
-                            ></div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                )} */}
               </div>
+            )}
+            {activeTab === "optimisation" && (!showOptimisationResults || !optimisationResult) && (
+              <OptimisationTab
+                isLimitationsCollapsed={isLimitationsCollapsed}
+                setIsLimitationsCollapsed={setIsLimitationsCollapsed}
+                setShowAdvancedSettingsModal={setShowAdvancedSettingsModal}
+                populationSize={populationSize} // Pass advanced settings props
+                setPopulationSize={setPopulationSize}
+                generations={generations}
+                setGenerations={setGenerations}
+                mutationRate={mutationRate}
+                setMutationRate={setMutationRate}
+                tournamentSize={tournamentSize}
+                setTournamentSize={setTournamentSize}
+                selectedMaximiseOption={selectedMaximiseOption} // New prop
+                setSelectedMaximiseOption={setSelectedMaximiseOption} // New prop
+                selectedAlgorithm={selectedAlgorithm} // New prop
+                setSelectedAlgorithm={setSelectedAlgorithm} // New prop
+              />
+            )}
+
+            {activeTab === "properties" && (
+              <PropertiesTab parsedStatement={parsedStatement} saveOptimisationInput={saveOptimisationInput} />
             )}
           </div>
 
@@ -1233,11 +768,30 @@ export default function StrategyTestingPage() {
               <button
                 className="flex-1 py-3 bg-[#141721] rounded-full text-white hover:bg-[#2B2E38]"
                 onClick={handleRunBacktest}
+                disabled={isLoading}
               >
-                Run Backtest
+                {isLoading ? (
+                  <>
+                    <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Running Backtest...
+                  </>
+                ) : (
+                  "Run Backtest"
+                )}
               </button>
-              <button className="flex-1 py-3 bg-[#141721] rounded-full text-white hover:bg-[#2B2E38]">
-                Run Optimisation
+              <button
+                onClick={handleOptimisation}
+                className="flex-1 py-3 bg-[#141721] rounded-full text-white hover:bg-[#2B2E38]"
+                disabled={isLoading2}
+              >
+                {isLoading2 ? (
+                  <>
+                    <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Running Optimisation...
+                  </>
+                ) : (
+                  "Run Optimisation"
+                )}
               </button>
             </div>
           </div>
@@ -1270,7 +824,7 @@ export default function StrategyTestingPage() {
                 <div className="flex items-center">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path
-                      d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z"
+                      d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z"
                       stroke="black"
                       strokeWidth="2"
                       strokeLinecap="round"
@@ -1299,6 +853,19 @@ export default function StrategyTestingPage() {
             </div>
           </div>
         )}
+        {isLoading2 && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-[#f5f5f5] rounded-lg shadow-lg w-full max-w-md p-6">
+              <div className="flex flex-col items-center py-6">
+                <div className="w-24 h-24 relative mb-6">
+                  <div className="absolute inset-0 rounded-full border-4 border-[#e6f7ff]"></div>
+                  <div className="absolute inset-0 rounded-full border-4 border-[#85e1fe] border-t-transparent animate-spin"></div>
+                </div>
+                <p className="text-xl font-medium text-black">Running Optimisation...</p>
+              </div>
+            </div>
+          </div>
+        )}
         {isChartExpanded && (
           <div className="fixed inset-0 bg-black bg-opacity-50 z-40" onClick={toggleChartExpansion} />
         )}
@@ -1306,74 +873,18 @@ export default function StrategyTestingPage() {
         {/* Advanced Settings Modal */}
         {showAdvancedSettingsModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-[#f5f5f5] rounded-lg shadow-lg w-full max-w-md p-6">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold text-black">Advanced Settings</h2>
-                <button
-                  onClick={() => setShowAdvancedSettingsModal(false)}
-                  className="text-gray-500 hover:text-gray-700"
-                >
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 mb-8">
-                <div>
-                  <label className="block text-sm text-gray-600 mb-2">Population size</label>
-                  <input
-                    type="text"
-                    value={populationSize}
-                    onChange={(e) => setPopulationSize(e.target.value)}
-                    className="w-full bg-white border border-gray-300 rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-black"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-600 mb-2">Generations</label>
-                  <input
-                    type="text"
-                    value={generations}
-                    onChange={(e) => setGenerations(e.target.value)}
-                    className="w-full bg-white border border-gray-300 rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-black"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-600 mb-2">Mutation rate</label>
-                  <input
-                    type="text"
-                    value={mutationRate}
-                    onChange={(e) => setMutationRate(e.target.value)}
-                    className="w-full bg-white border border-gray-300 rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-black"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-600 mb-2">Tournament size</label>
-                  <input
-                    type="text"
-                    value={tournamentSize}
-                    onChange={(e) => setTournamentSize(e.target.value)}
-                    className="w-full bg-white border border-gray-300 rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-black"
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end space-x-3">
-                <button
-                  onClick={() => setShowAdvancedSettingsModal(false)}
-                  className="px-6 py-3 border border-gray-300 rounded-full text-black"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    // Save the settings here
-                    setShowAdvancedSettingsModal(false)
-                  }}
-                  className="px-6 py-3 bg-[#85e1fe] rounded-full text-black"
-                >
-                  Save
-                </button>
-              </div>
-            </div>
+            <AdvancedSettingsModalContent
+              populationSize={populationSize}
+              setPopulationSize={setPopulationSize}
+              generations={generations}
+              setGenerations={setGenerations}
+              mutationRate={mutationRate}
+              setMutationRate={setMutationRate}
+              tournamentSize={tournamentSize}
+              setTournamentSize={setTournamentSize}
+              onClose={() => setShowAdvancedSettingsModal(false)}
+              onSave={handleSaveAdvancedSettings}
+            />
           </div>
         )}
       </div>

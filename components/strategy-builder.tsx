@@ -166,7 +166,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       strategy: [
         {
           statement: "if",
-          timeframe: "3h", // Initial timeframe for new statements
+          // Remove default timeframe - let user add it explicitly
         },
       ],
       Equity: [],
@@ -245,6 +245,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     componentType: "inp1" | "inp2" | "operator" | "then" | "accumulate"
   } | null>(null)
 
+  // Add a new state variable to track the currently selected search result index
+  const [selectedSearchIndex, setSelectedSearchIndex] = useState<number>(-1)
+
   // Load strategy data if strategyId is provided
   useEffect(() => {
     if (strategyData && strategyId) {
@@ -317,10 +320,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     }
   }, [strategyData, strategyId])
 
-  // Add this function to handle search input
+  // Modify the handleSearchInput function to reset the selected index when search results change
   const handleSearchInput = (statementIndex: number, value: string) => {
     setSearchTerm(value)
     setActiveStatementIndex(statementIndex)
+    // Reset selected index when search term changes
+    setSelectedSearchIndex(-1)
 
     if (value.trim() === "") {
       setSearchResults([])
@@ -435,8 +440,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     setSearchResults(sortedResults)
   }
 
-  // Add function to handle backspace removal
+  // Modify the handleKeyDown function to handle arrow keys and Enter key
   const handleKeyDown = (statementIndex: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Handle backspace for component removal (existing functionality)
     if (e.key === "Backspace" && searchTerm === "") {
       e.preventDefault()
 
@@ -490,6 +496,27 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           removeComponent(statementIndex, i, "statement")
           return
         }
+      }
+    }
+
+    // Handle arrow keys for search result navigation
+    else if (searchResults.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault()
+        // Move selection down, wrapping around to the top if at the bottom
+        setSelectedSearchIndex((prev) => (prev < searchResults.length - 1 ? prev + 1 : 0))
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault()
+        // Move selection up, wrapping around to the bottom if at the top
+        setSelectedSearchIndex((prev) => (prev > 0 ? prev - 1 : searchResults.length - 1))
+      } else if (e.key === "Enter" && selectedSearchIndex >= 0) {
+        e.preventDefault()
+        // Select the currently highlighted search result
+        handleAddComponent(statementIndex, searchResults[selectedSearchIndex])
+        // Reset search and selection
+        setSearchTerm("")
+        setSearchResults([])
+        setSelectedSearchIndex(-1)
       }
     }
   }
@@ -583,7 +610,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       strategy: [
         {
           statement: "if",
-          timeframe: "3h", // Initial timeframe for new statements
+          // Remove default timeframe - let user add it explicitly
         },
       ],
       Equity: [],
@@ -890,7 +917,14 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           delete condition.inp1
           break
         case "timeframe":
+          // Remove timeframe from both condition level and inp1 level
           delete condition.timeframe
+          if (condition.inp1 && typeof condition.inp1 === "object" && "timeframe" in condition.inp1) {
+            delete condition.inp1.timeframe
+          }
+          if (condition.inp2 && typeof condition.inp2 === "object" && "timeframe" in condition.inp2) {
+            delete condition.inp2.timeframe
+          }
           break
         case "statement":
           strategy.splice(conditionIndex, 1)
@@ -975,25 +1009,17 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     } else if (component.toLowerCase() === "timeframe") {
       // Add a new timeframe component to the statement
       if (currentStatement.strategy.length === 0) {
-        // If there are no conditions yet, create an "if" with a timeframe
+        // If there are no conditions yet, create an "if" condition first
         currentStatement.strategy.push({
           statement: "if",
-          timeframe: selectedTimeframe,
         })
-      } else {
-        // Add a new timeframe to an existing condition or as a new condition
-        const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+      }
 
-        // If the last condition already has an indicator, add a new "and" condition with timeframe
-        if (lastCondition.inp1) {
-          currentStatement.strategy.push({
-            statement: "and",
-            timeframe: selectedTimeframe,
-          })
-        } else {
-          // Otherwise, add timeframe to the last condition
-          lastCondition.timeframe = selectedTimeframe
-        }
+      const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+      // Always add timeframe to the last condition, don't create new conditions for timeframes
+      if (!lastCondition.timeframe && (!lastCondition.inp1 || !lastCondition.inp1.timeframe)) {
+        lastCondition.timeframe = selectedTimeframe
       }
     } else if (
       basicComponents.some((c) => c.label.toLowerCase() === component.toLowerCase()) ||
@@ -1006,13 +1032,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       if (currentStatement.strategy.length === 0 && statementType === "if") {
         currentStatement.strategy.push({
           statement: "if",
-          timeframe: selectedTimeframe, // Add default timeframe
         })
       } else if ((statementType === "and" || statementType === "or") && currentStatement.strategy.length > 0) {
         // Add "and" or "or" statement
         currentStatement.strategy.push({
           statement: statementType,
-          timeframe: selectedTimeframe, // Add default timeframe
         })
       } else if (component.toLowerCase() === "at candle" || component.toLowerCase() === "at-candle") {
         // If we have an active condition, set it as the target
@@ -1044,7 +1068,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           // No conditions yet, create a new "if" condition and target inp1
           currentStatement.strategy.push({
             statement: "if",
-            timeframe: selectedTimeframe,
           })
           setActiveConditionIndex(0)
           setTargetInput("inp1")
@@ -1074,7 +1097,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               timeframe: timeframe,
               input_params: {
                 timeperiod: 14,
-                source: "close", // Add default source
+                source: "close", 
+                ma_type: "SMA",
+                ma_length: 14,
+                bb_stddev: 2.0,// Add default source
               },
             }
           } else if (component.toLowerCase() === "volume") {
@@ -1087,7 +1113,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             lastCondition.inp2 = {
               type: "CUSTOM_I",
               name: "RSI_MA",
-              timeframe: "36min",
+              timeframe: timeframe,
               input_params: {
                 rsi_length: 14,
                 rsi_source: "Close",
@@ -1170,7 +1196,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               timeframe: timeframe,
               input_params: {
                 timeperiod: 14, // Numeric value, not string
-                source: "close", // Add default source
+                source: "close", 
+                ma_type: "SMA",
+                ma_length: 14,
+                bb_stddev: 2.0,// Add default source
               },
             }
           } else if (component.toLowerCase() === "volume") {
@@ -1184,7 +1213,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             lastCondition.inp1 = {
               type: "CUSTOM_I",
               name: "RSI_MA",
-              timeframe: "36min",
+              timeframe: timeframe,
               input_params: {
                 rsi_length: 14,
                 rsi_source: "Close",
@@ -1269,6 +1298,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             if (Object.keys(lastCondition.pendingAtCandle).length === 0) {
               delete lastCondition.pendingAtCandle
             }
+          }
+
+          // Move timeframe to inp1 and preserve it in the condition for display
+          if (lastCondition.timeframe && lastCondition.inp1 && "timeframe" in lastCondition.inp1) {
+            lastCondition.inp1.timeframe = lastCondition.timeframe
+            // Keep timeframe in condition for display purposes, don't delete it
           }
 
           // Remove the timeframe from the condition since it's now in inp1
@@ -1460,6 +1495,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               rsi_length: inp1.input_params?.timeperiod || 14,
               source: inp1.input_params?.source || "close", // Add source to tooltip
               ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
+              ma_type: inp1.input_params?.ma_type || "SMA",
+              ma_length: inp1.input_params?.ma_length || 14,
+              bb_stddev: inp1.input_params?.bb_stddev || 2.0,
             },
           }
         } else if (inp1.name === "RSI_MA") {
@@ -1509,12 +1547,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             },
           }
         }
-      } else if ("input" in inp1 && inp1.Derivative ) {
+      } else if ("input" in inp1 && inp1.Derivative) {
         if (["open", "close", "high", "low"].includes(inp1.input?.toLowerCase() || "")) {
           return {
             title: "Price",
             details: {
-              
               ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
             },
           }
@@ -1547,6 +1584,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             rsi_length: inp2.input_params?.timeperiod || 14,
             source: inp2.input_params?.source || "close", // Add source to tooltip
             ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
+            ma_type: inp2.input_params?.ma_type || "SMA",
+            ma_length: inp2.input_params?.ma_length || 14,
+            bb_stddev: inp2.input_params?.bb_stddev || 2.0,
           },
         }
       } else if ("name" in inp2 && inp2.name === "RSI_MA") {
@@ -1650,6 +1690,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
       // If we have an active condition, update its timeframe
       if (activeConditionIndex !== null) {
+        // Prevent timeframe changes for inp2
+        if (activeInputType === "inp2") {
+          setShowTimeframeDropdown(false)
+          return;
+        }
+      
         const newStatements = [...statements]
         const currentStatement = newStatements[activeStatementIndex]
         const condition = currentStatement.strategy[activeConditionIndex]
@@ -1658,13 +1704,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           // Update the correct timeframe based on input type
           if (activeInputType === "inp1" && condition.inp1 && "timeframe" in condition.inp1) {
             condition.inp1.timeframe = timeframe
-          } else if (
-            activeInputType === "inp2" &&
-            condition.inp2 &&
-            typeof condition.inp2 === "object" &&
-            "timeframe" in condition.inp2
-          ) {
-            condition.inp2.timeframe = timeframe
           } else if (activeInputType === "condition") {
             // For condition-level timeframes
             if (condition.inp1 && "timeframe" in condition.inp1) {
@@ -1688,11 +1727,16 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     conditionIndex: number,
     inputType: "inp1" | "inp2" | "condition" = "condition",
   ) => {
-    setActiveStatementIndex(statementIndex)
-    setActiveConditionIndex(conditionIndex)
-    setActiveInputType(inputType)
-    setShowTimeframeDropdown(true)
+  // Prevent opening timeframe dropdown for inp2
+  if (inputType === "inp2") {
+    return;
   }
+  
+  setActiveStatementIndex(statementIndex)
+  setActiveConditionIndex(conditionIndex)
+  setActiveInputType(inputType)
+  setShowTimeframeDropdown(true)
+}
 
   // Add a new function to open the AtCandleModal for editing
   const openAtCandleModal = (statementIndex: number, conditionIndex: number, targetInput?: "inp1" | "inp2") => {
@@ -1825,6 +1869,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       }
 
       // Store timeframes_required if it exists in the response
+      if (result && result.optimisation_form) {
+        localStorage.setItem("optimisation_form", JSON.stringify(result.optimisation_form))
+      }
       if (result && result.timeframes_required) {
         localStorage.setItem("timeframes_required", JSON.stringify(result.timeframes_required))
       }
@@ -1957,7 +2004,22 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               <ChevronDown className="ml-1 w-4 h-4" />
             </button>
             <button
-              onClick={() => removeComponent(activeStatementIndex, index, "timeframe")}
+              onClick={(e) => {
+                e.stopPropagation()
+                // Remove timeframe from both condition and inp1 if it exists
+                const newStatements = [...statements]
+                const currentStatement = newStatements[activeStatementIndex]
+                const condition = currentStatement.strategy[index]
+
+                if (condition.timeframe) {
+                  delete condition.timeframe
+                }
+                if (condition.inp1 && condition.inp1.timeframe) {
+                  delete condition.inp1.timeframe
+                }
+
+                setStatements(newStatements)
+              }}
               className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
             >
               <X className="w-3 h-3" />
@@ -2105,27 +2167,25 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         )
       }
 
-      // Show timeframe for inp2 if it exists
-      if (
-        condition.inp2 &&
-        typeof condition.inp2 === "object" &&
-        "timeframe" in condition.inp2 &&
-        condition.inp2.timeframe
-      ) {
-        components.push(
-          <div key={`inp2-timeframe-${index}`} className="mr-2 mb-2 relative group">
-            <div className="text-xs text-gray-400 mb-1">Timeframe (inp2)</div>
-            <button
-              onClick={() => openTimeframeDropdown(activeStatementIndex, index, "inp2")}
-              className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[160px] border border-[#2A2D42] transition-all duration-200 hover:border-[#4A4D62]"
-              data-inp2-timeframe-index={index}
-            >
-              <span className="text-gray-400">{condition.inp2.timeframe}</span>
-              <ChevronDown className="ml-1 w-4 h-4" />
-            </button>
-          </div>,
-        )
-      }
+// Show timeframe for inp2 if it exists
+if (
+  condition.inp2 &&
+  typeof condition.inp2 === "object" &&
+  "timeframe" in condition.inp2 &&
+  condition.inp2.timeframe
+) {
+  components.push(
+    <div key={`inp2-timeframe-${index}`} className="mr-2 mb-2 relative group">
+      <div className="text-xs text-gray-400 mb-1">Timeframe </div>
+      <div
+        className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[160px] border border-[#2A2D42] opacity-60 cursor-not-allowed"
+        data-inp2-timeframe-index={index}
+      >
+        <span className="text-gray-400">{condition.inp2.timeframe}</span>
+      </div>
+    </div>,
+  )
+}
 
       // Show inp2 value for all behaviors
       if (condition.inp2) {
@@ -2460,6 +2520,20 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   // Add a new state variable to track wait status for each statement after the existing state declarations:
   const [waitStatus, setWaitStatus] = useState<Record<number, boolean>>({})
 
+  // Add state to store the latest RSI MA settings
+  const [rsiMaSettings, setRsiMaSettings] = useState({
+    rsi_length: 14,
+    rsi_source: "Close",
+    ma_type: "SMA",
+    ma_length: 14,
+    bb_stddev: 2.0,
+  })
+
+  // Add state for indicator modal at the parent level
+  const [showIndicatorModal, setShowIndicatorModal] = useState(false)
+  const [pendingOtherIndicator, setPendingOtherIndicator] = useState<string | null>(null)
+  const [pendingTimeframe, setPendingTimeframe] = useState<string>("3h")
+
   return (
     <div className="flex-1 flex flex-col">
       {/* Main content area with scrolling */}
@@ -2556,7 +2630,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                         {searchResults.map((result, idx) => (
                           <button
                             key={idx}
-                            className="w-full text-left px-4 py-2 hover:bg-[#3A3D47] text-white"
+                            className={`w-full text-left px-4 py-2 ${
+                              idx === selectedSearchIndex ? "bg-[#4A4D62] text-white" : "hover:bg-[#3A3D47] text-white"
+                            }`}
                             onClick={() => {
                               handleAddComponent(index, result)
                             }}
@@ -2714,7 +2790,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                     timeframe: settings.timeframe || "3h",
                     input_params: {
                       timeperiod: settings.rsiLength || 14,
-                      source: settings.rsiSource?.toLowerCase() || "close", // Add source parameter
+                      source: settings.rsiSource?.toLowerCase() || "close", 
+                      ma_type: settings.maType || "SMA",
+                      ma_length: settings.maLength || 14,
+                      bb_stddev: settings.bbStdDev || 2.0,// Add source parameter
                     },
                   }
                 } else if (settings.indicator === "rsi-ma") {
@@ -2844,6 +2923,22 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               searchInputRefs.current[activeStatementIndex]?.focus()
             }, 100)
           }}
+          onNext={(indicator, timeframe) => {
+            setShowCrossingUpModal(false)
+            setPendingOtherIndicator(indicator)
+            setPendingTimeframe(timeframe)
+            if (indicator === "rsi") {
+              setShowIndicatorModal(true)
+            } else if (indicator === "rsi-ma") {
+              setShowIndicatorModal(true)
+            } else if (indicator === "bollinger") {
+              setShowBollingerModal(true)
+            } else if (indicator === "stochastic") {
+              setShowStochasticModal(true)
+            } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
+              setShowPriceSettingsModal(true)
+            }
+          }}
         />
       )}
       {showCrossingDownModal && (
@@ -2963,7 +3058,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                       // Add appropriate std dev parameter based on band type
                       ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
                       ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
-                      ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
+                      ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: settings.bbStdDev || 2.0 } : {}),
                     },
                   }
                 } else if (settings.indicator === "rsi") {
@@ -3242,6 +3337,14 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         <RsiSettingsModal
           onClose={() => setShowRsiModal(false)}
           onSave={(settings) => {
+            // Always update the rsiMaSettings state with the latest MA settings
+            setRsiMaSettings({
+              rsi_length: Number(settings.rsiLength),
+              rsi_source: settings.source || "Close",
+              ma_type: settings.maType || "SMA",
+              ma_length: Number(settings.maLength),
+              bb_stddev: Number(settings.bbStdDev) || 2.0,
+            })
             // Update RSI settings
             const newStatements = [...statements]
             const currentStatement = newStatements[activeStatementIndex]
@@ -3256,7 +3359,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                   const updatedIndicator = {
                     type: "CUSTOM_I",
                     name: "RSI_MA",
-                    timeframe: "36min",
+                    timeframe: settings.timeframe || "3h",
                     input_params: {
                       rsi_length: Number(settings.rsiLength),
                       rsi_source: settings.source || "Close",
@@ -3280,6 +3383,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                     input_params: {
                       timeperiod: Number(settings.rsiLength),
                       source: settings.source?.toLowerCase() || "close",
+                      ma_type: settings.maType || "SMA",
+                      ma_length: Number(settings.maLength),
+                      bb_stddev: Number(settings.bbStdDev) || 2.0,
                     },
                   }
 
@@ -3300,7 +3406,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                   lastCondition.inp1 = {
                     type: "CUSTOM_I",
                     name: "RSI_MA",
-                    timeframe: "36min",
+                    timeframe: settings.timeframe || "3h",
                     input_params: {
                       rsi_length: Number(settings.rsiLength),
                       rsi_source: settings.source || "Close",
@@ -3763,7 +3869,22 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       )}
       {/* Price Settings Modal */}
       {showPriceSettingsModal && (
-        <PriceSettingsModal onClose={() => setShowPriceSettingsModal(false)} onSave={handlePriceSelection} />
+        <PriceSettingsModal
+          onClose={() => setShowPriceSettingsModal(false)}
+          onSave={(priceType: string) => {
+            setShowPriceSettingsModal(false)
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+            // Use the actual priceType selected, unless it's 'price', then use 'close'
+            lastCondition.inp2 = {
+              type: "C",
+              input: priceType === "price" ? "close" : priceType,
+              timeframe: pendingTimeframe,
+            }
+            setStatements(newStatements)
+          }}
+        />
       )}
       {/* At Candle Modal */}
       {showAtCandleModal && (
@@ -3876,6 +3997,111 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           }}
           customTimeframes={customTimeframes}
           onSaveCustomTimeframe={handleSaveCustomTimeframe}
+        />
+      )}
+      {showIndicatorModal && pendingOtherIndicator === "rsi" && (
+        <RsiSettingsModal
+          onClose={() => setShowIndicatorModal(false)}
+          onSave={(settings: any) => {
+            setShowIndicatorModal(false)
+            // Save the indicator settings to inp2 as needed
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+            lastCondition.inp2 = {
+              type: "I",
+              name: "RSI",
+              timeframe: pendingTimeframe,
+              input_params: {
+                timeperiod: Number(settings.rsiLength),
+                source: settings.source?.toLowerCase() || "close",
+                ma_type: settings.maType || "SMA",
+                ma_length: Number(settings.maLength) || 14,
+                bb_stddev: Number(settings.bbStdDev) || 2.0,
+              },
+            }
+            setStatements(newStatements)
+          }}
+        />
+      )}
+      {showIndicatorModal && pendingOtherIndicator === "rsi-ma" && (
+        <RsiSettingsModal
+          onClose={() => setShowIndicatorModal(false)}
+          onSave={(settings: any) => {
+            setShowIndicatorModal(false)
+            // Save the indicator settings to inp2 as needed
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+            lastCondition.inp2 = {
+              type: "CUSTOM_I",
+              name: "RSI_MA",
+              timeframe: pendingTimeframe,
+              input_params: {
+                rsi_length: Number(settings.rsiLength),
+                rsi_source: settings.source || "Close",
+                ma_type: settings.maType || "SMA",
+                ma_length: Number(settings.maLength) || 14,
+                bb_stddev: Number(settings.bbStdDev) || 2.0,
+              },
+            }
+            setStatements(newStatements)
+          }}
+        />
+      )}
+      {showBollingerModal && (
+        <BollingerBandsSettingsModal
+          onClose={() => setShowBollingerModal(false)}
+          onSave={(settings: any) => {
+            setShowBollingerModal(false)
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+            lastCondition.inp2 = {
+              type: "I",
+              name: "BBANDS",
+              timeframe: pendingTimeframe,
+              input: settings.input || "upperband",
+              input_params: settings.input_params,
+            }
+            setStatements(newStatements)
+          }}
+        />
+      )}
+      {showStochasticModal && (
+        <StochasticSettingsModal
+          onClose={() => setShowStochasticModal(false)}
+          onSave={(settings: any) => {
+            setShowStochasticModal(false)
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+            lastCondition.inp2 = {
+              type: "I",
+              name: "Stochastic",
+              timeframe: pendingTimeframe,
+              input_params: settings,
+            }
+            setStatements(newStatements)
+          }}
+        />
+      )}
+      {showPriceSettingsModal && (
+        <PriceSettingsModal
+          onClose={() => setShowPriceSettingsModal(false)}
+          onSave={(priceType: string) => {
+            setShowPriceSettingsModal(false)
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+            // If the pendingOtherIndicator is 'price', always use 'close' as the input
+            lastCondition.inp2 = {
+              type: "C",
+              input: priceType === "price" ? "close" : priceType,
+              timeframe: pendingTimeframe,
+            }
+            setStatements(newStatements)
+          }}
         />
       )}
     </div>
