@@ -42,7 +42,7 @@ interface IndicatorParams {
   [key: string]: any
 }
 
-// Update the IndicatorInput interface to match the required JSON structure
+// Update the IndicatorInput interface to include all necessary properties
 interface IndicatorInput {
   type: string
   input?: string
@@ -56,7 +56,7 @@ interface IndicatorInput {
   }
 }
 
-// Update the StrategyCondition interface to support inp2 and more complex structures
+// Update the StrategyCondition interface to fix type issues
 interface StrategyCondition {
   statement: string
   inp1?: IndicatorInput | { name: string }
@@ -64,9 +64,16 @@ interface StrategyCondition {
   inp2?:
     | {
         type: string
-        value: number
+        value?: number
         wait?: string
         index?: number
+        timeframe?: string
+        input?: string
+        name?: string
+        input_params?: any
+        Derivative?: {
+          order: number
+        }
       }
     | { name: string }
   timeframe?: string // Added timeframe property to StrategyCondition
@@ -86,6 +93,7 @@ interface StrategyCondition {
   }
 }
 
+// Update the EquityRule interface to fix partial_tp_list type
 interface EquityRule {
   statement: string
   operator?: string
@@ -97,7 +105,7 @@ interface EquityRule {
       [key: string]: any
     }
     partial_tp_list?: Array<{
-      Price: string
+      Price?: string
       Close: string
       name?: string
       operator?: string
@@ -117,6 +125,7 @@ interface EquityRule {
   }
 }
 
+// Update the StrategyStatement interface to include TradingType
 interface StrategyStatement {
   side: string
   saveresult: string
@@ -277,7 +286,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             let hasWait = false
 
             // Check each condition in the strategy for wait parameters
-            statement.strategy.forEach((condition) => {
+            statement.strategy.forEach((condition: StrategyCondition) => {
               // Check inp1 for wait parameter
               if (
                 condition.inp1 &&
@@ -695,7 +704,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         } else if (condition.inp2 && "input" in condition.inp2) {
           if (condition.inp2.input === "volume") {
             setShowVolumeModal(true)
-          } else if (["open", "close", "high", "low"].includes(condition.inp2.input?.toLowerCase() || "")) {
+          } else if (typeof condition.inp2.input === "string" && ["open", "close", "high", "low"].includes(condition.inp2.input.toLowerCase())) {
             setShowPriceSettingsModal(true)
           }
         }
@@ -1110,12 +1119,17 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               timeframe: timeframe,
             }
           } else if (component.toLowerCase() === "rsi_ma" || component.toLowerCase() === "rsi-ma") {
+            // Special handling for RSI_MA
+            let rsiLength = 14;
+            if (lastCondition.inp1 && lastCondition.inp1.name === "RSI" && lastCondition.inp1.input_params?.timeperiod) {
+              rsiLength = lastCondition.inp1.input_params.timeperiod;
+            }
             lastCondition.inp2 = {
               type: "CUSTOM_I",
               name: "RSI_MA",
               timeframe: timeframe,
               input_params: {
-                rsi_length: 14,
+                rsi_length: rsiLength,
                 rsi_source: "Close",
                 ma_type: "SMA",
                 ma_length: 14,
@@ -1210,12 +1224,16 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             }
           } else if (component.toLowerCase() === "rsi_ma" || component.toLowerCase() === "rsi-ma") {
             // Special handling for RSI_MA
+            let rsiLength = 14;
+            if (lastCondition.inp1 && lastCondition.inp1.name === "RSI" && lastCondition.inp1.input_params?.timeperiod) {
+              rsiLength = lastCondition.inp1.input_params.timeperiod;
+            }
             lastCondition.inp1 = {
               type: "CUSTOM_I",
               name: "RSI_MA",
               timeframe: timeframe,
               input_params: {
-                rsi_length: 14,
+                rsi_length: rsiLength,
                 rsi_source: "Close",
                 ma_type: "SMA",
                 ma_length: 14,
@@ -2569,8 +2587,12 @@ if (
               data-active-index={index}
             >
               <div className="flex justify-between items-center mb-4">
-                <div className="flex items-center">
+                <div className="flex items-center gap-4">
                   <h2 className="text-xl font-medium">{statement.saveresult}</h2>
+                  {/* Display current side (Buy/Sell) */}
+                  <span className={`px-3 py-1 rounded-full text-xs font-bold ${statement.side === "B" ? "bg-gray-500 text-white" : "bg-gray-500 text-white"}`}>
+                    {statement.side === "B" ? "Buy" : "Sell"}
+                  </span>
                 </div>
                 <div className="relative flex items-center gap-4">
                   {/* Wait for closes only indicator - only show when wait is active */}
@@ -2972,7 +2994,10 @@ if (
                     timeframe: settings.timeframe || "3h",
                     input_params: {
                       timeperiod: settings.rsiLength || 14,
-                      source: settings.rsiSource?.toLowerCase() || "close", // Add source parameter
+                      source: settings.rsiSource?.toLowerCase() || "close", 
+                      ma_type: settings.maType || "SMA",
+                      ma_length: settings.maLength || 14,
+                      bb_stddev: settings.bbStdDev || 2.0,// Add source parameter
                     },
                   }
                 } else if (settings.indicator === "rsi-ma") {
@@ -3058,7 +3083,7 @@ if (
                       // Add appropriate std dev parameter based on band type
                       ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
                       ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
-                      ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: settings.bbStdDev || 2.0 } : {}),
+                      ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
                     },
                   }
                 } else if (settings.indicator === "rsi") {
@@ -3336,6 +3361,70 @@ if (
       {showRsiModal && (
         <RsiSettingsModal
           onClose={() => setShowRsiModal(false)}
+          initialSettings={(() => {
+            if (editingComponent) {
+              const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+              const indicator = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
+
+              console.log("Editing RSI component:", editingComponent, "indicator:", indicator)
+
+              if (indicator && "name" in indicator) {
+                if (indicator.name === "RSI" && "input_params" in indicator) {
+                  return {
+                    indicatorType: "rsi",
+                    rsiLength: String(indicator.input_params?.timeperiod || 14),
+                    source: indicator.input_params?.source ? indicator.input_params.source.charAt(0).toUpperCase() + indicator.input_params.source.slice(1) : "Close",
+                    maLength: String(indicator.input_params?.ma_length || 14),
+                    maType: indicator.input_params?.ma_type || "SMA",
+                    bbStdDev: String(indicator.input_params?.bb_stddev || 2.0),
+                    timeframe: indicator.timeframe || "3h",
+                  }
+                } else if (indicator.name === "RSI_MA" && "input_params" in indicator) {
+                  const settings = {
+                    indicatorType: "rsi-ma",
+                    rsiLength: String(indicator.input_params?.rsi_length || 14),
+                    source: indicator.input_params?.rsi_source || "Close",
+                    maLength: String(indicator.input_params?.ma_length || 14),
+                    maType: indicator.input_params?.ma_type || "SMA",
+                    bbStdDev: String(indicator.input_params?.bb_stddev || 2.0),
+                    timeframe: indicator.timeframe || "3h",
+                  }
+                  console.log("RSI_MA initialSettings:", settings)
+                  return settings
+                }
+              }
+            } else {
+              // Fallback to original behavior
+              const currentStatement = statements[activeStatementIndex]
+              const lastCondition = currentStatement?.strategy[currentStatement.strategy.length - 1]
+              const indicator = lastCondition?.inp1
+
+              if (indicator && "name" in indicator) {
+                if (indicator.name === "RSI" && "input_params" in indicator) {
+                  return {
+                    indicatorType: "rsi",
+                    rsiLength: String(indicator.input_params?.timeperiod || 14),
+                    source: indicator.input_params?.source ? indicator.input_params.source.charAt(0).toUpperCase() + indicator.input_params.source.slice(1) : "Close",
+                    maLength: String(indicator.input_params?.ma_length || 14),
+                    maType: indicator.input_params?.ma_type || "SMA",
+                    bbStdDev: String(indicator.input_params?.bb_stddev || 2.0),
+                    timeframe: indicator.timeframe || "3h",
+                  }
+                } else if (indicator.name === "RSI_MA" && "input_params" in indicator) {
+                  return {
+                    indicatorType: "rsi-ma",
+                    rsiLength: String(indicator.input_params?.rsi_length || 14),
+                    source: indicator.input_params?.rsi_source || "Close",
+                    maLength: String(indicator.input_params?.ma_length || 14),
+                    maType: indicator.input_params?.ma_type || "SMA",
+                    bbStdDev: String(indicator.input_params?.bb_stddev || 2.0),
+                    timeframe: indicator.timeframe || "3h",
+                  }
+                }
+              }
+            }
+            return undefined
+          })()}
           onSave={(settings) => {
             // Always update the rsiMaSettings state with the latest MA settings
             setRsiMaSettings({
@@ -3424,6 +3513,9 @@ if (
                     input_params: {
                       timeperiod: Number(settings.rsiLength),
                       source: settings.source?.toLowerCase() || "close",
+                      ma_type: settings.maType || "SMA",
+                      ma_length: Number(settings.maLength),
+                      bb_stddev: Number(settings.bbStdDev) || 2.0,
                     },
                   }
                 }
@@ -4002,23 +4094,48 @@ if (
       {showIndicatorModal && pendingOtherIndicator === "rsi" && (
         <RsiSettingsModal
           onClose={() => setShowIndicatorModal(false)}
+          initialSettings={{
+            indicatorType: "rsi",
+            rsiLength: "14",
+            source: "Close",
+            maLength: "14",
+            maType: "SMA",
+            bbStdDev: "2.0",
+            timeframe: pendingTimeframe,
+          }}
           onSave={(settings: any) => {
             setShowIndicatorModal(false)
             // Save the indicator settings to inp2 as needed
             const newStatements = [...statements]
             const currentStatement = newStatements[activeStatementIndex]
             const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-            lastCondition.inp2 = {
-              type: "I",
-              name: "RSI",
-              timeframe: pendingTimeframe,
-              input_params: {
-                timeperiod: Number(settings.rsiLength),
-                source: settings.source?.toLowerCase() || "close",
-                ma_type: settings.maType || "SMA",
-                ma_length: Number(settings.maLength) || 14,
-                bb_stddev: Number(settings.bbStdDev) || 2.0,
-              },
+            
+            if (settings.indicatorType === "rsi-ma") {
+              lastCondition.inp2 = {
+                type: "CUSTOM_I",
+                name: "RSI_MA",
+                timeframe: pendingTimeframe,
+                input_params: {
+                  rsi_length: Number(settings.rsiLength),
+                  rsi_source: settings.source || "Close",
+                  ma_type: settings.maType || "SMA",
+                  ma_length: Number(settings.maLength) || 14,
+                  bb_stddev: Number(settings.bbStdDev) || 2.0,
+                },
+              }
+            } else {
+              lastCondition.inp2 = {
+                type: "I",
+                name: "RSI",
+                timeframe: pendingTimeframe,
+                input_params: {
+                  timeperiod: Number(settings.rsiLength),
+                  source: settings.source?.toLowerCase() || "close",
+                  ma_type: settings.maType || "SMA",
+                  ma_length: Number(settings.maLength) || 14,
+                  bb_stddev: Number(settings.bbStdDev) || 2.0,
+                },
+              }
             }
             setStatements(newStatements)
           }}
@@ -4027,23 +4144,48 @@ if (
       {showIndicatorModal && pendingOtherIndicator === "rsi-ma" && (
         <RsiSettingsModal
           onClose={() => setShowIndicatorModal(false)}
+          initialSettings={{
+            indicatorType: "rsi-ma",
+            rsiLength: "14",
+            source: "Close",
+            maLength: "14",
+            maType: "SMA",
+            bbStdDev: "2.0",
+            timeframe: pendingTimeframe,
+          }}
           onSave={(settings: any) => {
             setShowIndicatorModal(false)
             // Save the indicator settings to inp2 as needed
             const newStatements = [...statements]
             const currentStatement = newStatements[activeStatementIndex]
             const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-            lastCondition.inp2 = {
-              type: "CUSTOM_I",
-              name: "RSI_MA",
-              timeframe: pendingTimeframe,
-              input_params: {
-                rsi_length: Number(settings.rsiLength),
-                rsi_source: settings.source || "Close",
-                ma_type: settings.maType || "SMA",
-                ma_length: Number(settings.maLength) || 14,
-                bb_stddev: Number(settings.bbStdDev) || 2.0,
-              },
+            
+            if (settings.indicatorType === "rsi-ma") {
+              lastCondition.inp2 = {
+                type: "CUSTOM_I",
+                name: "RSI_MA",
+                timeframe: pendingTimeframe,
+                input_params: {
+                  rsi_length: Number(settings.rsiLength),
+                  rsi_source: settings.source || "Close",
+                  ma_type: settings.maType || "SMA",
+                  ma_length: Number(settings.maLength) || 14,
+                  bb_stddev: Number(settings.bbStdDev) || 2.0,
+                },
+              }
+            } else {
+              lastCondition.inp2 = {
+                type: "I",
+                name: "RSI",
+                timeframe: pendingTimeframe,
+                input_params: {
+                  timeperiod: Number(settings.rsiLength),
+                  source: settings.source?.toLowerCase() || "close",
+                  ma_type: settings.maType || "SMA",
+                  ma_length: Number(settings.maLength) || 14,
+                  bb_stddev: Number(settings.bbStdDev) || 2.0,
+                },
+              }
             }
             setStatements(newStatements)
           }}
