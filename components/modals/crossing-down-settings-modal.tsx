@@ -115,6 +115,10 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave }: Cros
     if (currentInp1) {
       if (currentInp1.name === "RSI") {
         setRsiLength(currentInp1.input_params?.timeperiod || 14)
+        setRsiMaLength(currentInp1.input_params?.timeperiod || 14) // Always sync RSI_MA length to RSI timeperiod
+        setRsiSource(currentInp1.input_params?.rsi_source || "Close")
+        setMaType(currentInp1.input_params?.ma_type || "SMA")
+        setBbStdDev(currentInp1.input_params?.bb_stddev || 2.0)
       } else if (currentInp1.name === "RSI_MA") {
         setRsiMaLength(currentInp1.input_params?.rsi_length || 14)
         setMaLength(currentInp1.input_params?.ma_length || 14)
@@ -141,140 +145,108 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave }: Cros
     }
   }, [currentInp1])
 
+  // Add a helper to get read-only parameter values for existing indicators
+  const getReadOnlyParams = () => {
+    if (!currentInp1) return {}
+    if (indicator === "rsi") {
+      return {
+        rsiLength: currentInp1.input_params?.timeperiod || 14,
+        rsiSource: currentInp1.input_params?.source || "close",
+      }
+    }
+    if (indicator === "rsi-ma") {
+      // If currentInp1 is RSI, use its timeperiod for RSI_MA's rsi_length
+      // If currentInp1 is RSI_MA, use its rsi_length
+      const rsiLength = currentInp1.name === "RSI"
+        ? currentInp1.input_params?.timeperiod || 14
+        : currentInp1.input_params?.rsi_length || 14
+      return {
+        rsiLength: rsiLength,
+        maLength: currentInp1.input_params?.ma_length || 14,
+        rsiSource: currentInp1.input_params?.rsi_source || currentInp1.input_params?.source || "Close",
+        maType: currentInp1.input_params?.ma_type || "SMA",
+        bbStdDev: currentInp1.input_params?.bb_stddev || 2.0,
+      }
+    }
+    if (indicator === "volume-ma") {
+      return {
+        volumeMaLength: currentInp1.input_params?.ma_length || 20,
+      }
+    }
+    return {}
+  }
+
+  // Modified to render read-only parameter displays for existing indicators
   const renderExistingIndicatorParams = () => {
     if (valueType !== "indicator" || !indicator) return null
-
+    const params = getReadOnlyParams()
+    const readOnlyStyle = "bg-gray-100 text-gray-600 cursor-not-allowed"
     if (indicator === "rsi") {
       return (
         <div className="space-y-4">
           <div>
-            <Label htmlFor="rsiLength" className="block text-sm font-medium text-black mb-2">
-              RSI Length
+            <Label htmlFor="rsiLength" className="block text-sm font-medium text-gray-600 mb-2">
+              RSI Length (from original indicator)
             </Label>
-            <Input
-              id="rsiLength"
-              value={rsiLength}
-              onChange={(e) => setRsiLength(Number(e.target.value))}
-              type="number"
-              className="w-full border border-gray-300 rounded-md text-black"
-            />
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.rsiLength}</div>
           </div>
           <div>
-            <Label htmlFor="rsiSource" className="block text-sm font-medium text-black mb-2">
-              RSI Source
+            <Label htmlFor="rsiSource" className="block text-sm font-medium text-gray-600 mb-2">
+              RSI Source (from original indicator)
             </Label>
-            <Select value={rsiSource} onValueChange={setRsiSource}>
-              <SelectTrigger id="rsiSource" className="w-full border border-gray-300 text-black bg-white">
-                <SelectValue placeholder="Select source" />
-              </SelectTrigger>
-              <SelectContent className="bg-white text-black">
-                <SelectItem value="Close">Close</SelectItem>
-                <SelectItem value="Open">Open</SelectItem>
-                <SelectItem value="High">High</SelectItem>
-                <SelectItem value="Low">Low</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.rsiSource}</div>
           </div>
         </div>
       )
     }
-
     if (indicator === "rsi-ma") {
       return (
         <div className="space-y-4">
           <div>
-            <Label htmlFor="rsiMaLength" className="block text-sm font-medium text-black mb-2">
-              RSI Length
+            <Label htmlFor="rsiLength" className="block text-sm font-medium text-gray-600 mb-2">
+              RSI Length (from original indicator)
             </Label>
-            <Input
-              id="rsiMaLength"
-              value={rsiMaLength}
-              onChange={(e) => setRsiMaLength(Number(e.target.value))}
-              type="number"
-              className="w-full border border-gray-300 rounded-md text-black"
-            />
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.rsiLength}</div>
           </div>
           <div>
-            <Label htmlFor="maLength" className="block text-sm font-medium text-black mb-2">
-              MA Length
+            <Label htmlFor="maLength" className="block text-sm font-medium text-gray-600 mb-2">
+              MA Length (from original indicator)
             </Label>
-            <Input
-              id="maLength"
-              value={maLength}
-              onChange={(e) => setMaLength(Number(e.target.value))}
-              type="number"
-              className="w-full border border-gray-300 rounded-md text-black"
-            />
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.maLength}</div>
           </div>
           <div>
-            <Label htmlFor="rsiSource" className="block text-sm font-medium text-black mb-2">
-              RSI Source
+            <Label htmlFor="rsiSource" className="block text-sm font-medium text-gray-600 mb-2">
+              RSI Source (from original indicator)
             </Label>
-            <Select value={rsiSource} onValueChange={setRsiSource}>
-              <SelectTrigger id="rsiSource" className="w-full border border-gray-300 text-black bg-white">
-                <SelectValue placeholder="Select source" />
-              </SelectTrigger>
-              <SelectContent className="bg-white text-black">
-                <SelectItem value="Close">Close</SelectItem>
-                <SelectItem value="Open">Open</SelectItem>
-                <SelectItem value="High">High</SelectItem>
-                <SelectItem value="Low">Low</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.rsiSource}</div>
           </div>
           <div>
-            <Label htmlFor="maType" className="block text-sm font-medium text-black mb-2">
-              MA Type
+            <Label htmlFor="maType" className="block text-sm font-medium text-gray-600 mb-2">
+              MA Type (from original indicator)
             </Label>
-            <Select value={maType} onValueChange={setMaType}>
-              <SelectTrigger id="maType" className="w-full border border-gray-300 text-black bg-white">
-                <SelectValue placeholder="Select MA type" />
-              </SelectTrigger>
-              <SelectContent className="bg-white text-black">
-                <SelectItem value="SMA">SMA</SelectItem>
-                <SelectItem value="EMA">EMA</SelectItem>
-                <SelectItem value="WMA">WMA</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.maType}</div>
           </div>
           <div>
-            <Label htmlFor="bbStdDev" className="block text-sm font-medium text-black mb-2">
-              BB Std Dev
+            <Label htmlFor="bbStdDev" className="block text-sm font-medium text-gray-600 mb-2">
+              BB Std Dev (from original indicator)
             </Label>
-            <Input
-              id="bbStdDev"
-              value={bbStdDev}
-              onChange={(e) => setBbStdDev(Number(e.target.value))}
-              type="number"
-              step="0.1"
-              className="w-full border border-gray-300 rounded-md text-black"
-            />
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.bbStdDev}</div>
           </div>
         </div>
       )
     }
-
-    // Add Volume-MA parameters
     if (indicator === "volume-ma") {
       return (
         <div className="space-y-4">
           <div>
-            <Label htmlFor="volumeMaLength" className="block text-sm font-medium text-black mb-2">
-              MA Length
+            <Label htmlFor="volumeMaLength" className="block text-sm font-medium text-gray-600 mb-2">
+              MA Length (from original indicator)
             </Label>
-            <Input
-              id="volumeMaLength"
-              value={volumeMaLength}
-              onChange={(e) => setVolumeMaLength(Number(e.target.value))}
-              type="number"
-              className="w-full border border-gray-300 rounded-md text-black"
-            />
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.volumeMaLength}</div>
           </div>
         </div>
       )
     }
-
-    // For OHLC price indicators, no additional parameters needed
     if (["open", "high", "low", "close"].includes(indicator)) {
       return (
         <div className="space-y-4">
@@ -284,8 +256,6 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave }: Cros
         </div>
       )
     }
-
-    // For regular Volume, no additional parameters needed
     if (indicator === "volume") {
       return (
         <div className="space-y-4">
@@ -293,11 +263,22 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave }: Cros
         </div>
       )
     }
-
     return null
   }
 
   const handleSave = () => {
+    let finalRsiMaLength = rsiMaLength
+    let finalMaLength = maLength
+    let finalRsiSource = rsiSource
+    let finalMaType = maType
+    let finalBbStdDev = bbStdDev
+    if (indicator === "rsi-ma" && currentInp1) {
+      finalRsiMaLength = currentInp1.input_params?.rsi_length || currentInp1.input_params?.timeperiod || 14
+      finalMaLength = currentInp1.input_params?.ma_length || 14
+      finalRsiSource = currentInp1.input_params?.rsi_source || currentInp1.input_params?.source || "Close"
+      finalMaType = currentInp1.input_params?.ma_type || "SMA"
+      finalBbStdDev = currentInp1.input_params?.bb_stddev || 2.0
+    }
     onSave({
       valueType,
       customValue,
@@ -306,11 +287,11 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave }: Cros
       band,
       timeperiod,
       rsiLength,
-      rsiMaLength,
-      maLength,
-      rsiSource,
-      maType,
-      bbStdDev,
+      rsiMaLength: finalRsiMaLength,
+      maLength: finalMaLength,
+      rsiSource: finalRsiSource,
+      maType: finalMaType,
+      bbStdDev: finalBbStdDev,
       bbSource,
       volumeMaLength,
       fastPeriod,

@@ -6,15 +6,25 @@ import { X } from "lucide-react"
 interface RsiSettingsModalProps {
   onClose: () => void
   onSave: (settings: any) => void
+  initialSettings?: {
+    indicatorType?: string
+    rsiLength?: string
+    source?: string
+    maLength?: string
+    maType?: string
+    bbStdDev?: string
+    timeframe?: string
+  }
 }
 
-export function RsiSettingsModal({ onClose, onSave }: RsiSettingsModalProps) {
-  const [indicatorType, setIndicatorType] = useState("rsi")
-  const [rsiLength, setRsiLength] = useState("14")
-  const [source, setSource] = useState("Close")
-  const [maLength, setMaLength] = useState("14")
-  const [maType, setMaType] = useState("SMA")
-  const [bbStdDev, setBbStdDev] = useState("2.0")
+export function RsiSettingsModal({ onClose, onSave, initialSettings }: RsiSettingsModalProps) {
+  const [indicatorType, setIndicatorType] = useState(initialSettings?.indicatorType || "rsi")
+  const [rsiLength, setRsiLength] = useState(initialSettings?.rsiLength || "14")
+  const [source, setSource] = useState(initialSettings?.source || "Close")
+  const [maLength, setMaLength] = useState(initialSettings?.maLength || "14")
+  const [maType, setMaType] = useState(initialSettings?.maType || "SMA")
+  const [bbStdDev, setBbStdDev] = useState(initialSettings?.bbStdDev || "2.0")
+  const [timeframe, setTimeframe] = useState(initialSettings?.timeframe || "3h")
 
   const [showSourceDropdown, setShowSourceDropdown] = useState(false)
   const [showMaTypeDropdown, setShowMaTypeDropdown] = useState(false)
@@ -22,6 +32,20 @@ export function RsiSettingsModal({ onClose, onSave }: RsiSettingsModalProps) {
   const modalRef = useRef<HTMLDivElement>(null)
   const sourceDropdownRef = useRef<HTMLDivElement>(null)
   const maTypeDropdownRef = useRef<HTMLDivElement>(null)
+
+  // Update form when initialSettings change
+  useEffect(() => {
+    if (initialSettings) {
+      console.log("RSI Modal initialSettings:", initialSettings)
+      setIndicatorType(initialSettings.indicatorType || "rsi")
+      setRsiLength(initialSettings.rsiLength || "14")
+      setSource(initialSettings.source || "Close")
+      setMaLength(initialSettings.maLength || "14")
+      setMaType(initialSettings.maType || "SMA")
+      setBbStdDev(initialSettings.bbStdDev || "2.0")
+      setTimeframe(initialSettings.timeframe || "3h")
+    }
+  }, [initialSettings])
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -61,9 +85,6 @@ export function RsiSettingsModal({ onClose, onSave }: RsiSettingsModalProps) {
     }
   }, [])
 
-  // Always allow editing MA settings, regardless of indicatorType
-  // (No need for isRSIMA disabling logic)
-
   const handleSave = () => {
     // Always save all fields, but only use MA settings for RSI MA in parent logic
     onSave({
@@ -73,6 +94,7 @@ export function RsiSettingsModal({ onClose, onSave }: RsiSettingsModalProps) {
       maLength,
       maType,
       bbStdDev,
+      timeframe,
     })
   }
 

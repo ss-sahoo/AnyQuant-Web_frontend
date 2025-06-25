@@ -53,7 +53,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
   const [rsiLength, setRsiLength] = useState(14)
 
   // RSI-MA parameters
-  const [rsiMaLength, setRsiMaLength] = useState(rsiLength)
+  const [rsiMaLength, setRsiMaLength] = useState(14)
   const [maLength, setMaLength] = useState(14)
   const [rsiSource, setRsiSource] = useState("Close")
   const [maType, setMaType] = useState("SMA")
@@ -120,7 +120,8 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
     if (currentInp1) {
       if (currentInp1.name === "RSI") {
         setRsiLength(currentInp1.input_params?.timeperiod || 14)
-        setRsiMaLength(currentInp1.input_params?.rsi_length || 14)
+        setRsiMaLength(currentInp1.input_params?.timeperiod || 14)
+        setMaLength(currentInp1.input_params?.ma_length || 14)
         setRsiSource(currentInp1.input_params?.rsi_source || "Close")
         setMaType(currentInp1.input_params?.ma_type || "SMA")
         setBbStdDev(currentInp1.input_params?.bb_stddev || 2.0)
@@ -138,7 +139,6 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
         (currentInp1.type === "CUSTOM_I" && currentInp1.name === "Volume_MA")
       ) {
         setVolumeMaLength(currentInp1.input_params?.ma_length || 20)
-        // Make sure to set the indicator to "volume-ma" if that's the selected type
         if (valueType === "indicator" || valueType === "other") {
           setIndicator("volume-ma")
         }
@@ -151,6 +151,14 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
   }, [currentInp1])
 
   const handleSave = () => {
+    // For RSI_MA indicator, ensure we use the correct RSI length and MA length from currentInp1 if it's RSI
+    let finalRsiMaLength = rsiMaLength
+    let finalMaLength = maLength
+    if (indicator === "rsi-ma" && currentInp1?.name === "RSI") {
+      finalRsiMaLength = currentInp1.input_params?.timeperiod || 14
+      finalMaLength = currentInp1.input_params?.ma_length || 14
+    }
+    
     onSave({
       valueType,
       customValue,
@@ -159,8 +167,8 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
       band,
       timeperiod,
       rsiLength,
-      rsiMaLength,
-      maLength,
+      rsiMaLength: finalRsiMaLength,
+      maLength: finalMaLength,
       rsiSource,
       maType,
       bbStdDev,
@@ -185,10 +193,16 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
       }
     }
     if (indicator === "rsi-ma") {
+      // If currentInp1 is RSI, use its timeperiod for RSI_MA's rsi_length
+      // If currentInp1 is RSI_MA, use its rsi_length
+      const rsiLength = currentInp1.name === "RSI" 
+        ? currentInp1.input_params?.timeperiod || 14
+        : currentInp1.input_params?.rsi_length || 14
+      
       return {
-        rsiMaLength: currentInp1.input_params?.rsi_length || 14,
+        rsiLength: rsiLength,
         maLength: currentInp1.input_params?.ma_length || 14,
-        rsiSource: currentInp1.input_params?.rsi_source || "Close",
+        rsiSource: currentInp1.input_params?.rsi_source || currentInp1.input_params?.source || "Close",
         maType: currentInp1.input_params?.ma_type || "SMA",
         bbStdDev: currentInp1.input_params?.bb_stddev || 2.0,
       }
@@ -228,10 +242,10 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
       return (
         <div className="space-y-4">
           <div>
-            <Label htmlFor="rsiMaLength" className="block text-sm font-medium text-gray-600 mb-2">
+            <Label htmlFor="rsiLength" className="block text-sm font-medium text-gray-600 mb-2">
               RSI Length (from original indicator)
             </Label>
-            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.rsiMaLength}</div>
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.rsiLength}</div>
           </div>
           <div>
             <Label htmlFor="maLength" className="block text-sm font-medium text-gray-600 mb-2">
@@ -291,7 +305,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
     return null
   }
 
-  const handleCrossingUpNext = (indicator, timeframe) => {
+  const handleCrossingUpNext = (indicator: string, timeframe: string) => {
     onNext(indicator, timeframe)
   }
 
@@ -513,7 +527,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
               valueType: "other",
               indicator: "rsi-ma",
               timeframe: pendingTimeframe,
-              rsiMaLength: settings.rsiLength,
+              rsiLength: settings.rsiLength,
               maLength: settings.maLength,
               rsiSource: settings.source,
               maType: settings.maType,
