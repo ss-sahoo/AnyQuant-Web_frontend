@@ -11,7 +11,12 @@ import {
   runOptimisation,
   updateStrategyTradingType,
   saveOptimisationInput,
-} from "../AllApiCalls" // Import saveOptimisationInput
+  getOptimisationStatus,
+  getOptimizationResults,
+  getOptimizationResultDetail,
+  deleteOptimizationResult,
+  getStrategyOptimizationResults,
+} from "../AllApiCalls" // Import new functions
 import { X } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
 import { StrategyTab } from "@/components/strategy-tab"
@@ -19,6 +24,8 @@ import { BacktestTab } from "@/components/backtest-tab"
 import { OptimisationTab } from "@/components/optimisation-tab"
 import { PropertiesTab } from "@/components/properties-tab"
 import { AdvancedSettingsModalContent } from "@/components/advanced-settings-modal-content"
+import { PreviousOptimisationView } from '@/components/PreviousOptimisationView'
+import { OptimisationHistoryList } from '@/components/OptimisationHistoryList'
 
 export default function StrategyTestingPage() {
   const [activeTab, setActiveTab] = useState("strategy")
@@ -78,6 +85,26 @@ export default function StrategyTestingPage() {
   const [optimisationResult, setOptimisationResult] = useState<any>(null)
   const [plotHeatmapHtml, setPlotHeatmapHtml] = useState<string | null>(null)
   const [showOptimisationResults, setShowOptimisationResults] = useState(false)
+
+  // Add new state variables for optimization results management
+  const [optimizationResults, setOptimizationResults] = useState<any[]>([])
+  const [currentOptimizationId, setCurrentOptimizationId] = useState<string | null>(null)
+  const [optimizationStatus, setOptimizationStatus] = useState<string>("")
+  const [optimizationTaskId, setOptimizationTaskId] = useState<string | null>(null)
+  const [showOptimizationHistory, setShowOptimizationHistory] = useState(false)
+  const [selectedOptimizationResult, setSelectedOptimizationResult] = useState<any>(null)
+
+  // Add polling interval for optimization status
+  const [statusPollingInterval, setStatusPollingInterval] = useState<NodeJS.Timeout | null>(null)
+
+  // Add state for top-level optimisation tab and selected result
+  const [optimisationTab, setOptimisationTab] = useState<'results' | 'graph' | 'report'>('results');
+  const [selectedOptimisationRow, setSelectedOptimisationRow] = useState<any>(null);
+
+  const [showPreviousOptimisationView, setShowPreviousOptimisationView] = useState(false);
+
+  const [showOptimisationHistory, setShowOptimisationHistory] = useState(false);
+  const [selectedOptimisationDetail, setSelectedOptimisationDetail] = useState(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -190,8 +217,19 @@ export default function StrategyTestingPage() {
     }
   }
 
+  // Simple toast notification system
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    const toast = document.createElement('div');
+    toast.className = `fixed bottom-10 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded shadow-lg z-50 text-white ${type === 'success' ? 'bg-green-600' : 'bg-red-600'}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => {
+      document.body.removeChild(toast);
+    }, 3000);
+  };
+
   const handleFile = (file: File) => {
-    // Check if file is .py or .csv
+    // Only allow .py and .csv files. Update here if you want to support more types.
     const fileExtension = file.name.split(".").pop()?.toLowerCase()
     if (fileExtension === "py" || fileExtension === "csv") {
       setInputFile(file)
@@ -206,7 +244,7 @@ export default function StrategyTestingPage() {
 
       setShowSuccessModal(true)
     } else {
-      alert("Only .py and .csv files are supported")
+      showToast("Only .py and .csv files are supported", 'error')
     }
   }
 
@@ -284,12 +322,12 @@ export default function StrategyTestingPage() {
   // Updated handleRunBacktest function to use the new API structure
   const handleRunBacktest = async () => {
     if (!parsedStatement) {
-      alert("Strategy statement is missing or not parsed!")
+      showToast("Strategy statement is missing or not parsed!", 'error')
       return
     }
 
     if (requiredTimeframes.length > uploadedFiles.length) {
-      alert("Not enough files uploaded for the required timeframes")
+      showToast("Not enough files uploaded for the required timeframes", 'error')
       return
     }
 
@@ -319,32 +357,31 @@ export default function StrategyTestingPage() {
         files: timeframeFiles,
       })
 
-      if (result?.plot_trades_html) {
-        setPlotHtml(result.plot_trades_html)
+      if (result?.trades_plot_html) {
+        setPlotHtml(result.trades_plot_html)
       } else {
-        alert("Backtest failed or no chart returned")
+        showToast("Backtest failed or no chart returned", 'error')
       }
     } catch (error: any) {
-      alert("Backtest Error: " + (error.message || "Unknown error"))
+      showToast("Backtest Error: " + (error.message || "Unknown error"), 'error')
     } finally {
       setIsLoading(false)
     }
   }
 
-  const handleOptimisation = async () => {
+  const handleOptimisation = async (wait = false) => {
     if (!parsedStatement) {
-      alert("Strategy statement is missing or not parsed!")
+      showToast("Strategy statement is missing or not parsed!", 'error')
       return
     }
 
     if (requiredTimeframes.length > uploadedFiles.length) {
-      alert("Not enough files uploaded for the required timeframes")
+      showToast("Not enough files uploaded for the required timeframes", 'error')
       return
     }
 
     try {
       setIsLoading2(true)
-
       const timeframeFiles: Record<string, File> = {}
 
       // Directly map each required timeframe to the uploaded file in order
@@ -387,27 +424,158 @@ export default function StrategyTestingPage() {
       const result = await runOptimisation({
         statement: optimisationStatement,
         files: timeframeFiles,
+        strategy_statement_id: strategy_id ? strategy_id : null,
+        wait,
       })
 
-      // Store the result and heatmap
+      if (wait && result?.result) {
+        // Sync mode: use result directly
+        setOptimisationResult(result.result)
+       
+        setActiveTab("optimisation")
+        // Show PreviousOptimisationView with all results (append latest)
+        setShowPreviousOptimisationView(true)
+        setOptimizationResults(prev => Array.isArray(prev) ? [...prev, result.result] : [result.result])
+        if (result.result.heatmap_plot_html) {
+          setPlotHeatmapHtml(result.result.heatmap_plot_html)
+        } else {
+          setPlotHeatmapHtml(null)
+        }
+        if (result.result.trades_plot_html) {
+          setPlotHtml(result.result.trades_plot_html)
+        }
+        setOptimizationStatus("completed")
+        setCurrentOptimizationId(result.task_id || null)
+        return
+      }
+
+      // Async mode: Start polling for optimisation status if optimization_id or task_id exists
+      const pollId = result?.optimization_id || result?.task_id
+      if (pollId) {
+        setCurrentOptimizationId(pollId)
+        setOptimizationStatus("running")
+        startStatusPolling(pollId)
+      }
+
+      // Store the result and heatmap (may be partial)
       setOptimisationResult(result)
-      setShowOptimisationResults(true)
       setActiveTab("optimisation")
-      if (result?.plot_heatmap_html) {
-        setPlotHeatmapHtml(result.plot_heatmap_html)
+      setShowPreviousOptimisationView(true)
+      if (result?.heatmap_plot_html) {
+        setPlotHeatmapHtml(result.heatmap_plot_html)
       } else {
         setPlotHeatmapHtml(null)
       }
-      // Optionally, also set plotHtml if you want to show the main plot elsewhere
-      if (result?.plot_trades_html) {
-        setPlotHtml(result.plot_trades_html)
+      if (result?.trades_plot_html) {
+        setPlotHtml(result.trades_plot_html)
       }
     } catch (error: any) {
-      alert("Optimisation Error: " + (error.message || "Unknown error"))
+      showToast("Optimisation Error: " + (error.message || "Unknown error"), 'error')
     } finally {
       setIsLoading2(false)
     }
   }
+
+  // Add function to start status polling
+  const startStatusPolling = (optimizationId: string) => {
+    // Prevent multiple intervals
+    if (statusPollingInterval) {
+      clearInterval(statusPollingInterval);
+      setStatusPollingInterval(null);
+    }
+
+    let stopped = false;
+    const isFinalStatus = (status: string) => ["completed", "SUCCESS", "FAILED", "ERROR"].includes((status || "").toUpperCase());
+    const interval = setInterval(async () => {
+      if (stopped) return;
+      try {
+        const statusResult = await getOptimisationStatus(optimizationId);
+        setOptimizationStatus(statusResult.status);
+
+        if (isFinalStatus(statusResult.status)) {
+          stopped = true;
+          clearInterval(interval);
+          setStatusPollingInterval(null);
+
+          if (statusResult.result) {
+            setOptimisationResult(statusResult.result);
+            setOptimizationResults(prev => Array.isArray(prev) ? [...prev, statusResult.result] : [statusResult.result]);
+            setShowPreviousOptimisationView(true);
+          }
+          // Optionally handle failed/error status
+        }
+      } catch (error) {
+        stopped = true;
+        clearInterval(interval);
+        setStatusPollingInterval(null);
+        console.error("Error polling optimization status:", error);
+      }
+    }, 5000);
+
+    setStatusPollingInterval(interval);
+  };
+
+  // Add function to load optimization results
+  const loadOptimizationResults = async () => {
+    if (!strategy_id) return
+
+    try {
+      const results = await getStrategyOptimizationResults(strategy_id, {
+        page: 1,
+        page_size: 50
+      })
+      setOptimizationResults(results.results || [])
+    
+    } catch (error) {
+      showToast("Error loading optimization results", 'error')
+      console.error("Error loading optimization results:", error)
+    }
+  }
+
+  // Add function to view optimization result details
+  const viewOptimizationResult = async (optimizationId: string) => {
+    try {
+      const result = await getOptimizationResultDetail(optimizationId)
+      setSelectedOptimizationResult(result)
+      setShowOptimizationHistory(true)
+      showToast("Optimization result loaded", 'success')
+    } catch (error) {
+      showToast("Failed to load optimization result details", 'error')
+      console.error("Error loading optimization result details:", error)
+    }
+  }
+
+  // Add function to delete optimization result
+  const deleteOptimizationResultHandler = async (optimizationId: string) => {
+    if (!confirm("Are you sure you want to delete this optimization result?")) {
+      return
+    }
+
+    try {
+      await deleteOptimizationResult(optimizationId)
+      await loadOptimizationResults()
+      showToast("Optimization result deleted successfully", 'success')
+    } catch (error) {
+      showToast("Failed to delete optimization result", 'error')
+      console.error("Error deleting optimization result:", error)
+    }
+  }
+
+  // Load optimization results when component mounts
+  useEffect(() => {
+    if (strategy_id) {
+      loadOptimizationResults()
+    }
+  }, [strategy_id])
+
+  // Cleanup polling interval on unmount
+  useEffect(() => {
+    return () => {
+      if (statusPollingInterval) {
+        clearInterval(statusPollingInterval)
+      }
+    }
+  }, [statusPollingInterval])
 
   const handleClick = () => {
     fileInputRef.current?.click()
@@ -547,6 +715,14 @@ export default function StrategyTestingPage() {
     setShowAdvancedSettingsModal(false)
   }
 
+  // When optimisation results load, set the first row as selected by default
+  useEffect(() => {
+    const rows = (optimisationResult?.full_optimization_results || optimisationResult?.table || []);
+    if (rows.length > 0) {
+      setSelectedOptimisationRow(rows[0]);
+    }
+  }, [optimisationResult]);
+
   return (
     <AuthGuard>
       <div className="flex min-h-screen bg-[#121420] text-white">
@@ -557,244 +733,331 @@ export default function StrategyTestingPage() {
         <MobileSidebar currentPage="home" />
 
         <main className="flex-1 flex flex-col relative">
-          {/* Chart area with light blue background */}
-          {plotHtml ? (
-            <div className="relative">
-              <div
-                className={`transition-all duration-500 ease-in-out ${isChartExpanded ? "fixed inset-0 z-50 bg-black" : "relative"}`}
-              >
-                <iframe
-                  title="Plotly Chart"
-                  style={{
-                    width: "100%",
-                    height: isChartExpanded ? "100vh" : "calc(100vh - 300px)",
-                    border: "none",
-                    backgroundColor: "#f8f8f8",
-                    transition: "height 0.5s ease-in-out",
-                  }}
-                  srcDoc={plotHtml}
-                />
-                <button
-                  onClick={toggleChartExpansion}
-                  className={`absolute ${isChartExpanded ? "top-4 right-4" : "top-2 right-2"} bg-[#1E2132] hover:bg-[#2B2E38] text-white p-2 rounded-full transition-all duration-300`}
-                  aria-label={isChartExpanded ? "Minimize chart" : "Expand chart"}
-                >
-                  {isChartExpanded ? (
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path
-                        d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  ) : (
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path
-                        d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  )}
-                </button>
-              </div>
-            </div>
+          {/* Show PreviousOptimisationView if toggled */}
+          {showPreviousOptimisationView ? (
+            <PreviousOptimisationView
+              optimisationResults={optimizationResults}
+              onClose={() => setShowPreviousOptimisationView(false)}
+              isFullScreen={true}
+            />
           ) : (
-            <div className="w-full h-[calc(100vh-300px)] bg-[#f8f8f8]"></div>
-          )}
-
-          {/* Tabs */}
-          <div className="flex w-full">
-            {["strategy", "backtest", "optimisation", "properties"].map((tab) => (
-              <button
-                key={tab}
-                className={`flex-1 py-3 text-center font-medium ${
-                  activeTab === tab ? "bg-[#141721] text-[#85e1fe]" : "bg-[#1A1D2D] text-gray-400"
-                }`}
-                onClick={() => handleTabChange(tab)}
-              >
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
-              </button>
-            ))}
-          </div>
-
-          {/* Content area with overflow to allow scrolling */}
-          <div className="flex-1 overflow-y-auto pb-[160px] bg-[#000000] ml-[63px]">
-            {activeTab === "strategy" && (
-              <StrategyTab
-                selectedStrategy={selectedStrategy}
-                setSelectedStrategy={setSelectedStrategy}
-                requiredTimeframes={requiredTimeframes}
-                uploadedFiles={uploadedFiles}
-                matchesTimeframe={matchesTimeframe}
-                handleFileChange={handleFileChange}
-                handleDeleteFile={handleDeleteFile}
-                fileInputRef={fileInputRef}
-                handleClick={handleClick}
-                isDragging={isDragging}
-                handleDragOver={handleDragOver}
-                handleDragLeave={handleDragLeave}
-                handleDrop={handleDrop}
-                setShowSuccessModal={setShowSuccessModal}
-                currentFile={currentFile}
-              />
-            )}
-
-            {activeTab === "backtest" && (
-              <BacktestTab
-                dateRange={dateRange}
-                setDateRange={setDateRange}
-                selectedInstruments={selectedInstruments}
-                toggleInstrument={toggleInstrument}
-                instruments={instruments}
-                accountDeposit={accountDeposit}
-                handleAccountDepositChange={handleAccountDepositChange}
-                currency={currency}
-                setCurrency={setCurrency}
-                leverage={leverage}
-                leverageSliderValue={leverageSliderValue}
-                handleSliderChange={handleSliderChange}
-                getThumbPosition={getThumbPosition}
-                selectedTradingMode={selectedTradingMode}
-                setSelectedTradingMode={setSelectedTradingMode}
-                maxTrades={maxTrades}
-                setMaxTrades={setMaxTrades}
-                saveBacktestSettings={saveBacktestSettings}
-                isSaving={isSaving}
-              />
-            )}
-
-            {activeTab === "optimisation" && showOptimisationResults && optimisationResult && (
-              <div className="p-6 bg-[#000000] text-white min-h-[600px]">
-                {/* Results Table */}
-                <div className="overflow-x-auto mb-8">
-                  <table className="min-w-full text-xs border-separate border-spacing-y-2">
-                    <thead>
-                      <tr className="bg-[#1A1D2D] text-white">
-                        <th className="px-2 py-2">Pass</th>
-                        <th className="px-2 py-2">Profit</th>
-                        <th className="px-2 py-2">Total trades</th>
-                        <th className="px-2 py-2">Profit factor</th>
-                        <th className="px-2 py-2">Expected Pay</th>
-                        <th className="px-2 py-2">Drawdown $</th>
-                        <th className="px-2 py-2">Drawdown %</th>
-                        <th className="px-2 py-2">Inputs</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {optimisationResult?.table?.map((row: any, idx: number) => (
-                        <tr key={idx} className="bg-[#141721] text-white">
-                          <td className="px-2 py-2">{row.pass || idx + 1}</td>
-                          <td className="px-2 py-2">{row.profit}</td>
-                          <td className="px-2 py-2">{row.total_trades}</td>
-                          <td className="px-2 py-2">{row.profit_factor}</td>
-                          <td className="px-2 py-2">{row.expected_pay}</td>
-                          <td className="px-2 py-2">{row.drawdown_dollar}</td>
-                          <td className="px-2 py-2">{row.drawdown_percent}</td>
-                          <td className="px-2 py-2 max-w-[200px] truncate" title={row.inputs}>{row.inputs}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            <>
+              {/* Chart area with light blue background */}
+              {plotHtml ? (
+                <div className="relative">
+                  <div
+                    className={`transition-all duration-500 ease-in-out ${isChartExpanded ? "fixed inset-0 z-50 bg-black" : "relative"}`}
+                  >
+                    <iframe
+                      title="Plotly Chart"
+                      style={{
+                        width: "100%",
+                        height: isChartExpanded ? "100vh" : "calc(100vh - 300px)",
+                        border: "none",
+                        backgroundColor: "#f8f8f8",
+                        transition: "height 0.5s ease-in-out",
+                      }}
+                      srcDoc={plotHtml}
+                    />
+                    <button
+                      onClick={toggleChartExpansion}
+                      className={`absolute ${isChartExpanded ? "top-4 right-4" : "top-2 right-2"} bg-[#1E2132] hover:bg-[#2B2E38] text-white p-2 rounded-full transition-all duration-300`}
+                      aria-label={isChartExpanded ? "Minimize chart" : "Expand chart"}
+                    >
+                      {isChartExpanded ? (
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path
+                            d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      ) : (
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path
+                            d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
                 </div>
-                {/* Scatter Plot (if available) */}
-                {optimisationResult?.plot_heatmap_html && (
-                  <div className="mb-8">
-                    <h3 className="mb-2 text-lg font-semibold text-white">Scatter Plot</h3>
-                    <iframe
-                      title="Scatter Plot"
-                      style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#f8f8f8" }}
-                      srcDoc={optimisationResult.plot_heatmap_html}
-                    />
+              ) : (
+                <div className="w-full h-[calc(100vh-300px)] bg-[#f8f8f8]"></div>
+              )}
+
+              {/* Tabs */}
+              <div className="flex w-full">
+                {["strategy", "backtest", "optimisation", "properties"].map((tab) => (
+                  <button
+                    key={tab}
+                    className={`flex-1 py-3 text-center font-medium ${
+                      activeTab === tab ? "bg-[#141721] text-[#85e1fe]" : "bg-[#1A1D2D] text-gray-400"
+                    }`}
+                    onClick={() => handleTabChange(tab)}
+                  >
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  </button>
+                ))}
+              </div>
+
+              {/* Content area with overflow to allow scrolling */}
+              <div className="flex-1 overflow-y-auto pb-[160px] bg-[#000000] ml-[63px]">
+                {activeTab === "strategy" && (
+                  <StrategyTab
+                    selectedStrategy={selectedStrategy}
+                    setSelectedStrategy={setSelectedStrategy}
+                    requiredTimeframes={requiredTimeframes}
+                    uploadedFiles={uploadedFiles}
+                    matchesTimeframe={matchesTimeframe}
+                    handleFileChange={handleFileChange}
+                    handleDeleteFile={handleDeleteFile}
+                    fileInputRef={fileInputRef}
+                    handleClick={handleClick}
+                    isDragging={isDragging}
+                    handleDragOver={handleDragOver}
+                    handleDragLeave={handleDragLeave}
+                    handleDrop={handleDrop}
+                    setShowSuccessModal={setShowSuccessModal}
+                    currentFile={currentFile}
+                  />
+                )}
+
+                {activeTab === "backtest" && (
+                  <BacktestTab
+                    dateRange={dateRange}
+                    setDateRange={setDateRange}
+                    selectedInstruments={selectedInstruments}
+                    toggleInstrument={toggleInstrument}
+                    instruments={instruments}
+                    accountDeposit={accountDeposit}
+                    handleAccountDepositChange={handleAccountDepositChange}
+                    currency={currency}
+                    setCurrency={setCurrency}
+                    leverage={leverage}
+                    leverageSliderValue={leverageSliderValue}
+                    handleSliderChange={handleSliderChange}
+                    getThumbPosition={getThumbPosition}
+                    selectedTradingMode={selectedTradingMode}
+                    setSelectedTradingMode={setSelectedTradingMode}
+                    maxTrades={maxTrades}
+                    setMaxTrades={setMaxTrades}
+                    saveBacktestSettings={saveBacktestSettings}
+                    isSaving={isSaving}
+                  />
+                )}
+
+                {activeTab === "optimisation" && showOptimisationResults && optimisationResult && (
+                  <div className="p-6 bg-[#000000] text-white min-h-[600px]">
+                    {/* Top-level tabs: Results | Graph | Report */}
+                    <div className="flex border-b border-gray-700 mb-6">
+                      <button
+                        className={`px-6 py-3 font-semibold ${optimisationTab === 'results' ? 'text-[#85e1fe] border-b-2 border-[#85e1fe]' : 'text-gray-400'}`}
+                        onClick={() => setOptimisationTab('results')}
+                      >
+                        Results
+                      </button>
+                      <button
+                        className={`px-6 py-3 font-semibold ${optimisationTab === 'graph' ? 'text-[#85e1fe] border-b-2 border-[#85e1fe]' : 'text-gray-400'}`}
+                        onClick={() => setOptimisationTab('graph')}
+                      >
+                        Graph
+                      </button>
+                      <button
+                        className={`px-6 py-3 font-semibold ${optimisationTab === 'report' ? 'text-[#85e1fe] border-b-2 border-[#85e1fe]' : 'text-gray-400'}`}
+                        onClick={() => setOptimisationTab('report')}
+                      >
+                        Report
+                      </button>
+                    </div>
+
+                    {/* Results Tab */}
+                    {optimisationTab === 'results' && (
+                      <div>
+                        <div className="overflow-x-auto mb-8">
+                          <table className="min-w-full text-xs border-separate border-spacing-y-2">
+                            <thead>
+                              <tr className="bg-[#1A1D2D] text-white">
+                                <th className="px-2 py-2">#</th>
+                                <th className="px-2 py-2">Profit</th>
+                                <th className="px-2 py-2">Total trades</th>
+                                <th className="px-2 py-2">Profit factor</th>
+                                <th className="px-2 py-2">Expected Pay</th>
+                                <th className="px-2 py-2">Drawdown $</th>
+                                <th className="px-2 py-2">Drawdown %</th>
+                                <th className="px-2 py-2">Win Rate</th>
+                                <th className="px-2 py-2">Inputs</th>
+                                <th className="px-2 py-2"> </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(optimisationResult.full_optimization_results || optimisationResult.table || []).map((row: any, idx: number) => (
+                                <tr
+                                  key={idx}
+                                  className={`bg-[#141721] text-white cursor-pointer ${selectedOptimisationRow === row ? 'bg-[#23263a]' : ''}`}
+                                  onClick={() => {
+                                    setSelectedOptimisationRow(row);
+                                    setOptimisationTab('report');
+                                  }}
+                                >
+                                  <td className="px-2 py-2">{idx + 1}</td>
+                                  <td className="px-2 py-2">{row.profit}</td>
+                                  <td className="px-2 py-2">{row.total_trades}</td>
+                                  <td className="px-2 py-2">{row.profit_factor}</td>
+                                  <td className="px-2 py-2">{row.expected_pay}</td>
+                                  <td className="px-2 py-2">{row.drawdown_dollar}</td>
+                                  <td className="px-2 py-2">{row.drawdown_percent}</td>
+                                  <td className="px-2 py-2">{row.win_rate_percent || row.win_rate || '-'}</td>
+                                  <td className="px-2 py-2 max-w-[200px] truncate" title={row.inputs}>{row.inputs}</td>
+                                  <td className="px-2 py-2 text-right">
+                                    <button
+                                      className="text-[#85e1fe] hover:underline text-xs"
+                                      onClick={e => { e.stopPropagation(); setSelectedOptimisationRow(row); setOptimisationTab('report'); }}
+                                    >
+                                      View Report
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Graph Tab */}
+                    {optimisationTab === 'graph' && (
+                      <div>
+                        {optimisationResult.heatmap_plot_html && (
+                          <div className="mb-8">
+                            <h3 className="mb-2 text-lg font-semibold text-white">Scatter Plot</h3>
+                            <iframe
+                              title="Scatter Plot"
+                              style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#f8f8f8" }}
+                              srcDoc={optimisationResult.heatmap_plot_html}
+                            />
+                          </div>
+                        )}
+                        {optimisationResult.trades_plot_html && (
+                          <div className="mb-8">
+                            <h3 className="mb-2 text-lg font-semibold text-white">Trades Plot</h3>
+                            <iframe
+                              title="Trades Plot"
+                              style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#f8f8f8" }}
+                              srcDoc={optimisationResult.trades_plot_html}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Report Tab */}
+                    {optimisationTab === 'report' && selectedOptimisationRow && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div>
+                          <div className="mb-2 flex flex-col gap-1">
+                            {Object.entries(selectedOptimisationRow).map(([key, value]) => (
+                              typeof value === 'number' || typeof value === 'string' ? (
+                                <div key={key} className="flex justify-between border-b border-gray-800 py-1 text-sm">
+                                  <span className="text-gray-400">{key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
+                                  <span className="text-white font-semibold">{value}</span>
+                                </div>
+                              ) : null
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
-                {/* Heatmap Plot (if available) */}
-                {/* {plotHeatmapHtml && (
-                  <div className="mb-8">
-                    <h3 className="mb-2 text-lg font-semibold text-[#85e1fe]">Optimisation Heatmap</h3>
-                    <iframe
-                      title="Optimisation Heatmap"
-                      style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#f8f8f8" }}
-                      srcDoc={plotHeatmapHtml}
+                {activeTab === "optimisation" && (!showOptimisationResults || !optimisationResult) && (
+                  <>
+                    <div className="flex justify-end p-4">
+                      <button
+                        className="bg-[#85e1fe] text-black px-4 py-2 rounded-md hover:bg-[#6bcae2]"
+                        onClick={() => setShowOptimisationHistory(true)}
+                      >
+                        See Previous Optimisation
+                      </button>
+                    </div>
+                    <OptimisationTab
+                      isLimitationsCollapsed={isLimitationsCollapsed}
+                      setIsLimitationsCollapsed={setIsLimitationsCollapsed}
+                      setShowAdvancedSettingsModal={setShowAdvancedSettingsModal}
+                      populationSize={populationSize} // Pass advanced settings props
+                      setPopulationSize={setPopulationSize}
+                      generations={generations}
+                      setGenerations={setGenerations}
+                      mutationRate={mutationRate}
+                      setMutationRate={setMutationRate}
+                      tournamentSize={tournamentSize}
+                      setTournamentSize={setTournamentSize}
+                      selectedMaximiseOption={selectedMaximiseOption} // New prop
+                      setSelectedMaximiseOption={setSelectedMaximiseOption} // New prop
+                      selectedAlgorithm={selectedAlgorithm} // New prop
+                      setSelectedAlgorithm={setSelectedAlgorithm} // New prop
                     />
+                  </>
+                )}
+
+                {activeTab === "properties" && (
+                  <PropertiesTab parsedStatement={parsedStatement} saveOptimisationInput={saveOptimisationInput} />
+                )}
+              </div>
+
+              {/* Sticky footer with progress and buttons */}
+              <div className="absolute bottom-0 left-0 right-0 bg-black border-t border-gray-800 z-10 ml-[63px]">
+                {/* Progress Bar */}
+                <div className="p-4">
+                  <div className="flex justify-between items-center mb-2">
+                    <span>Progress</span>
+                    <span>Time left: ---</span>
                   </div>
-                )} */}
-              </div>
-            )}
-            {activeTab === "optimisation" && (!showOptimisationResults || !optimisationResult) && (
-              <OptimisationTab
-                isLimitationsCollapsed={isLimitationsCollapsed}
-                setIsLimitationsCollapsed={setIsLimitationsCollapsed}
-                setShowAdvancedSettingsModal={setShowAdvancedSettingsModal}
-                populationSize={populationSize} // Pass advanced settings props
-                setPopulationSize={setPopulationSize}
-                generations={generations}
-                setGenerations={setGenerations}
-                mutationRate={mutationRate}
-                setMutationRate={setMutationRate}
-                tournamentSize={tournamentSize}
-                setTournamentSize={setTournamentSize}
-                selectedMaximiseOption={selectedMaximiseOption} // New prop
-                setSelectedMaximiseOption={setSelectedMaximiseOption} // New prop
-                selectedAlgorithm={selectedAlgorithm} // New prop
-                setSelectedAlgorithm={setSelectedAlgorithm} // New prop
-              />
-            )}
+                  <div className="w-full bg-gray-700 h-2 rounded-full overflow-hidden">
+                    <div className="bg-[#85e1fe] h-full w-0"></div>
+                  </div>
+                </div>
 
-            {activeTab === "properties" && (
-              <PropertiesTab parsedStatement={parsedStatement} saveOptimisationInput={saveOptimisationInput} />
-            )}
-          </div>
-
-          {/* Sticky footer with progress and buttons */}
-          <div className="absolute bottom-0 left-0 right-0 bg-black border-t border-gray-800 z-10 ml-[63px]">
-            {/* Progress Bar */}
-            <div className="p-4">
-              <div className="flex justify-between items-center mb-2">
-                <span>Progress</span>
-                <span>Time left: ---</span>
+                {/* Action Buttons */}
+                <div className="p-4 flex gap-4">
+                  <button
+                    className="flex-1 py-3 bg-[#141721] rounded-full text-white hover:bg-[#2B2E38]"
+                    onClick={handleRunBacktest}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <>
+                        <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        Running Backtest...
+                      </>
+                    ) : (
+                      "Run Backtest"
+                    )}
+                  </button>
+                  <button
+                    onClick={() => handleOptimisation(false)}
+                    className="flex-1 py-3 bg-[#141721] rounded-full text-white hover:bg-[#2B2E38]"
+                    disabled={isLoading2}
+                  >
+                    {isLoading2 ? (
+                      <>
+                        <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        Running Optimisation...
+                      </>
+                    ) : (
+                      "Run Optimisation"
+                    )}
+                  </button>
+                </div>
               </div>
-              <div className="w-full bg-gray-700 h-2 rounded-full overflow-hidden">
-                <div className="bg-[#85e1fe] h-full w-0"></div>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="p-4 flex gap-4">
-              <button
-                className="flex-1 py-3 bg-[#141721] rounded-full text-white hover:bg-[#2B2E38]"
-                onClick={handleRunBacktest}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <>
-                    <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Running Backtest...
-                  </>
-                ) : (
-                  "Run Backtest"
-                )}
-              </button>
-              <button
-                onClick={handleOptimisation}
-                className="flex-1 py-3 bg-[#141721] rounded-full text-white hover:bg-[#2B2E38]"
-                disabled={isLoading2}
-              >
-                {isLoading2 ? (
-                  <>
-                    <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Running Optimisation...
-                  </>
-                ) : (
-                  "Run Optimisation"
-                )}
-              </button>
-            </div>
-          </div>
+            </>
+          )}
         </main>
 
         {/* File Upload Success Modal */}
@@ -886,6 +1149,232 @@ export default function StrategyTestingPage() {
               onSave={handleSaveAdvancedSettings}
             />
           </div>
+        )}
+
+        {/* Optimization History Modal */}
+        {showOptimizationHistory && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-6xl max-h-[80vh] overflow-hidden">
+              <div className="flex justify-between items-center p-6 border-b border-gray-700">
+                <h2 className="text-2xl font-bold text-white">Optimization History</h2>
+                <button 
+                  onClick={() => setShowOptimizationHistory(false)}
+                  className="text-gray-400 hover:text-white"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              
+              <div className="p-6 overflow-y-auto max-h-[60vh]">
+                {optimizationResults.length === 0 ? (
+                  <div className="text-center text-gray-400 py-8">
+                    No optimization results found
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {optimizationResults.map((result) => (
+                      <div key={result.id} className="bg-[#141721] rounded-lg p-4 border border-gray-700">
+                        <div className="flex justify-between items-start mb-4">
+                          <div>
+                            <h3 className="text-lg font-semibold text-white">
+                              Optimization #{result.id}
+                            </h3>
+                            <p className="text-gray-400 text-sm">
+                              Algorithm: {result.algorithm}
+                            </p>
+                            <p className="text-gray-400 text-sm">
+                              Date: {new Date(result.optimization_date).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                              result.status === "completed" ? "bg-green-500 text-white" :
+                              result.status === "running" ? "bg-yellow-500 text-black" :
+                              result.status === "failed" ? "bg-red-500 text-white" :
+                              "bg-gray-500 text-white"
+                            }`}>
+                              {result.status}
+                            </span>
+                            <button
+                              onClick={() => deleteOptimizationResultHandler(result.id)}
+                              className="text-red-400 hover:text-red-300"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                        
+                        {result.status === "completed" && (
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                            <div className="text-center">
+                              <p className="text-gray-400 text-sm">Final Equity</p>
+                              <p className="text-white font-semibold">
+                                ${result.final_equity?.toFixed(2) || "N/A"}
+                              </p>
+                            </div>
+                            <div className="text-center">
+                              <p className="text-gray-400 text-sm">Return (Ann.)</p>
+                              <p className="text-white font-semibold">
+                                {result.return_ann_percent?.toFixed(2) || "N/A"}%
+                              </p>
+                            </div>
+                            <div className="text-center">
+                              <p className="text-gray-400 text-sm">Win Rate</p>
+                              <p className="text-white font-semibold text-lg">
+                                {result.win_rate_percent?.toFixed(2) || "N/A"}%
+                              </p>
+                            </div>
+                            <div className="text-center">
+                              <p className="text-gray-400 text-sm">Max Drawdown</p>
+                              <p className="text-white font-semibold text-lg">
+                                {result.max_drawdown_percent?.toFixed(2) || "N/A"}%
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                        
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => viewOptimizationResult(result.id)}
+                            className="bg-[#85e1fe] text-black px-4 py-2 rounded-md hover:bg-[#6bcae2] text-sm"
+                          >
+                            View Details
+                          </button>
+                          {result.status === "completed" && (
+                            <button
+                              onClick={() => {
+                                // Load this result into the main view
+                                setOptimisationResult(result)
+                                setShowOptimisationResults(true)
+                                setShowOptimizationHistory(false)
+                              }}
+                              className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 text-sm"
+                            >
+                              Load Result
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Optimization Result Details Modal */}
+        {selectedOptimizationResult && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-4xl max-h-[80vh] overflow-hidden">
+              <div className="flex justify-between items-center p-6 border-b border-gray-700">
+                <h2 className="text-2xl font-bold text-white">
+                  Optimization Result Details
+                </h2>
+                <button 
+                  onClick={() => setSelectedOptimizationResult(null)}
+                  className="text-gray-400 hover:text-white"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              
+              <div className="p-6 overflow-y-auto max-h-[60vh]">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-6 mb-6">
+                  <div className="text-center">
+                    <p className="text-gray-400 text-sm">Final Equity</p>
+                    <p className="text-white font-semibold text-lg">
+                      ${selectedOptimizationResult.final_equity?.toFixed(2) || "N/A"}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-gray-400 text-sm">Return (Ann.)</p>
+                    <p className="text-white font-semibold text-lg">
+                      {selectedOptimizationResult.return_ann_percent?.toFixed(2) || "N/A"}%
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-gray-400 text-sm">Win Rate</p>
+                    <p className="text-white font-semibold text-lg">
+                      {selectedOptimizationResult.win_rate_percent?.toFixed(2) || "N/A"}%
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-gray-400 text-sm">Max Drawdown</p>
+                    <p className="text-white font-semibold text-lg">
+                      {selectedOptimizationResult.max_drawdown_percent?.toFixed(2) || "N/A"}%
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-gray-400 text-sm">Sharpe Ratio</p>
+                    <p className="text-white font-semibold text-lg">
+                      {selectedOptimizationResult.sharpe_ratio?.toFixed(2) || "N/A"}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-gray-400 text-sm">Number of Trades</p>
+                    <p className="text-white font-semibold text-lg">
+                      {selectedOptimizationResult.num_trades || "N/A"}
+                    </p>
+                  </div>
+                </div>
+                
+                {selectedOptimizationResult.optimized_parameters && (
+                  <div className="mb-6">
+                    <h3 className="text-lg font-semibold text-white mb-3">Optimized Parameters</h3>
+                    <div className="bg-[#141721] rounded-lg p-4">
+                      <pre className="text-sm text-gray-300 whitespace-pre-wrap">
+                        {JSON.stringify(selectedOptimizationResult.optimized_parameters, null, 2)}
+                      </pre>
+                    </div>
+                  </div>
+                )}
+                
+                {selectedOptimizationResult.trades_plot_html && (
+                  <div className="mb-6">
+                    <h3 className="text-lg font-semibold text-white mb-3">Trades Plot</h3>
+                    <iframe
+                      title="Trades Plot"
+                      style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#f8f8f8" }}
+                      srcDoc={selectedOptimizationResult.trades_plot_html}
+                    />
+                  </div>
+                )}
+                
+                {selectedOptimizationResult.heatmap_plot_html && (
+                  <div className="mb-6">
+                    <h3 className="text-lg font-semibold text-white mb-3">Heatmap Plot</h3>
+                    <iframe
+                      title="Heatmap Plot"
+                      style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#f8f8f8" }}
+                      srcDoc={selectedOptimizationResult.heatmap_plot_html}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showOptimisationHistory && !selectedOptimisationDetail && (
+          <OptimisationHistoryList
+            strategyId={strategy_id || ''}
+            onSelect={async (id) => {
+              const detail = await getOptimizationResultDetail(id);
+              setSelectedOptimisationDetail(detail);
+            }}
+            onClose={() => setShowOptimisationHistory(false)}
+          />
+        )}
+        {selectedOptimisationDetail && (
+          <PreviousOptimisationView
+            optimisationResults={[selectedOptimisationDetail]}
+            onClose={() => {
+              setSelectedOptimisationDetail(null);
+              setShowOptimisationHistory(false);
+            }}
+            isFullScreen={true}
+          />
         )}
       </div>
     </AuthGuard>
