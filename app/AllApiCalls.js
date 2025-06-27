@@ -224,38 +224,55 @@ export const runBacktest = async ({ statement, files }) => {
 
   return response.json()
 }
-export const runOptimisation = async ({ statement, files }) => {
+
+// NOTE: 'Fetch' is a custom wrapper for the browser fetch API, used for consistent error handling and headers.
+// If you want to use the native fetch, replace all 'Fetch' with 'fetch'.
+
+/**
+ * Run optimisation (async or sync)
+ * @param {Object} params
+ * @param {Object} params.statement - The strategy statement
+ * @param {Object} params.files - The files to upload
+ * @param {string|null} [params.strategy_statement_id] - Optional strategy statement ID
+ * @param {boolean} [params.wait] - If true, wait for completion and return result in response
+ */
+export const runOptimisation = async ({ statement, files, strategy_statement_id = null, wait = false }) => {
   const formData = new FormData()
 
   // Attach the statement JSON as a string
   formData.append("statement", JSON.stringify(statement))
 
+  // Attach strategy statement ID if provided
+  if (strategy_statement_id) {
+    formData.append("strategy_statement_id", strategy_statement_id)
+  }
+
+  // Attach wait if requested
+  if (wait) {
+    formData.append("wait", "true")
+  }
+
   // Attach each file using its timeframe key
-  // Example: files = { "3h": File, "15min": File }
   for (const [timeframe, file] of Object.entries(files)) {
     formData.append(timeframe, file)
   }
   try {
+    const response = await Fetch("/api/run-optimisation/", {
+      method: "POST",
+      body: formData,
+    })
 
-  const response = await Fetch("/api/run-optimisation/", {
-    method: "POST",
-    body: formData,
-  })  
-
-
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error?.error || "Failed to start backtest")
-  }
-  const data = await response.json();
-    console.log("Optimisation response:", data); // <-- ✅ Helps you inspect large responses
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error?.error || "Failed to start optimisation")
+    }
+    const data = await response.json();
+    console.log("Optimisation response:", data);
     return data;
   } catch (err) {
     console.error("Optimisation request failed:", err);
     throw err;
   }
-
-  return response.json()
 }
 
 
@@ -483,6 +500,118 @@ export const saveOptimisationInput = async (jsonSt, ui_data) => {
   if (!response.ok) {
     const errorData = await response.json();
     throw new Error(errorData.error || "Failed to save optimisation input");
+  }
+
+  return response.json();
+};
+
+// New API functions for optimization results management
+
+export const getOptimisationStatus = async (taskId) => {
+  const response = await Fetch(`/api/optimisation-status/${taskId}/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get optimisation status");
+  }
+
+  return response.json();
+};
+
+export const getOptimizationResults = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+  
+  if (params.strategy_statement_id) {
+    queryParams.append('strategy_statement_id', params.strategy_statement_id);
+  }
+  if (params.account_id) {
+    queryParams.append('account_id', params.account_id);
+  }
+  if (params.status) {
+    queryParams.append('status', params.status);
+  }
+  if (params.algorithm) {
+    queryParams.append('algorithm', params.algorithm);
+  }
+  if (params.page) {
+    queryParams.append('page', params.page);
+  }
+  if (params.page_size) {
+    queryParams.append('page_size', params.page_size);
+  }
+
+  const response = await Fetch(`/api/optimization-results/?${queryParams}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get optimization results");
+  }
+
+  return response.json();
+};
+
+export const getOptimizationResultDetail = async (optimizationId) => {
+  const response = await Fetch(`/api/optimization-results/${optimizationId}/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get optimization result detail");
+  }
+
+  return response.json();
+};
+
+export const deleteOptimizationResult = async (optimizationId) => {
+  const response = await Fetch(`/api/optimization-results/${optimizationId}/delete/`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to delete optimization result");
+  }
+
+  return response.json();
+};
+
+export const getStrategyOptimizationResults = async (strategyStatementId, params = {}) => {
+  const queryParams = new URLSearchParams();
+  
+  if (params.page) {
+    queryParams.append('page', params.page);
+  }
+  if (params.page_size) {
+    queryParams.append('page_size', params.page_size);
+  }
+
+  const response = await Fetch(`/api/strategies/${strategyStatementId}/optimization-results/?${queryParams}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get strategy optimization results");
   }
 
   return response.json();
