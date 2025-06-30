@@ -129,15 +129,39 @@ export default function StrategyTestingPage() {
       if (optimisationFormString) {
         try {
           const optimisationForm = JSON.parse(optimisationFormString)
-          setSelectedMaximiseOption(optimisationForm.maximise_options[0] || "")
-          setSelectedAlgorithm(optimisationForm.default_algorithm || "")
-          setPopulationSize(optimisationForm.algorithm_defaults.population_size.toString())
-          setGenerations(optimisationForm.algorithm_defaults.generations.toString())
-          setMutationRate(optimisationForm.algorithm_defaults.mutation_rate.toString())
-          setTournamentSize(optimisationForm.algorithm_defaults.tournament_size.toString())
+          
+          // Add null checks and fallback values
+          const maximiseOpts = optimisationForm.maximise_options || []
+          const algorithmDefaults = optimisationForm.algorithm_defaults || {}
+          
+          if (maximiseOpts.length > 0) {
+            setSelectedMaximiseOption(maximiseOpts[0] || "")
+          }
+          if (optimisationForm.default_algorithm) {
+            setSelectedAlgorithm(optimisationForm.default_algorithm || "")
+          }
+          setPopulationSize(algorithmDefaults.population_size?.toString() || "100")
+          setGenerations(algorithmDefaults.generations?.toString() || "50")
+          setMutationRate(algorithmDefaults.mutation_rate?.toString() || "0.1")
+          setTournamentSize(algorithmDefaults.tournament_size?.toString() || "3")
         } catch (error) {
           console.error("Error parsing optimisation_form from localStorage:", error)
+          // Set default values if parsing fails
+          setSelectedMaximiseOption("Return [%]")
+          setSelectedAlgorithm("Genetic Algorithm")
+          setPopulationSize("100")
+          setGenerations("50")
+          setMutationRate("0.1")
+          setTournamentSize("3")
         }
+      } else {
+        // Set default values if no optimisation_form exists
+        setSelectedMaximiseOption("Return [%]")
+        setSelectedAlgorithm("Genetic Algorithm")
+        setPopulationSize("100")
+        setGenerations("50")
+        setMutationRate("0.1")
+        setTournamentSize("3")
       }
     }
   }, [])
@@ -162,6 +186,22 @@ export default function StrategyTestingPage() {
             }
             if (strategyData.optimisation_form) {
               localStorage.setItem("optimisation_form", JSON.stringify(strategyData.optimisation_form))
+              const optimisationForm = strategyData.optimisation_form
+              
+              // Add null checks and fallback values
+              const maximiseOpts = optimisationForm.maximise_options || []
+              const algorithmDefaults = optimisationForm.algorithm_defaults || {}
+              
+              if (maximiseOpts.length > 0) {
+                setSelectedMaximiseOption(maximiseOpts[0] || "")
+              }
+              if (optimisationForm.default_algorithm) {
+                setSelectedAlgorithm(optimisationForm.default_algorithm || "")
+              }
+              setPopulationSize(algorithmDefaults.population_size?.toString() || "100")
+              setGenerations(algorithmDefaults.generations?.toString() || "50")
+              setMutationRate(algorithmDefaults.mutation_rate?.toString() || "0.1")
+              setTournamentSize(algorithmDefaults.tournament_size?.toString() || "3")
             }
             if (strategyData.id) {
               localStorage.setItem("strategy_id", strategyData.id)
@@ -357,8 +397,8 @@ export default function StrategyTestingPage() {
         files: timeframeFiles,
       })
 
-      if (result?.trades_plot_html) {
-        setPlotHtml(result.trades_plot_html)
+      if (result?.plot_html) {
+        setPlotHtml(result.plot_html)
       } else {
         showToast("Backtest failed or no chart returned", 'error')
       }
@@ -428,12 +468,13 @@ export default function StrategyTestingPage() {
         wait,
       })
 
+      console.log("Full optimization response:", result)
+
+      // Handle the response based on whether it's sync or async
       if (wait && result?.result) {
-        // Sync mode: use result directly
+        // Sync mode: use result.result directly
         setOptimisationResult(result.result)
-       
         setActiveTab("optimisation")
-        // Show PreviousOptimisationView with all results (append latest)
         setShowPreviousOptimisationView(true)
         setOptimizationResults(prev => Array.isArray(prev) ? [...prev, result.result] : [result.result])
         if (result.result.heatmap_plot_html) {
@@ -445,29 +486,38 @@ export default function StrategyTestingPage() {
           setPlotHtml(result.result.trades_plot_html)
         }
         setOptimizationStatus("completed")
-        setCurrentOptimizationId(result.task_id || null)
+        setCurrentOptimizationId(result.optimization_id || null)
         return
       }
 
-      // Async mode: Start polling for optimisation status if optimization_id or task_id exists
-      const pollId = result?.optimization_id || result?.task_id
+      // Async mode: Check if we have immediate results
+      if (result?.result) {
+        // We have results immediately (even in async mode)
+        setOptimisationResult(result.result)
+        setActiveTab("optimisation")
+        setShowPreviousOptimisationView(true)
+        setOptimizationResults(prev => Array.isArray(prev) ? [...prev, result.result] : [result.result])
+        if (result.result.heatmap_plot_html) {
+          setPlotHeatmapHtml(result.result.heatmap_plot_html)
+        } else {
+          setPlotHeatmapHtml(null)
+        }
+        if (result.result.trades_plot_html) {
+          setPlotHtml(result.result.trades_plot_html)
+        }
+        setOptimizationStatus("completed")
+        setCurrentOptimizationId(result.optimization_id || null)
+        return
+      }
+
+      // Pure async mode: Start polling for optimisation status if optimization_id exists
+      const pollId = result?.optimization_id
       if (pollId) {
         setCurrentOptimizationId(pollId)
         setOptimizationStatus("running")
         startStatusPolling(pollId)
-      }
-
-      // Store the result and heatmap (may be partial)
-      setOptimisationResult(result)
-      setActiveTab("optimisation")
-      setShowPreviousOptimisationView(true)
-      if (result?.heatmap_plot_html) {
-        setPlotHeatmapHtml(result.heatmap_plot_html)
       } else {
-        setPlotHeatmapHtml(null)
-      }
-      if (result?.trades_plot_html) {
-        setPlotHtml(result.trades_plot_html)
+        showToast("No optimization ID received for polling", 'error')
       }
     } catch (error: any) {
       showToast("Optimisation Error: " + (error.message || "Unknown error"), 'error')

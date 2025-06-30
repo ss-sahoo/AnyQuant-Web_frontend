@@ -23,23 +23,15 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
   const sourceDropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
-        onClose()
-      }
-    }
-
     function handleEscKey(event: KeyboardEvent) {
       if (event.key === "Escape") {
         onClose()
       }
     }
 
-    document.addEventListener("mousedown", handleClickOutside)
     document.addEventListener("keydown", handleEscKey)
 
     return () => {
-      document.removeEventListener("mousedown", handleClickOutside)
       document.removeEventListener("keydown", handleEscKey)
     }
   }, [onClose])
@@ -106,7 +98,14 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
   const sources = ["close", "open", "high", "low", "hl2", "hlc3", "ohlc4"]
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div 
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose()
+        }
+      }}
+    >
       <div ref={modalRef} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md max-h-[90vh] flex flex-col">
         {/* Fixed Header */}
         <div className="flex justify-between items-center p-6 border-b border-gray-200 flex-shrink-0">
@@ -125,7 +124,11 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
                 className={`py-3 px-4 text-center ${
                   level === "lower" ? "bg-gray-400 text-white" : "bg-white text-gray-700"
                 }`}
-                onClick={() => setLevel("lower")}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setLevel("lower")
+                }}
               >
                 Lower
               </button>
@@ -133,7 +136,11 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
                 className={`py-3 px-4 text-center ${
                   level === "basis" ? "bg-gray-400 text-white" : "bg-white text-gray-700"
                 }`}
-                onClick={() => setLevel("basis")}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setLevel("basis")
+                }}
               >
                 Basis
               </button>
@@ -141,7 +148,11 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
                 className={`py-3 px-4 text-center ${
                   level === "upper" ? "bg-gray-400 text-white" : "bg-white text-gray-700"
                 }`}
-                onClick={() => setLevel("upper")}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setLevel("upper")
+                }}
               >
                 Upper
               </button>

@@ -146,6 +146,7 @@ export const PreviousOptimisationView: React.FC<PreviousOptimisationViewProps> =
                       <th className="px-2 py-2 text-left">Drawdown %</th>
                       <th className="px-2 py-2 text-left">Win Rate [%]</th>
                       <th className="px-2 py-2 text-left"># Trades</th>
+                      <th className="px-2 py-2 text-left">Generation</th>
                       <th className="px-2 py-2 text-left">Inputs</th>
                       <th className="px-2 py-2 text-left"></th>
                     </tr>
@@ -173,6 +174,7 @@ export const PreviousOptimisationView: React.FC<PreviousOptimisationViewProps> =
                         <td className="px-2 py-2">{get(row, 'Max. Drawdown [%]')}</td>
                         <td className="px-2 py-2">{get(row, 'Win Rate [%]')}</td>
                         <td className="px-2 py-2">{get(row, '# Trades')}</td>
+                        <td className="px-2 py-2">{get(row, 'generation')}</td>
                         <td className="px-2 py-2 max-w-[200px] truncate" title={JSON.stringify(row)}>
                           {Object.entries(row)
                             .filter(([k]) => k.startsWith('param_'))
