@@ -1093,6 +1093,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       if (currentStatement.strategy.length > 0) {
         const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
+        // Special handling for "price" component - it should go to inp1 if no inp1 exists
+        if (component.toLowerCase() === "price") {
+          // Show the Price Settings modal for inp1
+          setShowPriceSettingsModal(true)
+          setActiveStatementIndex(statementIndex)
+        } else
         // Check if we already have inp1 and an operator - if so, we're adding to inp2
         if (lastCondition.inp1 && lastCondition.operator_name) {
           // Get the timeframe from the condition or use the selected timeframe
@@ -3965,16 +3971,7 @@ if (
           onClose={() => setShowPriceSettingsModal(false)}
           onSave={(priceType: string) => {
             setShowPriceSettingsModal(false)
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-            // Use the actual priceType selected, unless it's 'price', then use 'close'
-            lastCondition.inp2 = {
-              type: "C",
-              input: priceType === "price" ? "close" : priceType,
-              timeframe: pendingTimeframe,
-            }
-            setStatements(newStatements)
+            handlePriceSelection(priceType)
           }}
         />
       )}
@@ -4191,21 +4188,6 @@ if (
           }}
         />
       )}
-      {showBollingerModal && (
-        <BollingerBandsSettingsModal
-          onClose={() => setShowBollingerModal(false)}
-          onSave={(settings: any) => {
-            setShowBollingerModal(false)
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-            lastCondition.inp2 = {
-              type: "I",
-              name: "BBANDS",
-              timeframe: pendingTimeframe,
-              input: settings.input || "upperband",
-              input_params: settings.input_params,
-            }
             setStatements(newStatements)
           }}
         />
@@ -4223,24 +4205,6 @@ if (
               name: "Stochastic",
               timeframe: pendingTimeframe,
               input_params: settings,
-            }
-            setStatements(newStatements)
-          }}
-        />
-      )}
-      {showPriceSettingsModal && (
-        <PriceSettingsModal
-          onClose={() => setShowPriceSettingsModal(false)}
-          onSave={(priceType: string) => {
-            setShowPriceSettingsModal(false)
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-            // If the pendingOtherIndicator is 'price', always use 'close' as the input
-            lastCondition.inp2 = {
-              type: "C",
-              input: priceType === "price" ? "close" : priceType,
-              timeframe: pendingTimeframe,
             }
             setStatements(newStatements)
           }}
