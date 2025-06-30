@@ -2558,6 +2558,9 @@ if (
   const [pendingOtherIndicator, setPendingOtherIndicator] = useState<string | null>(null)
   const [pendingTimeframe, setPendingTimeframe] = useState<string>("3h")
 
+  // Add this state near other useState hooks
+  const [pendingBollingerForInp2, setPendingBollingerForInp2] = useState<null | { statementIndex: number; conditionIndex: number; timeframe: string }>(null);
+
   return (
     <div className="flex-1 flex flex-col">
       {/* Main content area with scrolling */}
@@ -2778,12 +2781,18 @@ if (
       {showStochasticModal && (
         <StochasticSettingsModal
           onClose={() => setShowStochasticModal(false)}
-          onSave={(settings) => {
-            // Update stochastic settings
+          onSave={(settings: any) => {
             setShowStochasticModal(false)
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+            lastCondition.inp2 = {
+              type: "I",
+              name: "Stochastic",
+              timeframe: pendingTimeframe,
+              input_params: settings,
+            }
+            setStatements(newStatements)
           }}
         />
       )}
@@ -2960,7 +2969,13 @@ if (
             } else if (indicator === "rsi-ma") {
               setShowIndicatorModal(true)
             } else if (indicator === "bollinger") {
-              setShowBollingerModal(true)
+              // Track which statement/condition/timeframe to update
+              setPendingBollingerForInp2({
+                statementIndex: activeStatementIndex,
+                conditionIndex: statements[activeStatementIndex].strategy.length - 1,
+                timeframe,
+              });
+              setShowBollingerModal(true);
             } else if (indicator === "stochastic") {
               setShowStochasticModal(true)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
@@ -3133,6 +3148,27 @@ if (
               searchInputRefs.current[activeStatementIndex]?.focus()
             }, 100)
           }}
+          onNext={(indicator, timeframe) => {
+            setShowCrossingDownModal(false)
+            setPendingOtherIndicator(indicator)
+            setPendingTimeframe(timeframe)
+            if (indicator === "rsi") {
+              setShowIndicatorModal(true)
+            } else if (indicator === "rsi-ma") {
+              setShowIndicatorModal(true)
+            } else if (indicator === "bollinger") {
+              setPendingBollingerForInp2({
+                statementIndex: activeStatementIndex,
+                conditionIndex: statements[activeStatementIndex].strategy.length - 1,
+                timeframe,
+              });
+              setShowBollingerModal(true);
+            } else if (indicator === "stochastic") {
+              setShowStochasticModal(true)
+            } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
+              setShowPriceSettingsModal(true)
+            }
+          }}
         />
       )}
       {showAboveModal && (
@@ -3247,6 +3283,27 @@ if (
               searchInputRefs.current[activeStatementIndex]?.focus()
             }, 100)
           }}
+          onNext={(indicator, timeframe) => {
+            setShowAboveModal(false)
+            setPendingOtherIndicator(indicator)
+            setPendingTimeframe(timeframe)
+            if (indicator === "rsi") {
+              setShowIndicatorModal(true)
+            } else if (indicator === "rsi-ma") {
+              setShowIndicatorModal(true)
+            } else if (indicator === "bollinger") {
+              setPendingBollingerForInp2({
+                statementIndex: activeStatementIndex,
+                conditionIndex: statements[activeStatementIndex].strategy.length - 1,
+                timeframe,
+              });
+              setShowBollingerModal(true);
+            } else if (indicator === "stochastic") {
+              setShowStochasticModal(true)
+            } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
+              setShowPriceSettingsModal(true)
+            }
+          }}
         />
       )}
       {showBelowModal && (
@@ -3360,6 +3417,27 @@ if (
             setTimeout(() => {
               searchInputRefs.current[activeStatementIndex]?.focus()
             }, 100)
+          }}
+          onNext={(indicator, timeframe) => {
+            setShowBelowModal(false)
+            setPendingOtherIndicator(indicator)
+            setPendingTimeframe(timeframe)
+            if (indicator === "rsi") {
+              setShowIndicatorModal(true)
+            } else if (indicator === "rsi-ma") {
+              setShowIndicatorModal(true)
+            } else if (indicator === "bollinger") {
+              setPendingBollingerForInp2({
+                statementIndex: activeStatementIndex,
+                conditionIndex: statements[activeStatementIndex].strategy.length - 1,
+                timeframe,
+              });
+              setShowBollingerModal(true);
+            } else if (indicator === "stochastic") {
+              setShowStochasticModal(true)
+            } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
+              setShowPriceSettingsModal(true)
+            }
           }}
         />
       )}
@@ -3573,9 +3651,21 @@ if (
             return undefined
           })()}
           onSave={(settings) => {
-            const newStatements = [...statements]
+            const newStatements = [...statements];
 
-            if (editingComponent) {
+            if (pendingBollingerForInp2) {
+              // Set inp2 of the correct condition
+              const { statementIndex, conditionIndex, timeframe } = pendingBollingerForInp2;
+              const condition = newStatements[statementIndex].strategy[conditionIndex];
+              condition.inp2 = {
+                type: "I",
+                name: "BBANDS",
+                timeframe: timeframe,
+                input: settings.input,
+                input_params: settings.input_params,
+              };
+              setPendingBollingerForInp2(null);
+            } else if (editingComponent) {
               const condition = newStatements[editingComponent.statementIndex].strategy[editingComponent.conditionIndex]
               const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
 
@@ -3601,12 +3691,12 @@ if (
               }
             }
 
-            setStatements(newStatements)
-            setShowBollingerModal(false)
-            setEditingComponent(null)
+            setStatements(newStatements);
+            setShowBollingerModal(false);
+            setEditingComponent(null);
             setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
+              searchInputRefs.current[activeStatementIndex]?.focus();
+            }, 100);
           }}
         />
       )}

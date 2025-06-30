@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { X } from 'lucide-react'
 
-interface CrossingUpSettingsModalProps {
+interface CrossingDownSettingsModalProps {
   onClose: () => void
   currentInp1?: any // Information about the current inp1 indicator
   onSave: (settings: {
@@ -27,7 +27,7 @@ interface CrossingUpSettingsModalProps {
     maType?: string
     bbStdDev?: number
     bbSource?: string
-   volumeMaLength?: number
+    volumeMaLength?: number
     fastPeriod?: number
     slowPeriod?: number
     signalPeriod?: number
@@ -35,9 +35,10 @@ interface CrossingUpSettingsModalProps {
     dPeriod?: number
     period?: number
   }) => void
+  onNext: (indicator: string, timeframe: string) => void
 }
 
-export function CrossingDownSettingsModal({ onClose, currentInp1, onSave }: CrossingUpSettingsModalProps) {
+export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext }: CrossingDownSettingsModalProps) {
   const [valueType, setValueType] = useState("value")
   const [customValue, setCustomValue] = useState("50")
   const [indicator, setIndicator] = useState("")
@@ -306,7 +307,7 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave }: Cros
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px] bg-white p-0 border border-gray-200 shadow-lg rounded-lg overflow-hidden">
+      <DialogContent className="sm:max-w-[425px] max-h-[90vh] bg-white p-0 border border-gray-200 shadow-lg rounded-lg overflow-hidden flex flex-col">
         <div className="flex justify-between items-center p-4 border-b border-gray-200">
           <DialogTitle className="text-lg font-medium text-black">Crossing Below Settings</DialogTitle>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
@@ -314,7 +315,7 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave }: Cros
           </button>
         </div>
 
-        <div className="p-4">
+        <div className="p-4 overflow-y-auto flex-1">
           <div className="mb-4">
             <Label className="block text-sm font-medium text-black mb-2">Value type</Label>
             <div className="grid grid-cols-3 gap-1 bg-gray-100 p-1 rounded-md">
@@ -440,13 +441,18 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave }: Cros
                       <SelectItem value="3h">3h</SelectItem>
                       <SelectItem value="4h">4h</SelectItem>
                       <SelectItem value="6h">6h</SelectItem>
-                      <SelectItem value="1d">1D</SelectItem>
+                      <SelectItem value="8h">8h</SelectItem>
+                      <SelectItem value="12h">12h</SelectItem>
+                      <SelectItem value="1d">1 day</SelectItem>
+                      <SelectItem value="3d">3 days</SelectItem>
+                      <SelectItem value="1w">1 week</SelectItem>
+                      <SelectItem value="1M">1 month</SelectItem>
                       <SelectItem value="custom">Custom</SelectItem>
                     </SelectContent>
                   </Select>
                   {timeframe === "custom" && (
                     <Input
-                      placeholder="Enter custom timeframe (e.g., 36min, 2.5h, 3D)"
+                      placeholder="Enter custom timeframe (e.g., 36min, 2.5h)"
                       value={customTimeframe}
                       onChange={(e) => setCustomTimeframe(e.target.value)}
                       className="w-full border border-gray-300 rounded-md text-black"
@@ -455,310 +461,39 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave }: Cros
                 </div>
               </div>
 
-              {/* Dynamic parameter configuration based on selected indicator */}
-              {indicator === "rsi" && (
-                  <div className="space-y-3">
-                <div>
-                  <Label htmlFor="rsiPeriod" className="block text-sm font-medium text-black mb-2">
-                    RSI Period
-                  </Label>
-                  <Input
-                    id="rsiPeriod"
-                    value={rsiLength}
-                    onChange={(e) => setRsiLength(Number(e.target.value))}
-                    type="number"
-                    className="w-full border border-gray-300 rounded-md text-black"
-                  />
-                </div>
-                <div>
-            <Label htmlFor="rsiSource" className="block text-sm font-medium text-black mb-2">
-              RSI Source
-            </Label>
-            <Select value={rsiSource} onValueChange={setRsiSource}>
-              <SelectTrigger id="rsiSource" className="w-full border border-gray-300 text-black bg-white">
-                <SelectValue placeholder="Select source" />
-              </SelectTrigger>
-              <SelectContent className="bg-white text-black">
-                <SelectItem value="Close">Close</SelectItem>
-                <SelectItem value="Open">Open</SelectItem>
-                <SelectItem value="High">High</SelectItem>
-                <SelectItem value="Low">Low</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-                </div>
-                
-
-              )}
-
-              {indicator === "rsi-ma" && (
-                <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="rsiMaLength" className="block text-sm font-medium text-black mb-2">
-                      RSI Length
-                    </Label>
-                    <Input
-                      id="rsiMaLength"
-                      value={rsiMaLength}
-                      onChange={(e) => setRsiMaLength(Number(e.target.value))}
-                      type="number"
-                      className="w-full border border-gray-300 rounded-md text-black"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="maLength" className="block text-sm font-medium text-black mb-2">
-                      MA Length
-                    </Label>
-                    <Input
-                      id="maLength"
-                      value={maLength}
-                      onChange={(e) => setMaLength(Number(e.target.value))}
-                      type="number"
-                      className="w-full border border-gray-300 rounded-md text-black"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="rsiSource" className="block text-sm font-medium text-black mb-2">
-                      RSI Source
-                    </Label>
-                    <Select value={rsiSource} onValueChange={setRsiSource}>
-                      <SelectTrigger id="rsiSource" className="w-full border border-gray-300 text-black bg-white">
-                        <SelectValue placeholder="Select source" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-white text-black">
-                        <SelectItem value="Close">Close</SelectItem>
-                        <SelectItem value="Open">Open</SelectItem>
-                        <SelectItem value="High">High</SelectItem>
-                        <SelectItem value="Low">Low</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label htmlFor="maType" className="block text-sm font-medium text-black mb-2">
-                      MA Type
-                    </Label>
-                    <Select value={maType} onValueChange={setMaType}>
-                      <SelectTrigger id="maType" className="w-full border border-gray-300 text-black bg-white">
-                        <SelectValue placeholder="Select MA type" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-white text-black">
-                        <SelectItem value="SMA">SMA</SelectItem>
-                        <SelectItem value="EMA">EMA</SelectItem>
-                        <SelectItem value="WMA">WMA</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              )}
-
-{indicator === "bollinger" && (
-                      <div className="space-y-3">
-                        <div>
-                          <Label htmlFor="band" className="block text-sm font-medium text-black mb-2">
-                            Band
-                          </Label>
-                          <Select value={band} onValueChange={setBand}>
-                            <SelectTrigger className="w-full border border-gray-300 text-black bg-white">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent className="bg-white text-black">
-                              <SelectItem value="upperband">Upper Band</SelectItem>
-                              <SelectItem value="middleband">Middle Band</SelectItem>
-                              <SelectItem value="lowerband">Lower Band</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label htmlFor="timeperiod" className="block text-sm font-medium text-black mb-2">
-                            Time Period
-                          </Label>
-                          <Input
-                            id="timeperiod"
-                            value={timeperiod}
-                            onChange={(e) => setTimeperiod(Number(e.target.value))}
-                            type="number"
-                            className="w-full border border-gray-300 rounded-md text-black"
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="bbStdDev" className="block text-sm font-medium text-black mb-2">
-                            Standard Deviation
-                          </Label>
-                          <Input
-                            id="bbStdDev"
-                            value={bbStdDev}
-                            onChange={(e) => setBbStdDev(Number(e.target.value))}
-                            type="number"
-                            step="0.1"
-                            className="w-full border border-gray-300 rounded-md text-black"
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="bbSource" className="block text-sm font-medium text-black mb-2">
-                            Source
-                          </Label>
-                          <Select value={bbSource} onValueChange={setBbSource}>
-                            <SelectTrigger className="w-full border border-gray-300 text-black bg-white">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent className="bg-white text-black">
-                              <SelectItem value="close">Close</SelectItem>
-                              <SelectItem value="open">Open</SelectItem>
-                              <SelectItem value="high">High</SelectItem>
-                              <SelectItem value="low">Low</SelectItem>
-                             
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    )}
-
-
-              {indicator === "volume-ma" && (
-                <div>
-                  <Label htmlFor="volumeMaLength" className="block text-sm font-medium text-black mb-2">
-                    MA Length
-                  </Label>
-                  <Input
-                    id="volumeMaLength"
-                    value={volumeMaLength}
-                    onChange={(e) => setVolumeMaLength(Number(e.target.value))}
-                    type="number"
-                    className="w-full border border-gray-300 rounded-md text-black"
-                  />
-                </div>
-              )}
-
-              {indicator === "macd" && (
-                <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="fastPeriod" className="block text-sm font-medium text-black mb-2">
-                      Fast Period
-                    </Label>
-                    <Input
-                      id="fastPeriod"
-                      value={fastPeriod}
-                      onChange={(e) => setFastPeriod(Number(e.target.value))}
-                      type="number"
-                      className="w-full border border-gray-300 rounded-md text-black"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="slowPeriod" className="block text-sm font-medium text-black mb-2">
-                      Slow Period
-                    </Label>
-                    <Input
-                      id="slowPeriod"
-                      value={slowPeriod}
-                      onChange={(e) => setSlowPeriod(Number(e.target.value))}
-                      type="number"
-                      className="w-full border border-gray-300 rounded-md text-black"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="signalPeriod" className="block text-sm font-medium text-black mb-2">
-                      Signal Period
-                    </Label>
-                    <Input
-                      id="signalPeriod"
-                      value={signalPeriod}
-                      onChange={(e) => setSignalPeriod(Number(e.target.value))}
-                      type="number"
-                      className="w-full border border-gray-300 rounded-md text-black"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {indicator === "stochastic" && (
-                <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="kPeriod" className="block text-sm font-medium text-black mb-2">
-                      %K Period
-                    </Label>
-                    <Input
-                      id="kPeriod"
-                      value={kPeriod}
-                      onChange={(e) => setKPeriod(Number(e.target.value))}
-                      type="number"
-                      className="w-full border border-gray-300 rounded-md text-black"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="dPeriod" className="block text-sm font-medium text-black mb-2">
-                      %D Period
-                    </Label>
-                    <Input
-                      id="dPeriod"
-                      value={dPeriod}
-                      onChange={(e) => setDPeriod(Number(e.target.value))}
-                      type="number"
-                      className="w-full border border-gray-300 rounded-md text-black"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {indicator === "atr" && (
-                <div>
-                  <Label htmlFor="atrPeriod" className="block text-sm font-medium text-black mb-2">
-                    ATR Period
-                  </Label>
-                  <Input
-                    id="atrPeriod"
-                    value={period}
-                    onChange={(e) => setPeriod(Number(e.target.value))}
-                    type="number"
-                    className="w-full border border-gray-300 rounded-md text-black"
-                  />
-                </div>
-              )}
-
-              {(indicator === "sma" || indicator === "ema" || indicator === "wma") && (
-                <div>
-                  <Label htmlFor="maPeriod" className="block text-sm font-medium text-black mb-2">
-                    MA Period
-                  </Label>
-                  <Input
-                    id="maPeriod"
-                    value={period}
-                    onChange={(e) => setPeriod(Number(e.target.value))}
-                    type="number"
-                    className="w-full border border-gray-300 rounded-md text-black"
-                  />
-                </div>
-              )}
-
-              {/* For price indicators, show no additional parameters message */}
-              {["open", "high", "low", "close", "price"].includes(indicator) && (
-                <div className="text-sm text-gray-600">
-                  No additional parameters required for {indicator.charAt(0).toUpperCase() + indicator.slice(1)} price.
-                </div>
-              )}
-
-              {indicator === "volume" && (
-                <div className="text-sm text-gray-600">
-                  No additional parameters required for Volume.
-                </div>
-              )}
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  onClick={() => {
+                    onNext(indicator, timeframe === "custom" ? customTimeframe : timeframe)
+                  }}
+                  className="rounded-full px-6 bg-[#85e1fe] text-black hover:bg-[#6bc8e3] border-none"
+                  disabled={!indicator || !timeframe || (timeframe === "custom" && !customTimeframe)}
+                >
+                  Next
+                </Button>
+              </div>
             </div>
           )}
         </div>
 
         <div className="flex justify-end gap-2 p-4 border-t border-gray-200 bg-gray-50">
-          <Button
-            variant="outline"
-            onClick={onClose}
-            className="rounded-full px-6 text-black border-gray-300 hover:bg-gray-100 hover:text-black"
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSave}
-            className="rounded-full px-6 bg-[#85e1fe] text-black hover:bg-[#6bc8e3] border-none"
-          >
-            Save
-          </Button>
+          {valueType !== "other" && (
+            <>
+              <Button
+                variant="outline"
+                onClick={onClose}
+                className="rounded-full px-6 text-black border-gray-300 hover:bg-gray-100 hover:text-black"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSave}
+                className="rounded-full px-6 bg-[#85e1fe] text-black hover:bg-[#6bc8e3] border-none"
+              >
+                Save
+              </Button>
+            </>
+          )}
         </div>
       </DialogContent>
     </Dialog>
