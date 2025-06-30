@@ -7,11 +7,11 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { X } from "lucide-react"
+import { RsiSettingsModal } from "@/components/modals/rsi-settings-modal"
 
 interface AboveSettingsModalProps {
   onClose: () => void
   currentInp1?: any // Information about the current inp1 indicator
-  
   onSave: (settings: {
     valueType: string
     customValue?: string
@@ -28,7 +28,6 @@ interface AboveSettingsModalProps {
     maType?: string
     bbStdDev?: number
     bbSource?: string
-
     // Volume-MA parameters
     volumeMaLength?: number
     fastPeriod?: number
@@ -36,12 +35,14 @@ interface AboveSettingsModalProps {
     signalPeriod?: number
     kPeriod?: number
     dPeriod?: number
-    period?: number}) => void
+    period?: number
+  }) => void
+  onNext: (indicator: string, timeframe: string) => void
 }
 
-export function AboveSettingsModal({ onClose, currentInp1, onSave }: AboveSettingsModalProps) {
+export function AboveSettingsModal({ onClose, currentInp1, onSave, onNext }: AboveSettingsModalProps) {
   const [valueType, setValueType] = useState("value")
-  const [customValue, setCustomValue] = useState("70")
+  const [customValue, setCustomValue] = useState("50")
   const [indicator, setIndicator] = useState("")
   const [timeframe, setTimeframe] = useState("3h")
   const [band, setBand] = useState("upperband")
@@ -57,6 +58,7 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave }: AboveSettin
   const [rsiSource, setRsiSource] = useState("Close")
   const [maType, setMaType] = useState("SMA")
   const [bbStdDev, setBbStdDev] = useState(2.0)
+  const [bbSource, setBbSource] = useState("close")
 
   // Volume-MA parameters
   const [volumeMaLength, setVolumeMaLength] = useState(20)
@@ -68,7 +70,11 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave }: AboveSettin
   const [kPeriod, setKPeriod] = useState(14)
   const [dPeriod, setDPeriod] = useState(3)
   const [period, setPeriod] = useState(14)
-  const [bbSource, setBbSource] = useState("close")
+
+  // Add state to control showing the indicator modal for 'other' valueType
+  const [showIndicatorModal, setShowIndicatorModal] = useState(false)
+  const [pendingOtherIndicator, setPendingOtherIndicator] = useState<string | null>(null)
+  const [pendingTimeframe, setPendingTimeframe] = useState<string>("3h")
 
   // Get available existing indicators based on inp1
   const getExistingIndicatorOptions = () => {
@@ -83,12 +89,10 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave }: AboveSettin
       options.push({ value: "rsi", label: "RSI" })
       options.push({ value: "rsi-ma", label: "RSI-MA" })
     } else if (currentInp1.name === "BBANDS") {
-      options.push({ value: "bollinger", label: "Bollinger Bands" })
       // Add OHLC options for BBANDS
-      options.push({ value: "open", label: "Open" })
       options.push({ value: "high", label: "High" })
       options.push({ value: "low", label: "Low" })
-      options.push({ value: "close", label: "Close" })
+      options.push({ value: "mid", label: "Mid" })
     } else if (currentInp1.name === "MACD") {
       options.push({ value: "macd", label: "MACD" })
     } else if (
@@ -116,7 +120,8 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave }: AboveSettin
     if (currentInp1) {
       if (currentInp1.name === "RSI") {
         setRsiLength(currentInp1.input_params?.timeperiod || 14)
-        setRsiMaLength(currentInp1.input_params?.timeperiod || 14) // Always sync RSI_MA length to RSI timeperiod
+        setRsiMaLength(currentInp1.input_params?.timeperiod || 14)
+        setMaLength(currentInp1.input_params?.ma_length || 14)
         setRsiSource(currentInp1.input_params?.rsi_source || "Close")
         setMaType(currentInp1.input_params?.ma_type || "SMA")
         setBbStdDev(currentInp1.input_params?.bb_stddev || 2.0)
@@ -134,7 +139,6 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave }: AboveSettin
         (currentInp1.type === "CUSTOM_I" && currentInp1.name === "Volume_MA")
       ) {
         setVolumeMaLength(currentInp1.input_params?.ma_length || 20)
-        // Make sure to set the indicator to "volume-ma" if that's the selected type
         if (valueType === "indicator" || valueType === "other") {
           setIndicator("volume-ma")
         }
@@ -146,6 +150,40 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave }: AboveSettin
     }
   }, [currentInp1])
 
+  const handleSave = () => {
+    // For RSI_MA indicator, ensure we use the correct RSI length and MA length from currentInp1 if it's RSI
+    let finalRsiMaLength = rsiMaLength
+    let finalMaLength = maLength
+    if (indicator === "rsi-ma" && currentInp1?.name === "RSI") {
+      finalRsiMaLength = currentInp1.input_params?.timeperiod || 14
+      finalMaLength = currentInp1.input_params?.ma_length || 14
+    }
+    
+    onSave({
+      valueType,
+      customValue,
+      indicator,
+      timeframe: timeframe === "custom" ? customTimeframe : timeframe,
+      band,
+      timeperiod,
+      rsiLength,
+      rsiMaLength: finalRsiMaLength,
+      maLength: finalMaLength,
+      rsiSource,
+      maType,
+      bbStdDev,
+      bbSource,
+      volumeMaLength,
+      fastPeriod,
+      slowPeriod,
+      signalPeriod,
+      kPeriod,
+      dPeriod,
+      period,
+    })
+    onClose()
+  }
+
   // Add a helper to get read-only parameter values for existing indicators
   const getReadOnlyParams = () => {
     if (!currentInp1) return {}
@@ -156,9 +194,7 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave }: AboveSettin
       }
     }
     if (indicator === "rsi-ma") {
-      // If currentInp1 is RSI, use its timeperiod for RSI_MA's rsi_length
-      // If currentInp1 is RSI_MA, use its rsi_length
-      const rsiLength = currentInp1.name === "RSI"
+      const rsiLength = currentInp1.name === "RSI" 
         ? currentInp1.input_params?.timeperiod || 14
         : currentInp1.input_params?.rsi_length || 14
       return {
@@ -177,7 +213,6 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave }: AboveSettin
     return {}
   }
 
-  // Modified to render read-only parameter displays for existing indicators
   const renderExistingIndicatorParams = () => {
     if (valueType !== "indicator" || !indicator) return null
     const params = getReadOnlyParams()
@@ -267,47 +302,13 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave }: AboveSettin
     return null
   }
 
-  const handleSave = () => {
-    let finalRsiMaLength = rsiMaLength
-    let finalMaLength = maLength
-    let finalRsiSource = rsiSource
-    let finalMaType = maType
-    let finalBbStdDev = bbStdDev
-    if (indicator === "rsi-ma" && currentInp1) {
-      finalRsiMaLength = currentInp1.input_params?.rsi_length || currentInp1.input_params?.timeperiod || 14
-      finalMaLength = currentInp1.input_params?.ma_length || 14
-      finalRsiSource = currentInp1.input_params?.rsi_source || currentInp1.input_params?.source || "Close"
-      finalMaType = currentInp1.input_params?.ma_type || "SMA"
-      finalBbStdDev = currentInp1.input_params?.bb_stddev || 2.0
-    }
-    onSave({
-      valueType,
-      customValue,
-      indicator,
-      timeframe,
-      band,
-      timeperiod,
-      rsiLength,
-      rsiMaLength: finalRsiMaLength,
-      maLength: finalMaLength,
-      rsiSource: finalRsiSource,
-      maType: finalMaType,
-      bbStdDev: finalBbStdDev,
-      bbSource,
-      volumeMaLength,
-      fastPeriod,
-      slowPeriod,
-      signalPeriod,
-      kPeriod,
-      dPeriod,
-      period,
-    })
-    onClose()
+  const handleAboveNext = (indicator: string, timeframe: string) => {
+    onNext(indicator, timeframe)
   }
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px] bg-white p-0 border border-gray-200 shadow-lg rounded-lg overflow-hidden">
+      <DialogContent className="sm:max-w-[425px] max-h-[90vh] bg-white p-0 border border-gray-200 shadow-lg rounded-lg overflow-hidden flex flex-col">
         <div className="flex justify-between items-center p-4 border-b border-gray-200">
           <DialogTitle className="text-lg font-medium text-black">Above Settings</DialogTitle>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
@@ -315,7 +316,7 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave }: AboveSettin
           </button>
         </div>
 
-        <div className="p-4">
+        <div className="p-4 overflow-y-auto flex-1">
           <div className="mb-4">
             <Label className="block text-sm font-medium text-black mb-2">Value type</Label>
             <div className="grid grid-cols-3 gap-1 bg-gray-100 p-1 rounded-md">
@@ -382,7 +383,6 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave }: AboveSettin
                   </SelectContent>
                 </Select>
               </div>
-              
               {renderExistingIndicatorParams()}
             </div>
           )}
@@ -421,347 +421,118 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave }: AboveSettin
                 </Select>
               </div>
 
-              {indicator && (
-                <div>
-                  <Label htmlFor="timeframe" className="block text-sm font-medium text-black mb-2">
-                    Timeframe
-                  </Label>
-                  <div className="space-y-2">
-                    <Select value={timeframe} onValueChange={setTimeframe}>
-                      <SelectTrigger id="timeframe" className="w-full border border-gray-300 text-black bg-white">
-                        <SelectValue placeholder="Select timeframe" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-white text-black">
-                        <SelectItem value="1min">1min</SelectItem>
-                        <SelectItem value="5min">5min</SelectItem>
-                        <SelectItem value="15min">15min</SelectItem>
-                        <SelectItem value="30min">30min</SelectItem>
-                        <SelectItem value="45min">45min</SelectItem>
-                        <SelectItem value="1h">1h</SelectItem>
-                        <SelectItem value="2h">2h</SelectItem>
-                        <SelectItem value="3h">3h</SelectItem>
-                        <SelectItem value="4h">4h</SelectItem>
-                        <SelectItem value="6h">6h</SelectItem>
-                        <SelectItem value="1d">1D</SelectItem>
-                        <SelectItem value="custom">Custom</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {timeframe === "custom" && (
-                      <Input
-                        placeholder="Enter custom timeframe (e.g., 36min, 2.5h, 3D)"
-                        value={customTimeframe}
-                        onChange={(e) => setCustomTimeframe(e.target.value)}
-                        className="w-full border border-gray-300 rounded-md text-black"
-                      />
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Dynamic parameter configuration based on selected indicator */}
-              {indicator === "rsi" && (
-                  <div className="space-y-3">
-                <div>
-                  <Label htmlFor="rsiPeriod" className="block text-sm font-medium text-black mb-2">
-                    RSI Period
-                  </Label>
-                  <Input
-                    id="rsiPeriod"
-                    value={rsiLength}
-                    onChange={(e) => setRsiLength(Number(e.target.value))}
-                    type="number"
-                    className="w-full border border-gray-300 rounded-md text-black"
-                  />
-                </div>
-                <div>
-            <Label htmlFor="rsiSource" className="block text-sm font-medium text-black mb-2">
-              RSI Source
-            </Label>
-            <Select value={rsiSource} onValueChange={setRsiSource}>
-              <SelectTrigger id="rsiSource" className="w-full border border-gray-300 text-black bg-white">
-                <SelectValue placeholder="Select source" />
-              </SelectTrigger>
-              <SelectContent className="bg-white text-black">
-                <SelectItem value="Close">Close</SelectItem>
-                <SelectItem value="Open">Open</SelectItem>
-                <SelectItem value="High">High</SelectItem>
-                <SelectItem value="Low">Low</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-                </div>
-                
-
-              )}
-
-              {indicator === "rsi-ma" && (
-                <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="rsiMaLength" className="block text-sm font-medium text-black mb-2">
-                      RSI Length
-                    </Label>
+              <div>
+                <Label htmlFor="timeframe" className="block text-sm font-medium text-black mb-2">
+                  Timeframe
+                </Label>
+                <div className="space-y-2">
+                  <Select value={timeframe} onValueChange={setTimeframe}>
+                    <SelectTrigger id="timeframe" className="w-full border border-gray-300 text-black bg-white">
+                      <SelectValue placeholder="Select timeframe" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white text-black">
+                      <SelectItem value="1min">1min</SelectItem>
+                      <SelectItem value="5min">5min</SelectItem>
+                      <SelectItem value="15min">15min</SelectItem>
+                      <SelectItem value="30min">30min</SelectItem>
+                      <SelectItem value="45min">45min</SelectItem>
+                      <SelectItem value="1h">1h</SelectItem>
+                      <SelectItem value="2h">2h</SelectItem>
+                      <SelectItem value="3h">3h</SelectItem>
+                      <SelectItem value="4h">4h</SelectItem>
+                      <SelectItem value="6h">6h</SelectItem>
+                      <SelectItem value="8h">8h</SelectItem>
+                      <SelectItem value="12h">12h</SelectItem>
+                      <SelectItem value="1d">1 day</SelectItem>
+                      <SelectItem value="3d">3 days</SelectItem>
+                      <SelectItem value="1w">1 week</SelectItem>
+                      <SelectItem value="1M">1 month</SelectItem>
+                      <SelectItem value="custom">Custom</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {timeframe === "custom" && (
                     <Input
-                      id="rsiMaLength"
-                      value={rsiMaLength}
-                      onChange={(e) => setRsiMaLength(Number(e.target.value))}
-                      type="number"
+                      placeholder="Enter custom timeframe (e.g., 36min, 2.5h)"
+                      value={customTimeframe}
+                      onChange={(e) => setCustomTimeframe(e.target.value)}
                       className="w-full border border-gray-300 rounded-md text-black"
                     />
-                  </div>
-                  <div>
-                    <Label htmlFor="maLength" className="block text-sm font-medium text-black mb-2">
-                      MA Length
-                    </Label>
-                    <Input
-                      id="maLength"
-                      value={maLength}
-                      onChange={(e) => setMaLength(Number(e.target.value))}
-                      type="number"
-                      className="w-full border border-gray-300 rounded-md text-black"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="rsiSource" className="block text-sm font-medium text-black mb-2">
-                      RSI Source
-                    </Label>
-                    <Select value={rsiSource} onValueChange={setRsiSource}>
-                      <SelectTrigger id="rsiSource" className="w-full border border-gray-300 text-black bg-white">
-                        <SelectValue placeholder="Select source" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-white text-black">
-                        <SelectItem value="Close">Close</SelectItem>
-                        <SelectItem value="Open">Open</SelectItem>
-                        <SelectItem value="High">High</SelectItem>
-                        <SelectItem value="Low">Low</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label htmlFor="maType" className="block text-sm font-medium text-black mb-2">
-                      MA Type
-                    </Label>
-                    <Select value={maType} onValueChange={setMaType}>
-                      <SelectTrigger id="maType" className="w-full border border-gray-300 text-black bg-white">
-                        <SelectValue placeholder="Select MA type" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-white text-black">
-                        <SelectItem value="SMA">SMA</SelectItem>
-                        <SelectItem value="EMA">EMA</SelectItem>
-                        <SelectItem value="WMA">WMA</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  )}
                 </div>
-              )}
+              </div>
 
-{indicator === "bollinger" && (
-                      <div className="space-y-3">
-                        <div>
-                          <Label htmlFor="band" className="block text-sm font-medium text-black mb-2">
-                            Band
-                          </Label>
-                          <Select value={band} onValueChange={setBand}>
-                            <SelectTrigger className="w-full border border-gray-300 text-black bg-white">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent className="bg-white text-black">
-                              <SelectItem value="upperband">Upper Band</SelectItem>
-                              <SelectItem value="middleband">Middle Band</SelectItem>
-                              <SelectItem value="lowerband">Lower Band</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label htmlFor="timeperiod" className="block text-sm font-medium text-black mb-2">
-                            Time Period
-                          </Label>
-                          <Input
-                            id="timeperiod"
-                            value={timeperiod}
-                            onChange={(e) => setTimeperiod(Number(e.target.value))}
-                            type="number"
-                            className="w-full border border-gray-300 rounded-md text-black"
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="bbStdDev" className="block text-sm font-medium text-black mb-2">
-                            Standard Deviation
-                          </Label>
-                          <Input
-                            id="bbStdDev"
-                            value={bbStdDev}
-                            onChange={(e) => setBbStdDev(Number(e.target.value))}
-                            type="number"
-                            step="0.1"
-                            className="w-full border border-gray-300 rounded-md text-black"
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="bbSource" className="block text-sm font-medium text-black mb-2">
-                            Source
-                          </Label>
-                          <Select value={bbSource} onValueChange={setBbSource}>
-                            <SelectTrigger className="w-full border border-gray-300 text-black bg-white">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent className="bg-white text-black">
-                              <SelectItem value="close">Close</SelectItem>
-                              <SelectItem value="open">Open</SelectItem>
-                              <SelectItem value="high">High</SelectItem>
-                              <SelectItem value="low">Low</SelectItem>
-                              
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    )}
-
-
-              {indicator === "volume-ma" && (
-                <div>
-                  <Label htmlFor="volumeMaLength" className="block text-sm font-medium text-black mb-2">
-                    MA Length
-                  </Label>
-                  <Input
-                    id="volumeMaLength"
-                    value={volumeMaLength}
-                    onChange={(e) => setVolumeMaLength(Number(e.target.value))}
-                    type="number"
-                    className="w-full border border-gray-300 rounded-md text-black"
-                  />
-                </div>
-              )}
-
-              {indicator === "macd" && (
-                <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="fastPeriod" className="block text-sm font-medium text-black mb-2">
-                      Fast Period
-                    </Label>
-                    <Input
-                      id="fastPeriod"
-                      value={fastPeriod}
-                      onChange={(e) => setFastPeriod(Number(e.target.value))}
-                      type="number"
-                      className="w-full border border-gray-300 rounded-md text-black"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="slowPeriod" className="block text-sm font-medium text-black mb-2">
-                      Slow Period
-                    </Label>
-                    <Input
-                      id="slowPeriod"
-                      value={slowPeriod}
-                      onChange={(e) => setSlowPeriod(Number(e.target.value))}
-                      type="number"
-                      className="w-full border border-gray-300 rounded-md text-black"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="signalPeriod" className="block text-sm font-medium text-black mb-2">
-                      Signal Period
-                    </Label>
-                    <Input
-                      id="signalPeriod"
-                      value={signalPeriod}
-                      onChange={(e) => setSignalPeriod(Number(e.target.value))}
-                      type="number"
-                      className="w-full border border-gray-300 rounded-md text-black"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {indicator === "stochastic" && (
-                <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="kPeriod" className="block text-sm font-medium text-black mb-2">
-                      %K Period
-                    </Label>
-                    <Input
-                      id="kPeriod"
-                      value={kPeriod}
-                      onChange={(e) => setKPeriod(Number(e.target.value))}
-                      type="number"
-                      className="w-full border border-gray-300 rounded-md text-black"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="dPeriod" className="block text-sm font-medium text-black mb-2">
-                      %D Period
-                    </Label>
-                    <Input
-                      id="dPeriod"
-                      value={dPeriod}
-                      onChange={(e) => setDPeriod(Number(e.target.value))}
-                      type="number"
-                      className="w-full border border-gray-300 rounded-md text-black"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {indicator === "atr" && (
-                <div>
-                  <Label htmlFor="atrPeriod" className="block text-sm font-medium text-black mb-2">
-                    ATR Period
-                  </Label>
-                  <Input
-                    id="atrPeriod"
-                    value={period}
-                    onChange={(e) => setPeriod(Number(e.target.value))}
-                    type="number"
-                    className="w-full border border-gray-300 rounded-md text-black"
-                  />
-                </div>
-              )}
-
-              {(indicator === "sma" || indicator === "ema" || indicator === "wma") && (
-                <div>
-                  <Label htmlFor="maPeriod" className="block text-sm font-medium text-black mb-2">
-                    MA Period
-                  </Label>
-                  <Input
-                    id="maPeriod"
-                    value={period}
-                    onChange={(e) => setPeriod(Number(e.target.value))}
-                    type="number"
-                    className="w-full border border-gray-300 rounded-md text-black"
-                  />
-                </div>
-              )}
-
-              {/* For price indicators, show no additional parameters message */}
-              {["open", "high", "low", "close", "price"].includes(indicator) && (
-                <div className="text-sm text-gray-600">
-                  No additional parameters required for {indicator.charAt(0).toUpperCase() + indicator.slice(1)} price.
-                </div>
-              )}
-
-              {indicator === "volume" && (
-                <div className="text-sm text-gray-600">No additional parameters required for Volume.</div>
-              )}
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  onClick={() => {
+                    onNext(indicator, timeframe === "custom" ? customTimeframe : timeframe)
+                  }}
+                  className="rounded-full px-6 bg-[#85e1fe] text-black hover:bg-[#6bc8e3] border-none"
+                  disabled={!indicator || !timeframe || (timeframe === "custom" && !customTimeframe)}
+                >
+                  Next
+                </Button>
+              </div>
             </div>
           )}
         </div>
 
         <div className="flex justify-end gap-2 p-4 border-t border-gray-200 bg-gray-50">
-          <Button
-            variant="outline"
-            onClick={onClose}
-            className="rounded-full px-6 text-black border-gray-300 hover:bg-gray-100 hover:text-black"
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSave}
-            className="rounded-full px-6 bg-[#85e1fe] text-black hover:bg-[#6bc8e3] border-none"
-          >
-            Save
-          </Button>
+          {valueType !== "other" && (
+            <>
+              <Button
+                variant="outline"
+                onClick={onClose}
+                className="rounded-full px-6 text-black border-gray-300 hover:bg-gray-100 hover:text-black"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSave}
+                className="rounded-full px-6 bg-[#85e1fe] text-black hover:bg-[#6bc8e3] border-none"
+              >
+                Save
+              </Button>
+            </>
+          )}
         </div>
       </DialogContent>
+
+      {showIndicatorModal && pendingOtherIndicator === "rsi" && (
+        <RsiSettingsModal
+          onClose={() => setShowIndicatorModal(false)}
+          onSave={(settings: any) => {
+            setShowIndicatorModal(false)
+            onSave({
+              valueType: "other",
+              indicator: "rsi",
+              timeframe: pendingTimeframe,
+              rsiLength: settings.rsiLength,
+              rsiSource: settings.source,
+              maType: settings.maType,
+              maLength: settings.maLength,
+              bbStdDev: settings.bbStdDev,
+            })
+          }}
+        />
+      )}
+      {showIndicatorModal && pendingOtherIndicator === "rsi-ma" && (
+        <RsiSettingsModal
+          onClose={() => setShowIndicatorModal(false)}
+          onSave={(settings: any) => {
+            setShowIndicatorModal(false)
+            onSave({
+              valueType: "other",
+              indicator: "rsi-ma",
+              timeframe: pendingTimeframe,
+              rsiLength: settings.rsiLength,
+              maLength: settings.maLength,
+              rsiSource: settings.source,
+              maType: settings.maType,
+              bbStdDev: settings.bbStdDev,
+            })
+          }}
+        />
+      )}
     </Dialog>
   )
 }

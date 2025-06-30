@@ -7,10 +7,11 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { X } from "lucide-react"
+import { RsiSettingsModal } from "@/components/modals/rsi-settings-modal"
 
 interface BelowSettingsModalProps {
   onClose: () => void
-  currentInp1?: any // Information about the current inp1 indicator
+  currentInp1?: any
   onSave: (settings: {
     valueType: string
     customValue?: string
@@ -29,17 +30,24 @@ interface BelowSettingsModalProps {
     bbSource?: string
     // Volume-MA parameters
     volumeMaLength?: number
+    fastPeriod?: number
+    slowPeriod?: number
+    signalPeriod?: number
+    kPeriod?: number
+    dPeriod?: number
+    period?: number
   }) => void
+  onNext: (indicator: string, timeframe: string) => void
 }
 
-export function BelowSettingsModal({ onClose, currentInp1, onSave }: BelowSettingsModalProps) {
+export function BelowSettingsModal({ onClose, currentInp1, onSave, onNext }: BelowSettingsModalProps) {
   const [valueType, setValueType] = useState("value")
   const [customValue, setCustomValue] = useState("30")
   const [indicator, setIndicator] = useState("")
   const [timeframe, setTimeframe] = useState("3h")
   const [band, setBand] = useState("lowerband")
   const [timeperiod, setTimeperiod] = useState(17)
-  const [bbSource, setBbSource] = useState("close")
+  const [customTimeframe, setCustomTimeframe] = useState("")
 
   // RSI parameters
   const [rsiLength, setRsiLength] = useState(14)
@@ -50,9 +58,23 @@ export function BelowSettingsModal({ onClose, currentInp1, onSave }: BelowSettin
   const [rsiSource, setRsiSource] = useState("Close")
   const [maType, setMaType] = useState("SMA")
   const [bbStdDev, setBbStdDev] = useState(2.0)
+  const [bbSource, setBbSource] = useState("close")
 
   // Volume-MA parameters
   const [volumeMaLength, setVolumeMaLength] = useState(20)
+
+  // Additional indicator parameters
+  const [fastPeriod, setFastPeriod] = useState(12)
+  const [slowPeriod, setSlowPeriod] = useState(26)
+  const [signalPeriod, setSignalPeriod] = useState(9)
+  const [kPeriod, setKPeriod] = useState(14)
+  const [dPeriod, setDPeriod] = useState(3)
+  const [period, setPeriod] = useState(14)
+
+  // Add state to control showing the indicator modal for 'other' valueType
+  const [showIndicatorModal, setShowIndicatorModal] = useState(false)
+  const [pendingOtherIndicator, setPendingOtherIndicator] = useState<string | null>(null)
+  const [pendingTimeframe, setPendingTimeframe] = useState<string>("3h")
 
   // Get available existing indicators based on inp1
   const getExistingIndicatorOptions = () => {
@@ -67,12 +89,10 @@ export function BelowSettingsModal({ onClose, currentInp1, onSave }: BelowSettin
       options.push({ value: "rsi", label: "RSI" })
       options.push({ value: "rsi-ma", label: "RSI-MA" })
     } else if (currentInp1.name === "BBANDS") {
-      options.push({ value: "bollinger", label: "Bollinger Bands" })
       // Add OHLC options for BBANDS
-      options.push({ value: "open", label: "Open" })
       options.push({ value: "high", label: "High" })
       options.push({ value: "low", label: "Low" })
-      options.push({ value: "close", label: "Close" })
+      options.push({ value: "mid", label: "Mid" })
     } else if (currentInp1.name === "MACD") {
       options.push({ value: "macd", label: "MACD" })
     } else if (
@@ -100,6 +120,11 @@ export function BelowSettingsModal({ onClose, currentInp1, onSave }: BelowSettin
     if (currentInp1) {
       if (currentInp1.name === "RSI") {
         setRsiLength(currentInp1.input_params?.timeperiod || 14)
+        setRsiMaLength(currentInp1.input_params?.timeperiod || 14)
+        setMaLength(currentInp1.input_params?.ma_length || 14)
+        setRsiSource(currentInp1.input_params?.rsi_source || "Close")
+        setMaType(currentInp1.input_params?.ma_type || "SMA")
+        setBbStdDev(currentInp1.input_params?.bb_stddev || 2.0)
       } else if (currentInp1.name === "RSI_MA") {
         setRsiMaLength(currentInp1.input_params?.rsi_length || 14)
         setMaLength(currentInp1.input_params?.ma_length || 14)
@@ -114,7 +139,6 @@ export function BelowSettingsModal({ onClose, currentInp1, onSave }: BelowSettin
         (currentInp1.type === "CUSTOM_I" && currentInp1.name === "Volume_MA")
       ) {
         setVolumeMaLength(currentInp1.input_params?.ma_length || 20)
-        // Make sure to set the indicator to "volume-ma" if that's the selected type
         if (valueType === "indicator" || valueType === "other") {
           setIndicator("volume-ma")
         }
@@ -125,6 +149,39 @@ export function BelowSettingsModal({ onClose, currentInp1, onSave }: BelowSettin
       }
     }
   }, [currentInp1])
+
+  const handleSave = () => {
+    // For RSI_MA indicator, ensure we use the correct RSI length and MA length from currentInp1 if it's RSI
+    let finalRsiMaLength = rsiMaLength
+    let finalMaLength = maLength
+    if (indicator === "rsi-ma" && currentInp1?.name === "RSI") {
+      finalRsiMaLength = currentInp1.input_params?.timeperiod || 14
+      finalMaLength = currentInp1.input_params?.ma_length || 14
+    }
+    
+    onSave({
+      valueType,
+      customValue,
+      indicator,
+      timeframe: timeframe === "custom" ? customTimeframe : timeframe,
+      band,
+      timeperiod,
+      rsiLength,
+      rsiMaLength: finalRsiMaLength,
+      maLength: finalMaLength,
+      rsiSource,
+      maType,
+      bbStdDev,
+      bbSource,
+      volumeMaLength,
+      fastPeriod,
+      slowPeriod,
+      signalPeriod,
+      kPeriod,
+      dPeriod,
+      period,
+    })
+  }
 
   // Add a helper to get read-only parameter values for existing indicators
   const getReadOnlyParams = () => {
@@ -138,9 +195,10 @@ export function BelowSettingsModal({ onClose, currentInp1, onSave }: BelowSettin
     if (indicator === "rsi-ma") {
       // If currentInp1 is RSI, use its timeperiod for RSI_MA's rsi_length
       // If currentInp1 is RSI_MA, use its rsi_length
-      const rsiLength = currentInp1.name === "RSI"
+      const rsiLength = currentInp1.name === "RSI" 
         ? currentInp1.input_params?.timeperiod || 14
         : currentInp1.input_params?.rsi_length || 14
+      
       return {
         rsiLength: rsiLength,
         maLength: currentInp1.input_params?.ma_length || 14,
@@ -247,41 +305,13 @@ export function BelowSettingsModal({ onClose, currentInp1, onSave }: BelowSettin
     return null
   }
 
-  const handleSave = () => {
-    let finalRsiMaLength = rsiMaLength
-    let finalMaLength = maLength
-    let finalRsiSource = rsiSource
-    let finalMaType = maType
-    let finalBbStdDev = bbStdDev
-    if (indicator === "rsi-ma" && currentInp1) {
-      finalRsiMaLength = currentInp1.input_params?.rsi_length || currentInp1.input_params?.timeperiod || 14
-      finalMaLength = currentInp1.input_params?.ma_length || 14
-      finalRsiSource = currentInp1.input_params?.rsi_source || currentInp1.input_params?.source || "Close"
-      finalMaType = currentInp1.input_params?.ma_type || "SMA"
-      finalBbStdDev = currentInp1.input_params?.bb_stddev || 2.0
-    }
-    onSave({
-      valueType,
-      customValue,
-      indicator,
-      timeframe,
-      band,
-      timeperiod,
-      rsiLength,
-      rsiMaLength: finalRsiMaLength,
-      maLength: finalMaLength,
-      rsiSource: finalRsiSource,
-      maType: finalMaType,
-      bbStdDev: finalBbStdDev,
-      bbSource,
-      volumeMaLength,
-    })
-    onClose()
+  const handleCrossingUpNext = (indicator: string, timeframe: string) => {
+    onNext(indicator, timeframe)
   }
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px] bg-white p-0 border border-gray-200 shadow-lg rounded-lg overflow-hidden">
+      <DialogContent className="sm:max-w-[425px] max-h-[90vh] bg-white p-0 border border-gray-200 shadow-lg rounded-lg overflow-hidden flex flex-col">
         <div className="flex justify-between items-center p-4 border-b border-gray-200">
           <DialogTitle className="text-lg font-medium text-black">Below Settings</DialogTitle>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
@@ -289,7 +319,7 @@ export function BelowSettingsModal({ onClose, currentInp1, onSave }: BelowSettin
           </button>
         </div>
 
-        <div className="p-4">
+        <div className="p-4 overflow-y-auto flex-1">
           <div className="mb-4">
             <Label className="block text-sm font-medium text-black mb-2">Value type</Label>
             <div className="grid grid-cols-3 gap-1 bg-gray-100 p-1 rounded-md">
@@ -371,170 +401,140 @@ export function BelowSettingsModal({ onClose, currentInp1, onSave }: BelowSettin
                     <SelectValue placeholder="Select indicator" />
                   </SelectTrigger>
                   <SelectContent className="bg-white text-black">
+                    {/* Price Indicators */}
                     <SelectItem value="close">Close</SelectItem>
                     <SelectItem value="open">Open</SelectItem>
                     <SelectItem value="high">High</SelectItem>
                     <SelectItem value="low">Low</SelectItem>
                     <SelectItem value="price">Price</SelectItem>
-                    <SelectItem value="bollinger">Bollinger Bands</SelectItem>
+
+                    {/* Technical Indicators */}
                     <SelectItem value="rsi">RSI</SelectItem>
+                    <SelectItem value="rsi-ma">RSI-MA</SelectItem>
+                    <SelectItem value="bollinger">Bollinger Bands</SelectItem>
+                    <SelectItem value="macd">MACD</SelectItem>
+                    <SelectItem value="sma">Simple Moving Average (SMA)</SelectItem>
+                    <SelectItem value="stochastic">Stochastic</SelectItem>
+                    <SelectItem value="atr">Average True Range (ATR)</SelectItem>
+
+                    {/* Volume Indicators */}
                     <SelectItem value="volume">Volume</SelectItem>
                     <SelectItem value="volume-ma">Volume MA</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              {indicator && (
-                <div>
-                  <Label htmlFor="timeframe" className="block text-sm font-medium text-black mb-2">
-                    Timeframe
-                  </Label>
+              <div>
+                <Label htmlFor="timeframe" className="block text-sm font-medium text-black mb-2">
+                  Timeframe
+                </Label>
+                <div className="space-y-2">
                   <Select value={timeframe} onValueChange={setTimeframe}>
                     <SelectTrigger id="timeframe" className="w-full border border-gray-300 text-black bg-white">
                       <SelectValue placeholder="Select timeframe" />
                     </SelectTrigger>
                     <SelectContent className="bg-white text-black">
+                      <SelectItem value="1min">1min</SelectItem>
+                      <SelectItem value="5min">5min</SelectItem>
                       <SelectItem value="15min">15min</SelectItem>
                       <SelectItem value="30min">30min</SelectItem>
                       <SelectItem value="45min">45min</SelectItem>
                       <SelectItem value="1h">1h</SelectItem>
+                      <SelectItem value="2h">2h</SelectItem>
                       <SelectItem value="3h">3h</SelectItem>
                       <SelectItem value="4h">4h</SelectItem>
-                      <SelectItem value="1 day">1 day</SelectItem>
+                      <SelectItem value="6h">6h</SelectItem>
+                      <SelectItem value="8h">8h</SelectItem>
+                      <SelectItem value="12h">12h</SelectItem>
+                      <SelectItem value="1d">1 day</SelectItem>
+                      <SelectItem value="3d">3 days</SelectItem>
+                      <SelectItem value="1w">1 week</SelectItem>
+                      <SelectItem value="1M">1 month</SelectItem>
+                      <SelectItem value="custom">Custom</SelectItem>
                     </SelectContent>
                   </Select>
+                  {timeframe === "custom" && (
+                    <Input
+                      placeholder="Enter custom timeframe (e.g., 36min, 2.5h)"
+                      value={customTimeframe}
+                      onChange={(e) => setCustomTimeframe(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md text-black"
+                    />
+                  )}
                 </div>
-              )}
-                {indicator === "rsi" && (
-                  <div className="space-y-3">
-                <div>
-                  <Label htmlFor="rsiPeriod" className="block text-sm font-medium text-black mb-2">
-                    RSI Period
-                  </Label>
-                  <Input
-                    id="rsiPeriod"
-                    value={rsiLength}
-                    onChange={(e) => setRsiLength(Number(e.target.value))}
-                    type="number"
-                    className="w-full border border-gray-300 rounded-md text-black"
-                  />
-                </div>
-                <div>
-            <Label htmlFor="rsiSource" className="block text-sm font-medium text-black mb-2">
-              RSI Source
-            </Label>
-            <Select value={rsiSource} onValueChange={setRsiSource}>
-              <SelectTrigger id="rsiSource" className="w-full border border-gray-300 text-black bg-white">
-                <SelectValue placeholder="Select source" />
-              </SelectTrigger>
-              <SelectContent className="bg-white text-black">
-                <SelectItem value="Close">Close</SelectItem>
-                <SelectItem value="Open">Open</SelectItem>
-                <SelectItem value="High">High</SelectItem>
-                <SelectItem value="Low">Low</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-                </div>
-                
+              </div>
 
-              )}
-
-{indicator === "bollinger" && (
-                      <div className="space-y-3">
-                        <div>
-                          <Label htmlFor="band" className="block text-sm font-medium text-black mb-2">
-                            Band
-                          </Label>
-                          <Select value={band} onValueChange={setBand}>
-                            <SelectTrigger className="w-full border border-gray-300 text-black bg-white">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent className="bg-white text-black">
-                              <SelectItem value="upperband">Upper Band</SelectItem>
-                              <SelectItem value="middleband">Middle Band</SelectItem>
-                              <SelectItem value="lowerband">Lower Band</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label htmlFor="timeperiod" className="block text-sm font-medium text-black mb-2">
-                            Time Period
-                          </Label>
-                          <Input
-                            id="timeperiod"
-                            value={timeperiod}
-                            onChange={(e) => setTimeperiod(Number(e.target.value))}
-                            type="number"
-                            className="w-full border border-gray-300 rounded-md text-black"
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="bbStdDev" className="block text-sm font-medium text-black mb-2">
-                            Standard Deviation
-                          </Label>
-                          <Input
-                            id="bbStdDev"
-                            value={bbStdDev}
-                            onChange={(e) => setBbStdDev(Number(e.target.value))}
-                            type="number"
-                            step="0.1"
-                            className="w-full border border-gray-300 rounded-md text-black"
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="bbSource" className="block text-sm font-medium text-black mb-2">
-                            Source
-                          </Label>
-                          <Select value={bbSource} onValueChange={setBbSource}>
-                            <SelectTrigger className="w-full border border-gray-300 text-black bg-white">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent className="bg-white text-black">
-                              <SelectItem value="close">Close</SelectItem>
-                              <SelectItem value="open">Open</SelectItem>
-                              <SelectItem value="high">High</SelectItem>
-                              <SelectItem value="low">Low</SelectItem>
-                              
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    )}
-
-              {indicator === "volume-ma" && (
-                <div>
-                  <Label htmlFor="volumeMaLength" className="block text-sm font-medium text-black mb-2">
-                    MA Length
-                  </Label>
-                  <Input
-                    id="volumeMaLength"
-                    value={volumeMaLength}
-                    onChange={(e) => setVolumeMaLength(Number(e.target.value))}
-                    type="number"
-                    className="w-full border border-gray-300 rounded-md text-black"
-                  />
-                </div>
-              )}
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  onClick={() => {
+                    onNext(indicator, timeframe === "custom" ? customTimeframe : timeframe)
+                  }}
+                  className="rounded-full px-6 bg-[#85e1fe] text-black hover:bg-[#6bc8e3] border-none"
+                  disabled={!indicator || !timeframe || (timeframe === "custom" && !customTimeframe)}
+                >
+                  Next
+                </Button>
+              </div>
             </div>
           )}
         </div>
 
         <div className="flex justify-end gap-2 p-4 border-t border-gray-200 bg-gray-50">
-          <Button
-            variant="outline"
-            onClick={onClose}
-            className="rounded-full px-6 text-black border-gray-300 hover:bg-gray-100 hover:text-black"
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSave}
-            className="rounded-full px-6 bg-[#85e1fe] text-black hover:bg-[#6bc8e3] border-none"
-          >
-            Save
-          </Button>
+          {valueType !== "other" && (
+            <>
+              <Button
+                variant="outline"
+                onClick={onClose}
+                className="rounded-full px-6 text-black border-gray-300 hover:bg-gray-100 hover:text-black"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSave}
+                className="rounded-full px-6 bg-[#85e1fe] text-black hover:bg-[#6bc8e3] border-none"
+              >
+                Save
+              </Button>
+            </>
+          )}
         </div>
+
+        {showIndicatorModal && pendingOtherIndicator === "rsi" && (
+          <RsiSettingsModal
+            onClose={() => setShowIndicatorModal(false)}
+            onSave={(settings: any) => {
+              setShowIndicatorModal(false)
+              onSave({
+                valueType: "other",
+                indicator: "rsi",
+                timeframe: pendingTimeframe,
+                rsiLength: settings.rsiLength,
+                rsiSource: settings.source,
+                maType: settings.maType,
+                maLength: settings.maLength,
+                bbStdDev: settings.bbStdDev,
+              })
+            }}
+          />
+        )}
+        {showIndicatorModal && pendingOtherIndicator === "rsi-ma" && (
+          <RsiSettingsModal
+            onClose={() => setShowIndicatorModal(false)}
+            onSave={(settings: any) => {
+              setShowIndicatorModal(false)
+              onSave({
+                valueType: "other",
+                indicator: "rsi-ma",
+                timeframe: pendingTimeframe,
+                rsiLength: settings.rsiLength,
+                maLength: settings.maLength,
+                rsiSource: settings.source,
+                maType: settings.maType,
+                bbStdDev: settings.bbStdDev,
+              })
+            }}
+          />
+        )}
       </DialogContent>
     </Dialog>
   )
