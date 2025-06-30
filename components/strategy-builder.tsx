@@ -4278,10 +4278,7 @@ if (
           }}
         />
       )}
-            setStatements(newStatements)
-          }}
-        />
-      )}
+       
       {showStochasticModal && (
         <StochasticSettingsModal
           onClose={() => setShowStochasticModal(false)}
