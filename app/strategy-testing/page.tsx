@@ -3,6 +3,7 @@
 import type React from "react"
 
 import { useRef, useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { Sidebar } from "@/components/sidebar"
 import { MobileSidebar } from "@/components/mobile-sidebar"
 import {
@@ -16,6 +17,11 @@ import {
   getOptimizationResultDetail,
   deleteOptimizationResult,
   getStrategyOptimizationResults,
+  runWalkForwardOptimisation,
+  getWalkForwardOptimizationResults,
+  getWalkForwardOptimizationResultDetail,
+  deleteWalkForwardOptimizationResult,
+  getStrategyWalkForwardOptimizationResults,
 } from "../AllApiCalls" // Import new functions
 import { X } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
@@ -26,8 +32,11 @@ import { PropertiesTab } from "@/components/properties-tab"
 import { AdvancedSettingsModalContent } from "@/components/advanced-settings-modal-content"
 import { PreviousOptimisationView } from '@/components/PreviousOptimisationView'
 import { OptimisationHistoryList } from '@/components/OptimisationHistoryList'
+import { WalkForwardOptimizationResults } from '@/components/walk-forward-optimization-results'
+import { WalkForwardOptimisationView } from "@/components/walk-forward-optimization-results-view";
 
 export default function StrategyTestingPage() {
+  const router = useRouter()
   const [activeTab, setActiveTab] = useState("strategy")
   const [showIframe, setShowIframe] = useState(false) // This state is not used in the provided code, keeping it for consistency.
 
@@ -105,6 +114,78 @@ export default function StrategyTestingPage() {
 
   const [showOptimisationHistory, setShowOptimisationHistory] = useState(false);
   const [selectedOptimisationDetail, setSelectedOptimisationDetail] = useState(null);
+
+  // Walk Forward Optimization states
+  const [isLoading3, setIsLoading3] = useState(false);
+  const [walkForwardOptimizationResults, setWalkForwardOptimizationResults] = useState<any[]>([]);
+  const [showWalkForwardOptimizationResults, setShowWalkForwardOptimizationResults] = useState(false);
+  const [selectedWalkForwardResult, setSelectedWalkForwardResult] = useState<any>(null);
+  const [walkForwardDetailResult, setWalkForwardDetailResult] = useState<any>(null);
+
+  // Add progress bar states
+  const [progress, setProgress] = useState(0); // For backtest
+  const [progress2, setProgress2] = useState(0); // For optimisation
+  const [progress3, setProgress3] = useState(0); // For walk forward optimisation
+
+  // Animate progress bar for backtest
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (isLoading) {
+      setProgress(0);
+      interval = setInterval(() => {
+        setProgress((prev) => {
+          if (prev < 95) return prev + Math.random() * 5 + 1; // Animate up to 95%
+          return prev;
+        });
+      }, 120);
+    } else if (!isLoading && progress > 0) {
+      setProgress(100);
+      setTimeout(() => setProgress(0), 500);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isLoading]);
+
+  // Animate progress bar for optimisation
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (isLoading2) {
+      setProgress2(0);
+      interval = setInterval(() => {
+        setProgress2((prev) => {
+          if (prev < 95) return prev + Math.random() * 5 + 1;
+          return prev;
+        });
+      }, 120);
+    } else if (!isLoading2 && progress2 > 0) {
+      setProgress2(100);
+      setTimeout(() => setProgress2(0), 500);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isLoading2]);
+
+  // Animate progress bar for walk forward optimisation
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (isLoading3) {
+      setProgress3(0);
+      interval = setInterval(() => {
+        setProgress3((prev) => {
+          if (prev < 95) return prev + Math.random() * 5 + 1;
+          return prev;
+        });
+      }, 120);
+    } else if (!isLoading3 && progress3 > 0) {
+      setProgress3(100);
+      setTimeout(() => setProgress3(0), 500);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isLoading3]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -440,6 +521,21 @@ export default function StrategyTestingPage() {
         }
       })
 
+      // Get optimisation form from localStorage to extract Parameters and Constraints
+      const optimisationFormString = localStorage.getItem("optimisation_form")
+      let parametersObject: Record<string, any> = {}
+      let constraintsArray: string[] = []
+      
+      if (optimisationFormString) {
+        try {
+          const optimisationForm = JSON.parse(optimisationFormString)
+          parametersObject = optimisationForm.Parameters || {}
+          constraintsArray = optimisationForm.Constraints || []
+        } catch (error) {
+          console.error("Error parsing optimisation_form from localStorage:", error)
+        }
+      }
+
       // Construct Hyper-parameters from state
       const hyperParameters = {
         population_size: Number(populationSize),
@@ -455,10 +551,18 @@ export default function StrategyTestingPage() {
         "Hyper-parameters": hyperParameters,
       }
 
-      // Merge misc into statement for the API call
+      // Construct optimiser_parameters structure
+      const optimiserParameters = {
+        Parameters: parametersObject,
+        Misc: misc,
+        Constraints: constraintsArray,
+      }
+
+      // Merge both structures into statement for the API call
       const optimisationStatement = {
         ...parsedStatement,
         optimisation_misc: misc,
+        optimiser_parameters: optimiserParameters,
       }
 
       const result = await runOptimisation({
@@ -526,6 +630,177 @@ export default function StrategyTestingPage() {
     }
   }
 
+  const handleWalkForwardOptimisation = async (wait = false) => {
+    if (!parsedStatement) {
+      showToast("Strategy statement is missing or not parsed!", 'error')
+      return
+    }
+
+    if (requiredTimeframes.length > uploadedFiles.length) {
+      showToast("Not enough files uploaded for the required timeframes", 'error')
+      return
+    }
+
+    try {
+      setIsLoading3(true)
+      const timeframeFiles: Record<string, File> = {}
+
+      // Directly map each required timeframe to the uploaded file in order
+      requiredTimeframes.forEach((timeframe, index) => {
+        const filename = uploadedFiles[index]
+        if (filename && fileObjects[filename]) {
+          timeframeFiles[timeframe] = fileObjects[filename]
+        }
+      })
+
+      // Add unmatched remaining files to the form with filename as key (optional fallback)
+      uploadedFiles.forEach((filename) => {
+        if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
+          const key = filename.split(".")[0]
+          timeframeFiles[key] = fileObjects[filename]
+        }
+      })
+
+      // Get walk forward settings from localStorage
+      const walkForwardSettingsString = localStorage.getItem("walk_forward_settings")
+      let walkForwardSettings = {
+        warmup_bars: 15,
+        lookback_bars: 1000,
+        validation_bars: 200,
+        anchor: true,
+      }
+
+      if (walkForwardSettingsString) {
+        try {
+          walkForwardSettings = JSON.parse(walkForwardSettingsString)
+        } catch (error) {
+          console.error("Error parsing walk forward settings:", error)
+        }
+      }
+
+      // Get optimisation form from localStorage to extract Parameters and Constraints
+      const optimisationFormString = localStorage.getItem("optimisation_form")
+      let parametersObject: Record<string, any> = {}
+      let constraintsArray: string[] = []
+      
+      if (optimisationFormString) {
+        try {
+          const optimisationForm = JSON.parse(optimisationFormString)
+          parametersObject = optimisationForm.Parameters || {}
+          constraintsArray = optimisationForm.Constraints || []
+        } catch (error) {
+          console.error("Error parsing optimisation_form from localStorage:", error)
+        }
+      }
+
+      // Construct Hyper-parameters from state
+      const hyperParameters = {
+        population_size: Number(populationSize),
+        generations: Number(generations),
+        mutation_rate: Number(mutationRate),
+        tournament_size: Number(tournamentSize),
+      }
+
+      // Construct Misc object (without walk_forward_settings)
+      const misc = {
+        Algorithm: selectedAlgorithm,
+        Maximise: selectedMaximiseOption,
+        "Hyper-parameters": hyperParameters,
+      }
+
+      // Construct optimiser_parameters structure
+      const optimiserParameters = {
+        Parameters: parametersObject,
+        Misc: misc,
+        Constraints: constraintsArray,
+      }
+
+      // Merge both structures into statement for the API call
+      const walkForwardStatement = {
+        ...parsedStatement,
+        optimisation_misc: misc,
+        optimiser_parameters: optimiserParameters,
+      }
+
+      const apiParams: any = {
+        statement: walkForwardStatement,
+        files: timeframeFiles,
+        walk_forward_setting: walkForwardSettings, // Pass as separate parameter
+        wait,
+      }
+      
+      if (strategy_id && !isNaN(Number(strategy_id))) {
+        apiParams.strategy_statement_id = Number(strategy_id)
+      }
+
+      const result = await runWalkForwardOptimisation(apiParams)
+
+      console.log("Walk Forward optimization response:", result)
+      console.log("Result status:", result?.status)
+      console.log("Result message:", result?.message)
+
+      // Check if we have a successful result (either nested or direct)
+      const resultData = result?.result || result;
+      
+      if (resultData && (resultData.status === 'success' || resultData.message?.toLowerCase().includes('success'))) {
+        console.log("Success detected, navigating to results page");
+        // Store only the optimization ID in sessionStorage and navigate to results page
+        if (resultData.optimization_id) {
+          sessionStorage.setItem('walkForwardOptimizationId', resultData.optimization_id.toString());
+          // Add a small delay to ensure sessionStorage is set
+          setTimeout(() => {
+            router.push('/walk-forward-results');
+          }, 100);
+        } else {
+          // Fallback: store minimal data in sessionStorage
+          const minimalData = {
+            id: resultData.id || resultData.optimization_id,
+            status: resultData.status,
+            message: resultData.message
+          };
+          sessionStorage.setItem('walkForwardMinimalData', JSON.stringify(minimalData));
+          // Add a small delay to ensure sessionStorage is set
+          setTimeout(() => {
+            router.push('/walk-forward-results');
+          }, 100);
+        }
+        return;
+      }
+
+      // If we have any result data, navigate to details page
+      if (resultData) {
+        console.log("Result data found, navigating to results page");
+        // Store only the optimization ID in sessionStorage
+        if (resultData.optimization_id) {
+          sessionStorage.setItem('walkForwardOptimizationId', resultData.optimization_id.toString());
+          // Add a small delay to ensure sessionStorage is set
+          setTimeout(() => {
+            router.push('/walk-forward-results');
+          }, 100);
+        } else {
+          // Fallback: store minimal data
+          const minimalData = {
+            id: resultData.id || resultData.optimization_id,
+            status: resultData.status,
+            message: resultData.message
+          };
+          sessionStorage.setItem('walkForwardMinimalData', JSON.stringify(minimalData));
+          // Add a small delay to ensure sessionStorage is set
+          setTimeout(() => {
+            router.push('/walk-forward-results');
+          }, 100);
+        }
+        return;
+      }
+
+      console.log("No result data found");
+    } catch (error: any) {
+      showToast("Walk Forward Optimisation Error: " + (error.message || "Unknown error"), 'error')
+    } finally {
+      setIsLoading3(false)
+    }
+  }
+
   // Add function to start status polling
   const startStatusPolling = (optimizationId: string) => {
     // Prevent multiple intervals
@@ -541,7 +816,6 @@ export default function StrategyTestingPage() {
       try {
         const statusResult = await getOptimisationStatus(optimizationId);
         setOptimizationStatus(statusResult.status);
-
         if (isFinalStatus(statusResult.status)) {
           stopped = true;
           clearInterval(interval);
@@ -615,8 +889,61 @@ export default function StrategyTestingPage() {
   useEffect(() => {
     if (strategy_id) {
       loadOptimizationResults()
+      loadWalkForwardOptimizationResults()
     }
   }, [strategy_id])
+
+  // Add function to load walk forward optimization results
+  const loadWalkForwardOptimizationResults = async () => {
+    if (!strategy_id) return
+
+    try {
+      const results = await getStrategyWalkForwardOptimizationResults(strategy_id, {
+        page: 1,
+        page_size: 50
+      })
+      setWalkForwardOptimizationResults(results.results || [])
+    
+    } catch (error) {
+      showToast("Error loading walk forward optimization results", 'error')
+      console.error("Error loading walk forward optimization results:", error)
+    }
+  }
+
+  // Add function to view walk forward optimization result details
+  const viewWalkForwardOptimizationResult = async (optimizationId: number) => {
+    try {
+      console.log("Fetching WFO result detail for ID:", optimizationId)
+      const result = await getWalkForwardOptimizationResultDetail(optimizationId)
+      console.log("WFO result detail received:", result)
+      
+      showToast("Loading walk forward optimization result details...", 'success')
+      
+      // Navigate to the walk-forward-results page with the optimization ID
+      // The page will fetch the data directly using the ID
+      router.push(`/walk-forward-results?id=${optimizationId}`)
+    } catch (error) {
+      console.error("Error in viewWalkForwardOptimizationResult:", error)
+      showToast("Failed to load walk forward optimization result details", 'error')
+      console.error("Error loading walk forward optimization result details:", error)
+    }
+  }
+
+  // Add function to delete walk forward optimization result
+  const deleteWalkForwardOptimizationResultHandler = async (optimizationId: number) => {
+    if (!confirm("Are you sure you want to delete this walk forward optimization result?")) {
+      return
+    }
+
+    try {
+      await deleteWalkForwardOptimizationResult(optimizationId)
+      await loadWalkForwardOptimizationResults()
+      showToast("Walk forward optimization result deleted successfully", 'success')
+    } catch (error) {
+      showToast("Failed to delete walk forward optimization result", 'error')
+      console.error("Error deleting walk forward optimization result:", error)
+    }
+  }
 
   // Cleanup polling interval on unmount
   useEffect(() => {
@@ -754,15 +1081,68 @@ export default function StrategyTestingPage() {
     }
   }
 
-  const handleSaveAdvancedSettings = () => {
-    // Implement saving logic for advanced settings here
-    console.log("Saving advanced settings:", {
-      populationSize,
-      generations,
-      mutationRate,
-      tournamentSize,
-    })
-    setShowAdvancedSettingsModal(false)
+  const handleSaveAdvancedSettings = async () => {
+    try {
+      if (!parsedStatement) {
+        showToast("Strategy statement is missing!", 'error')
+        return
+      }
+
+      // Get current optimisation form from localStorage
+      const currentOptimisationFormString = localStorage.getItem("optimisation_form")
+      let currentOptimisationForm = currentOptimisationFormString
+        ? JSON.parse(currentOptimisationFormString)
+        : {
+            parameters: [],
+            maximise_options: [],
+            algorithm_options: [],
+            default_algorithm: "",
+            algorithm_defaults: {
+              population_size: 100,
+              generations: 50,
+              mutation_rate: 0.1,
+              tournament_size: 3,
+            },
+          }
+
+      // Transform parameters array to Parameters object format for the API
+      const parametersObject: Record<string, any> = {}
+      if (currentOptimisationForm.parameters && Array.isArray(currentOptimisationForm.parameters)) {
+        currentOptimisationForm.parameters.forEach((param: any) => {
+          if (param.optimise && param.encoding) {
+            parametersObject[param.encoding] = {
+              value: param.default, // Changed from 'default' to 'value' for backend compatibility
+              ...(param.range && { range: param.range }),
+              ...(param.step && { step: param.step }),
+              type: param.type,
+            }
+          }
+        })
+      }
+
+      // Update the algorithm defaults with the new values from advanced settings
+      currentOptimisationForm.algorithm_defaults = {
+        population_size: Number(populationSize),
+        generations: Number(generations),
+        mutation_rate: Number(mutationRate),
+        tournament_size: Number(tournamentSize),
+      }
+
+      // Add the transformed Parameters object
+      currentOptimisationForm.Parameters = parametersObject
+
+      // Save to localStorage first
+      localStorage.setItem("optimisation_form", JSON.stringify(currentOptimisationForm))
+
+      // Call the API to save the updated settings
+      await saveOptimisationInput(parsedStatement, currentOptimisationForm)
+
+      showToast("Advanced settings saved successfully!", 'success')
+      setShowAdvancedSettingsModal(false)
+    } catch (error: any) {
+      console.error("Error saving advanced settings:", error)
+      showToast("Failed to save advanced settings: " + (error.message || "Unknown error"), 'error')
+    }
   }
 
   // When optimisation results load, set the first row as selected by default
@@ -772,6 +1152,8 @@ export default function StrategyTestingPage() {
       setSelectedOptimisationRow(rows[0]);
     }
   }, [optimisationResult]);
+
+
 
   return (
     <AuthGuard>
@@ -1052,6 +1434,11 @@ export default function StrategyTestingPage() {
                       setSelectedMaximiseOption={setSelectedMaximiseOption} // New prop
                       selectedAlgorithm={selectedAlgorithm} // New prop
                       setSelectedAlgorithm={setSelectedAlgorithm} // New prop
+                      saveOptimisationInput={saveOptimisationInput} // API function for saving
+                      parsedStatement={parsedStatement} // Strategy statement for API calls
+                      onShowWalkForwardResults={() => setShowWalkForwardOptimizationResults(true)}
+                      onRunWalkForwardOptimisation={() => handleWalkForwardOptimisation(false)}
+                      isLoading3={isLoading3}
                     />
                   </>
                 )}
@@ -1070,7 +1457,19 @@ export default function StrategyTestingPage() {
                     <span>Time left: ---</span>
                   </div>
                   <div className="w-full bg-gray-700 h-2 rounded-full overflow-hidden">
-                    <div className="bg-[#85e1fe] h-full w-0"></div>
+                    <div
+                      className="bg-green-500 h-full transition-all duration-300"
+                      style={{
+                        width: (isLoading
+                          ? `${Math.min(progress, 100)}%`
+                          : isLoading2
+                          ? `${Math.min(progress2, 100)}%`
+                          : isLoading3
+                          ? `${Math.min(progress3, 100)}%`
+                          : "0%"),
+                        opacity: (isLoading || isLoading2 || isLoading3) ? 1 : 0,
+                      }}
+                    ></div>
                   </div>
                 </div>
 
@@ -1081,28 +1480,14 @@ export default function StrategyTestingPage() {
                     onClick={handleRunBacktest}
                     disabled={isLoading}
                   >
-                    {isLoading ? (
-                      <>
-                        <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        Running Backtest...
-                      </>
-                    ) : (
-                      "Run Backtest"
-                    )}
+                    Run Backtest
                   </button>
                   <button
                     onClick={() => handleOptimisation(false)}
                     className="flex-1 py-3 bg-[#141721] rounded-full text-white hover:bg-[#2B2E38]"
                     disabled={isLoading2}
                   >
-                    {isLoading2 ? (
-                      <>
-                        <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        Running Optimisation...
-                      </>
-                    ) : (
-                      "Run Optimisation"
-                    )}
+                    Run Optimisation
                   </button>
                 </div>
               </div>
@@ -1153,32 +1538,7 @@ export default function StrategyTestingPage() {
         )}
 
         {/* Loading Modal */}
-        {isLoading && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-[#f5f5f5] rounded-lg shadow-lg w-full max-w-md p-6">
-              <div className="flex flex-col items-center py-6">
-                <div className="w-24 h-24 relative mb-6">
-                  <div className="absolute inset-0 rounded-full border-4 border-[#e6f7ff]"></div>
-                  <div className="absolute inset-0 rounded-full border-4 border-[#85e1fe] border-t-transparent animate-spin"></div>
-                </div>
-                <p className="text-xl font-medium text-black">Running Backtest...</p>
-              </div>
-            </div>
-          </div>
-        )}
-        {isLoading2 && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-[#f5f5f5] rounded-lg shadow-lg w-full max-w-md p-6">
-              <div className="flex flex-col items-center py-6">
-                <div className="w-24 h-24 relative mb-6">
-                  <div className="absolute inset-0 rounded-full border-4 border-[#e6f7ff]"></div>
-                  <div className="absolute inset-0 rounded-full border-4 border-[#85e1fe] border-t-transparent animate-spin"></div>
-                </div>
-                <p className="text-xl font-medium text-black">Running Optimisation...</p>
-              </div>
-            </div>
-          </div>
-        )}
+        
         {isChartExpanded && (
           <div className="fixed inset-0 bg-black bg-opacity-50 z-40" onClick={toggleChartExpansion} />
         )}
@@ -1264,7 +1624,7 @@ export default function StrategyTestingPage() {
                             </div>
                             <div className="text-center">
                               <p className="text-gray-400 text-sm">Return (Ann.)</p>
-                              <p className="text-white font-semibold">
+                              <p className="text-white font-semibold text-lg">
                                 {result.return_ann_percent?.toFixed(2) || "N/A"}%
                               </p>
                             </div>
@@ -1426,7 +1786,38 @@ export default function StrategyTestingPage() {
             isFullScreen={true}
           />
         )}
+
+        {/* Walk Forward Optimization Results Modal */}
+        {showWalkForwardOptimizationResults && (
+          <WalkForwardOptimizationResults
+            results={walkForwardOptimizationResults}
+            onClose={() => setShowWalkForwardOptimizationResults(false)}
+            onViewDetail={(result) => viewWalkForwardOptimizationResult(result.id)}
+            onDelete={(id) => deleteWalkForwardOptimizationResultHandler(id)}
+            onLoadResult={(result) => {
+              setSelectedWalkForwardResult(result);
+              setShowWalkForwardOptimizationResults(false);
+              // Optionally display result in main view
+              if (result.trades_plot_html) {
+                setPlotHtml(result.trades_plot_html);
+              }
+              if (result.heatmap_plot_html) {
+                setPlotHeatmapHtml(result.heatmap_plot_html);
+              }
+            }}
+          />
+        )}
+
+        {/* Walk Forward Optimization Details Modal */}
+        {walkForwardDetailResult && (
+          <WalkForwardOptimisationView
+            result={walkForwardDetailResult}
+            onClose={() => setWalkForwardDetailResult(null)}
+            isFullScreen={true}
+          />
+        )}
       </div>
     </AuthGuard>
   )
 }
+

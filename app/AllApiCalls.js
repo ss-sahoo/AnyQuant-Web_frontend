@@ -617,3 +617,148 @@ export const getStrategyOptimizationResults = async (strategyStatementId, params
   return response.json();
 };
 
+// Walk Forward Optimization API functions
+
+export const runWalkForwardOptimisation = async ({ statement, files, strategy_statement_id = null, wait = false, walk_forward_setting = null }) => {
+  const formData = new FormData()
+
+  // Attach the statement JSON as a string
+  formData.append("statement", JSON.stringify(statement))
+
+  // Attach walk_forward_setting if provided
+  if (walk_forward_setting) {
+    formData.append("walk_forward_setting", JSON.stringify(walk_forward_setting))
+  }
+
+  // Attach strategy statement ID if provided
+  if (strategy_statement_id) {
+    formData.append("strategy_statement_id", strategy_statement_id)
+  }
+
+  // Attach wait if requested
+  if (wait) {
+    formData.append("wait", "true")
+  }
+
+  // Attach each file using its timeframe key
+  for (const [timeframe, file] of Object.entries(files)) {
+    formData.append(timeframe, file)
+  }
+
+  try {
+    const response = await Fetch("/api/run-walkforward-optimisation/", {
+      method: "POST",
+      body: formData,
+    })
+
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error?.error || "Failed to start walk forward optimisation")
+    }
+    const data = await response.json();
+    console.log("Walk Forward Optimisation response:", data);
+    return data;
+  } catch (err) {
+    console.error("Walk Forward Optimisation request failed:", err);
+    throw err;
+  }
+};
+
+export const getWalkForwardOptimizationResults = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+  
+  if (params.strategy_statement_id) {
+    queryParams.append('strategy_statement_id', params.strategy_statement_id);
+  }
+  if (params.status) {
+    queryParams.append('status', params.status);
+  }
+  if (params.algorithm) {
+    queryParams.append('algorithm', params.algorithm);
+  }
+  if (params.page) {
+    queryParams.append('page', params.page);
+  }
+  if (params.page_size) {
+    queryParams.append('page_size', params.page_size);
+  }
+
+  const response = await Fetch(`/api/walkforward-optimization-results/?${queryParams}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get walk forward optimization results");
+  }
+
+  return response.json();
+};
+
+export const getWalkForwardOptimizationResultDetail = async (optimizationId) => {
+  console.log("API call: getWalkForwardOptimizationResultDetail for ID:", optimizationId)
+  
+  const response = await Fetch(`/api/walkforward-optimization-results/${optimizationId}/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  console.log("API response status:", response.status, response.ok)
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    console.error("API error response:", errorData)
+    throw new Error(errorData.error || "Failed to get walk forward optimization result detail");
+  }
+
+  const data = await response.json();
+  console.log("API response data:", data)
+  return data;
+};
+
+export const deleteWalkForwardOptimizationResult = async (optimizationId) => {
+  const response = await Fetch(`/api/walkforward-optimization-results/${optimizationId}/delete/`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to delete walk forward optimization result");
+  }
+
+  return response.json();
+};
+
+export const getStrategyWalkForwardOptimizationResults = async (strategyStatementId, params = {}) => {
+  const queryParams = new URLSearchParams();
+  
+  if (params.page) {
+    queryParams.append('page', params.page);
+  }
+  if (params.page_size) {
+    queryParams.append('page_size', params.page_size);
+  }
+
+  const response = await Fetch(`/api/strategies/${strategyStatementId}/walkforward-optimization-results/?${queryParams}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get strategy walk forward optimization results");
+  }
+
+  return response.json();
+};
+

@@ -2,6 +2,7 @@
 
 import type React from "react"
 import { useState, useEffect } from "react"
+import { WalkForwardSettingsModalContent } from "./walk-forward-settings-modal-content"
 
 interface OptimisationTabProps {
   isLimitationsCollapsed: boolean
@@ -19,6 +20,11 @@ interface OptimisationTabProps {
   setSelectedMaximiseOption: React.Dispatch<React.SetStateAction<string>> // New prop
   selectedAlgorithm: string // New prop
   setSelectedAlgorithm: React.Dispatch<React.SetStateAction<string>> // New prop
+  saveOptimisationInput?: (jsonSt: any, ui_data: any) => Promise<any> // API function for saving
+  parsedStatement?: any // Strategy statement for API calls
+  onShowWalkForwardResults?: () => void // Callback to show walk forward results
+  onRunWalkForwardOptimisation?: () => void // Callback to run walk forward optimisation
+  isLoading3?: boolean // Loading state for walk forward optimisation
 }
 
 interface OptimisationForm {
@@ -32,6 +38,7 @@ interface OptimisationForm {
     mutation_rate: number
     tournament_size: number
   }
+  Parameters?: Record<string, any> // Add Parameters field for API format
 }
 
 export function OptimisationTab({
@@ -50,12 +57,24 @@ export function OptimisationTab({
   setSelectedMaximiseOption, // Destructure new prop
   selectedAlgorithm, // Destructure new prop
   setSelectedAlgorithm, // Destructure new prop
+  saveOptimisationInput, // API function for saving
+  parsedStatement, // Strategy statement for API calls
+  onShowWalkForwardResults, // Callback to show walk forward results
+  onRunWalkForwardOptimisation, // Callback to run walk forward optimisation
+  isLoading3, // Loading state for walk forward optimisation
 }: OptimisationTabProps) {
   // Remove local states for selectedMaximiseOption and selectedAlgorithm
   // const [selectedMaximiseOption, setSelectedMaximiseOption] = useState<string>("")
   // const [selectedAlgorithm, setSelectedAlgorithm] = useState<string>("")
   const [maximiseOptions, setMaximiseOptions] = useState<string[]>([])
   const [algorithmOptions, setAlgorithmOptions] = useState<string[]>([])
+  
+  // Walk Forward Optimisation Settings states
+  const [showWalkForwardSettingsModal, setShowWalkForwardSettingsModal] = useState(false)
+  const [warmupBars, setWarmupBars] = useState("15")
+  const [lookbackBars, setLookbackBars] = useState("1000")
+  const [validationBars, setValidationBars] = useState("200")
+  const [anchor, setAnchor] = useState(true)
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -63,18 +82,43 @@ export function OptimisationTab({
       if (optimisationFormString) {
         try {
           const optimisationForm: OptimisationForm = JSON.parse(optimisationFormString)
-          setMaximiseOptions(optimisationForm.maximise_options)
-          setAlgorithmOptions(optimisationForm.algorithm_options)
-          setSelectedMaximiseOption(optimisationForm.maximise_options[0] || "") // Use prop setter
-          setSelectedAlgorithm(optimisationForm.default_algorithm) // Use prop setter
+          
+          // Add null checks for arrays and objects
+          const maximiseOptions = optimisationForm.maximise_options || []
+          const algorithmOptions = optimisationForm.algorithm_options || []
+          const algorithmDefaults = optimisationForm.algorithm_defaults || {
+            population_size: 100,
+            generations: 50,
+            mutation_rate: 0.1,
+            tournament_size: 3,
+          }
+          
+          setMaximiseOptions(maximiseOptions)
+          setAlgorithmOptions(algorithmOptions)
+          setSelectedMaximiseOption(maximiseOptions[0] || "") // Use prop setter
+          setSelectedAlgorithm(optimisationForm.default_algorithm || "") // Use prop setter
 
-          // Set advanced settings from loaded data
-          setPopulationSize(optimisationForm.algorithm_defaults.population_size.toString())
-          setGenerations(optimisationForm.algorithm_defaults.generations.toString())
-          setMutationRate(optimisationForm.algorithm_defaults.mutation_rate.toString())
-          setTournamentSize(optimisationForm.algorithm_defaults.tournament_size.toString())
+          // Set advanced settings from loaded data with null checks
+          setPopulationSize(algorithmDefaults.population_size?.toString() || "100")
+          setGenerations(algorithmDefaults.generations?.toString() || "50")
+          setMutationRate(algorithmDefaults.mutation_rate?.toString() || "0.1")
+          setTournamentSize(algorithmDefaults.tournament_size?.toString() || "3")
         } catch (error) {
           console.error("Error parsing optimisation_form from localStorage in OptimisationTab:", error)
+        }
+      }
+
+      // Load walk forward settings from localStorage
+      const walkForwardSettingsString = localStorage.getItem("walk_forward_settings")
+      if (walkForwardSettingsString) {
+        try {
+          const walkForwardSettings = JSON.parse(walkForwardSettingsString)
+          setWarmupBars(walkForwardSettings.warmup_bars?.toString() || "15")
+          setLookbackBars(walkForwardSettings.lookback_bars?.toString() || "1000")
+          setValidationBars(walkForwardSettings.validation_bars?.toString() || "200")
+          setAnchor(walkForwardSettings.anchor !== undefined ? walkForwardSettings.anchor : true)
+        } catch (error) {
+          console.error("Error parsing walk_forward_settings from localStorage:", error)
         }
       }
     }
@@ -87,11 +131,11 @@ export function OptimisationTab({
     setSelectedAlgorithm, // Add to dependency array
   ])
 
-  const handleSaveOptimisationDefaults = () => {
+  const handleSaveOptimisationDefaults = async () => {
     if (typeof window !== "undefined") {
       try {
         const currentOptimisationFormString = localStorage.getItem("optimisation_form")
-        const currentOptimisationForm: OptimisationForm = currentOptimisationFormString
+        let currentOptimisationForm: OptimisationForm = currentOptimisationFormString
           ? JSON.parse(currentOptimisationFormString)
           : {
               parameters: [],
@@ -99,25 +143,49 @@ export function OptimisationTab({
               algorithm_options: [],
               default_algorithm: "",
               algorithm_defaults: {
-                population_size: 0,
-                generations: 0,
-                mutation_rate: 0,
-                tournament_size: 0,
+                population_size: 100,
+                generations: 50,
+                mutation_rate: 0.1,
+                tournament_size: 3,
               },
             }
 
-        // Update the relevant fields
-        currentOptimisationForm.maximise_options = maximiseOptions
-        currentOptimisationForm.default_algorithm = selectedAlgorithm
-        currentOptimisationForm.algorithm_options = algorithmOptions // Ensure this is updated if options change
-        currentOptimisationForm.algorithm_defaults = {
-          population_size: Number(populationSize),
-          generations: Number(generations),
-          mutation_rate: Number(mutationRate),
-          tournament_size: Number(tournamentSize),
+        // Transform parameters array to Parameters object format for the API
+        const parametersObject: Record<string, any> = {}
+        if (currentOptimisationForm.parameters && Array.isArray(currentOptimisationForm.parameters)) {
+          currentOptimisationForm.parameters.forEach((param: any) => {
+            if (param.optimise && param.encoding) {
+              parametersObject[param.encoding] = {
+                value: param.default, // Changed from 'default' to 'value' for backend compatibility
+                ...(param.range && { range: param.range }),
+                ...(param.step && { step: param.step }),
+                type: param.type,
+              }
+            }
+          })
         }
 
-        localStorage.setItem("optimisation_form", JSON.stringify(currentOptimisationForm))
+        // Preserve existing parameters and only update the fields that need to be changed
+        const updatedOptimisationForm = {
+          ...currentOptimisationForm, // Keep all existing data including parameters
+          Parameters: parametersObject, // Add the transformed Parameters object
+          maximise_options: maximiseOptions,
+          default_algorithm: selectedAlgorithm,
+          algorithm_options: algorithmOptions,
+          algorithm_defaults: {
+            population_size: Number(populationSize),
+            generations: Number(generations),
+            mutation_rate: Number(mutationRate),
+            tournament_size: Number(tournamentSize),
+          },
+        }
+
+        localStorage.setItem("optimisation_form", JSON.stringify(updatedOptimisationForm))
+
+        // If API function and parsed statement are available, also save to backend
+        if (saveOptimisationInput && parsedStatement) {
+          await saveOptimisationInput(parsedStatement, updatedOptimisationForm)
+        }
 
         // Show success message
         const successMessage = document.createElement("div")
@@ -129,9 +197,82 @@ export function OptimisationTab({
         setTimeout(() => {
           document.body.removeChild(successMessage)
         }, 3000)
-      } catch (error) {
-        console.error("Failed to save optimisation defaults to localStorage:", error)
-        alert("Failed to save optimisation defaults.")
+      } catch (error: any) {
+        console.error("Failed to save optimisation defaults:", error)
+        alert("Failed to save optimisation defaults: " + (error.message || "Unknown error"))
+      }
+    }
+  }
+
+  const handleSaveWalkForwardSettings = async () => {
+    if (typeof window !== "undefined") {
+      try {
+        const walkForwardSettings = {
+          warmup_bars: Number(warmupBars),
+          lookback_bars: Number(lookbackBars),
+          validation_bars: Number(validationBars),
+          anchor: anchor,
+        }
+
+        localStorage.setItem("walk_forward_settings", JSON.stringify(walkForwardSettings))
+
+        // If API function and parsed statement are available, also save to backend
+        if (saveOptimisationInput && parsedStatement) {
+          // Get current optimisation form from localStorage
+          const currentOptimisationFormString = localStorage.getItem("optimisation_form")
+          let currentOptimisationForm = currentOptimisationFormString
+            ? JSON.parse(currentOptimisationFormString)
+            : {
+                parameters: [],
+                maximise_options: [],
+                algorithm_options: [],
+                default_algorithm: "",
+                algorithm_defaults: {
+                  population_size: 100,
+                  generations: 50,
+                  mutation_rate: 0.1,
+                  tournament_size: 3,
+                },
+              }
+
+          // Transform parameters array to Parameters object format for the API
+          const parametersObject: Record<string, any> = {}
+          if (currentOptimisationForm.parameters && Array.isArray(currentOptimisationForm.parameters)) {
+            currentOptimisationForm.parameters.forEach((param: any) => {
+              if (param.optimise && param.encoding) {
+                parametersObject[param.encoding] = {
+                  value: param.default, // Changed from 'default' to 'value' for backend compatibility
+                  ...(param.range && { range: param.range }),
+                  ...(param.step && { step: param.step }),
+                  type: param.type,
+                }
+              }
+            })
+          }
+
+          // Add walk forward settings and Parameters object to the optimisation form
+          currentOptimisationForm.walk_forward_settings = walkForwardSettings
+          currentOptimisationForm.Parameters = parametersObject
+
+          // Call the API to save the updated settings
+          await saveOptimisationInput(parsedStatement, currentOptimisationForm)
+        }
+
+        // Show success message
+        const successMessage = document.createElement("div")
+        successMessage.className =
+          "fixed bottom-20 left-1/2 transform -translate-x-1/2 bg-[#85e1fe] text-black px-6 py-3 rounded-md shadow-lg z-50"
+        successMessage.textContent = "Walk Forward settings saved successfully!"
+        document.body.appendChild(successMessage)
+
+        setTimeout(() => {
+          document.body.removeChild(successMessage)
+        }, 3000)
+
+        setShowWalkForwardSettingsModal(false)
+      } catch (error: any) {
+        console.error("Failed to save walk forward settings:", error)
+        alert("Failed to save walk forward settings: " + (error.message || "Unknown error"))
       }
     }
   }
@@ -178,12 +319,20 @@ export function OptimisationTab({
                 Genetic algorithm
               </label>
             </div>
-            <button
-              className="bg-transparent border border-[#2b2e38] text-white rounded-full px-4 py-2 text-sm"
-              onClick={() => setShowAdvancedSettingsModal(true)}
-            >
-              Advanced Settings
-            </button>
+            <div className="flex gap-2">
+              <button
+                className="bg-transparent border border-[#2b2e38] text-white rounded-full px-4 py-2 text-sm"
+                onClick={() => setShowAdvancedSettingsModal(true)}
+              >
+                Advanced Settings
+              </button>
+              <button
+                className="bg-transparent border border-[#2b2e38] text-white rounded-full px-4 py-2 text-sm"
+                onClick={() => setShowWalkForwardSettingsModal(true)}
+              >
+                Walk Forward Optimisation Settings
+              </button>
+            </div>
           </div>
 
           <div className="flex justify-between items-center">
@@ -316,9 +465,48 @@ export function OptimisationTab({
             <button className="bg-[#85e1fe] text-black rounded-full px-6 py-2" onClick={handleSaveOptimisationDefaults}>
               Save
             </button>
+            {onShowWalkForwardResults && (
+              <button 
+                className="bg-transparent border border-[#2b2e38] text-white rounded-full px-6 py-2"
+                onClick={onShowWalkForwardResults}
+              >
+                View Walk Forward Results
+              </button>
+            )}
           </div>
         </div>
+
+        {/* Walk Forward Optimisation Button */}
+        {onRunWalkForwardOptimisation && (
+          <div className="mt-6 flex justify-end">
+            <button
+              className="w-1/3 py-3 bg-[#141721] text-white rounded-full hover:bg-[#6bcae2] font-medium"
+              onClick={onRunWalkForwardOptimisation}
+              disabled={isLoading3}
+            >
+              {isLoading3 ? "Running Walk Forward Optimisation..." : "Run Walk Forward Optimisation"}
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* Walk Forward Optimisation Settings Modal */}
+      {showWalkForwardSettingsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <WalkForwardSettingsModalContent
+            warmupBars={warmupBars}
+            setWarmupBars={setWarmupBars}
+            lookbackBars={lookbackBars}
+            setLookbackBars={setLookbackBars}
+            validationBars={validationBars}
+            setValidationBars={setValidationBars}
+            anchor={anchor}
+            setAnchor={setAnchor}
+            onClose={() => setShowWalkForwardSettingsModal(false)}
+            onSave={handleSaveWalkForwardSettings}
+          />
+        </div>
+      )}
     </div>
   )
 }
