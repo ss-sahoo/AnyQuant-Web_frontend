@@ -43,6 +43,7 @@ interface OptimisationForm {
   }
   simple_constraints: string[][] // Changed from 'constraints: string[]'
   Constraints: string[] // Added this line
+  Parameters?: Record<string, any> // Add Parameters field for API format
 }
 
 interface PropertiesTabProps {
@@ -217,6 +218,22 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
         ([encoding1, encoding2]) => `${encoding1} == ${encoding2}`,
       )
       currentOptimisationForm.Constraints = formattedConstraints // Assign to Constraints
+
+      // Transform parameters array to Parameters object format for the API
+      const parametersObject: Record<string, any> = {}
+      if (currentOptimisationForm.parameters && Array.isArray(currentOptimisationForm.parameters)) {
+        currentOptimisationForm.parameters.forEach((param: any) => {
+          if (param.optimise && param.encoding) {
+            parametersObject[param.encoding] = {
+              value: param.default, // Changed from 'default' to 'value' for backend compatibility
+              ...(param.range && { range: param.range }),
+              ...(param.step && { step: param.step }),
+              type: param.type,
+            }
+          }
+        })
+      }
+      currentOptimisationForm.Parameters = parametersObject
 
       console.log("Sending ui_data to API:", currentOptimisationForm) // IMPORTANT: Check this output in your browser's console!
       await saveOptimisationInput(parsedStatement, currentOptimisationForm)
