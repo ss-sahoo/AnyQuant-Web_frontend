@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getWalkForwardOptimizationResultDetail } from '../AllApiCalls';
 
@@ -8,7 +8,7 @@ interface WalkForwardResultsPageProps {
   // This will be populated from URL params or state
 }
 
-export default function WalkForwardResultsPage() {
+function WalkForwardResultsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<'results' | 'graph' | 'report'>('results');
@@ -515,5 +515,25 @@ export default function WalkForwardResultsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+// Loading fallback component
+function WalkForwardResultsLoading() {
+  return (
+    <div className="fixed inset-0 bg-[#000] text-white flex items-center justify-center z-50">
+      <div className="text-center">
+        <div className="text-2xl font-bold text-[#85e1fe] mb-4">Loading Walk Forward Results...</div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#85e1fe] mx-auto"></div>
+      </div>
+    </div>
+  );
+}
+
+export default function WalkForwardResultsPage() {
+  return (
+    <Suspense fallback={<WalkForwardResultsLoading />}>
+      <WalkForwardResultsContent />
+    </Suspense>
   );
 } 
