@@ -17,6 +17,99 @@ function WalkForwardResultsContent() {
   const [checkedRows, setCheckedRows] = useState<{ [key: number]: boolean }>({});
   const [isLoading, setIsLoading] = useState(false);
 
+  // State for individual plots loaded via API
+  const [apiPlots, setApiPlots] = useState<{ [key: string]: string }>({});
+  const [plotLoading, setPlotLoading] = useState<{ [key: string]: boolean }>({});
+  const [plotErrors, setPlotErrors] = useState<{ [key: string]: string }>({});
+
+  // Debug: Log the entire result structure to understand how plots are stored
+  useEffect(() => {
+    if (result) {
+      console.log('🔍 DEBUG: Full result structure:', result);
+      console.log('🔍 DEBUG: Looking for plot fields...');
+      
+      // Check for the specific plot names
+      const plotNames = [
+        'train_validation_split_graph.html',
+        'train_validation_Equity Final [$].html',
+        'train_validation_Return (Ann.) [%].html'
+      ];
+      
+      plotNames.forEach(name => {
+        console.log(`🔍 DEBUG: Checking for ${name}:`, result[name] ? '✅ Found' : '❌ Not found');
+        if (result[name]) {
+          console.log(`🔍 DEBUG: ${name} content length:`, result[name].length);
+        }
+      });
+      
+      // Check plots_html object
+      console.log('🔍 DEBUG: plots_html object:', result.plots_html);
+      if (result.plots_html) {
+        Object.keys(result.plots_html).forEach(key => {
+          console.log(`🔍 DEBUG: plots_html.${key}:`, result.plots_html[key] ? '✅ Found' : '❌ Not found');
+        });
+      }
+      
+      // Check for any other HTML fields
+      Object.keys(result).forEach(key => {
+        if (key.includes('html') || key.includes('plot') || key.includes('graph')) {
+          console.log(`🔍 DEBUG: Found HTML field: ${key}`, typeof result[key]);
+        }
+      });
+
+      // Load plots via API if we have an optimization ID
+      if (result.walkforward_optimization_id || result.optimization_id) {
+        loadPlotsViaAPI(result.walkforward_optimization_id || result.optimization_id);
+      }
+    }
+  }, [result]);
+
+  const baseUrl = "https://anyquant.co.uk"
+
+  // Function to load individual plot via API
+  const loadPlotViaAPI = async (optimizationId: number, plotType: string) => {
+    setPlotLoading(prev => ({ ...prev, [plotType]: true }));
+    setPlotErrors(prev => ({ ...prev, [plotType]: '' }));
+
+    try {
+      console.log(`🔄 Loading plot: ${plotType} for optimization ID: ${optimizationId}`);
+      
+      const response = await fetch(`${baseUrl}/api/walkforward-optimization-result/${optimizationId}/plot/${plotType}/`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      console.log(`✅ Loaded plot ${plotType}:`, data);
+      
+      setApiPlots(prev => ({
+        ...prev,
+        [plotType]: data.plot_html
+      }));
+    } catch (error: any) {
+      console.error(`❌ Error loading plot ${plotType}:`, error);
+      setPlotErrors(prev => ({
+        ...prev,
+        [plotType]: `Failed to load ${plotType}: ${error.message}`
+      }));
+    } finally {
+      setPlotLoading(prev => ({ ...prev, [plotType]: false }));
+    }
+  };
+
+  // Function to load all plots via API
+  const loadPlotsViaAPI = async (optimizationId: number) => {
+    console.log('🚀 Loading all plots via API for optimization ID:', optimizationId);
+    
+    const plotTypes = ['split_graph', 'equity_trend', 'return_trend'];
+    
+    // Load all plots in parallel
+    await Promise.all(
+      plotTypes.map(plotType => loadPlotViaAPI(optimizationId, plotType))
+    );
+  };
+
   // Get result from URL params, sessionStorage, or fetch by ID
   useEffect(() => {
     const resultParam = searchParams.get('result');
@@ -389,75 +482,212 @@ function WalkForwardResultsContent() {
         {/* Graph Tab */}
         {tab === 'graph' && (
           <div className="w-full grid grid-cols-1 gap-8">
-            {/* Split Graph */}
-            {result.split_graph_html && (
-              <div>
-                <div className="mb-2 font-bold text-white text-base">Split Graph</div>
+            {/* Debug: Show available plots */}
+           
+
+            {/* API Loaded Plots - Primary Method */}
+            {Object.entries(apiPlots).map(([plotType, plotHtml]) => (
+              <div key={plotType}>
+                <div className="mb-2 font-bold text-white text-base">
+                  {plotType === 'split_graph' && 'Train/Validation Split Graph'}
+                  {plotType === 'equity_trend' && 'Equity Trend Over Folds'}
+                  {plotType === 'return_trend' && 'Return Trend Over Folds'}
+                  <span className="text-xs text-gray-400"> (API Loaded)</span>
+                </div>
                 <iframe
-                  title="Split Graph"
+                  title={plotType}
                   className="w-full h-[400px] bg-white"
                   style={{ border: 'none' }}
-                  srcDoc={result.split_graph_html}
+                  srcDoc={plotHtml}
                 />
               </div>
-            )}
-            
-            {/* Equity Trend Graph */}
-            {result.equity_trend_html && (
-              <div>
-                <div className="mb-2 font-bold text-white text-base">Equity Trend</div>
-                <iframe
-                  title="Equity Trend"
-                  className="w-full h-[400px] bg-white"
-                  style={{ border: 'none' }}
-                  srcDoc={result.equity_trend_html}
-                />
-              </div>
-            )}
-            
-            {/* Return Trend Graph */}
-            {result.return_trend_html && (
-              <div>
-                <div className="mb-2 font-bold text-white text-base">Return Trend</div>
-                <iframe
-                  title="Return Trend"
-                  className="w-full h-[400px] bg-white"
-                  style={{ border: 'none' }}
-                  srcDoc={result.return_trend_html}
-                />
-              </div>
-            )}
-            
-            {/* Variable Trends */}
-            {result.variable_trends_html && (
-              <div>
-                <div className="mb-2 font-bold text-white text-base">Variable Trends</div>
-                <iframe
-                  title="Variable Trends"
-                  className="w-full h-[400px] bg-white"
-                  style={{ border: 'none' }}
-                  srcDoc={result.variable_trends_html}
-                />
-              </div>
-            )}
-            
-            {/* Other plots from plots object */}
-            {Object.entries(plots).map(([name, html]) => {
-              if (typeof html === 'string') {
+            ))}
+
+            {/* Loading States for API Plots */}
+            {Object.entries(plotLoading).map(([plotType, isLoading]) => {
+              if (isLoading) {
                 return (
-                  <div key={name}>
-                    <div className="mb-2 font-bold text-white text-base">{name}</div>
-                    <iframe
-                      title={name}
-                      className="w-full h-[400px] bg-white"
-                      style={{ border: 'none' }}
-                      srcDoc={html}
-                    />
+                  <div key={plotType}>
+                    <div className="mb-2 font-bold text-white text-base">
+                      {plotType === 'split_graph' && 'Train/Validation Split Graph'}
+                      {plotType === 'equity_trend' && 'Equity Trend Over Folds'}
+                      {plotType === 'return_trend' && 'Return Trend Over Folds'}
+                      <span className="text-xs text-gray-400"> (Loading...)</span>
+                    </div>
+                    <div className="w-full h-[400px] bg-[#141721] flex items-center justify-center">
+                      <div className="text-center">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#85e1fe] mx-auto mb-2"></div>
+                        <div className="text-gray-400">Loading {plotType}...</div>
+                      </div>
+                    </div>
                   </div>
                 );
               }
               return null;
             })}
+
+            {/* Error States for API Plots */}
+            {Object.entries(plotErrors).map(([plotType, error]) => {
+              if (error) {
+                return (
+                  <div key={plotType}>
+                    <div className="mb-2 font-bold text-white text-base">
+                      {plotType === 'split_graph' && 'Train/Validation Split Graph'}
+                      {plotType === 'equity_trend' && 'Equity Trend Over Folds'}
+                      {plotType === 'return_trend' && 'Return Trend Over Folds'}
+                      <span className="text-xs text-red-400"> (Error)</span>
+                    </div>
+                    <div className="w-full h-[400px] bg-[#141721] flex items-center justify-center">
+                      <div className="text-center">
+                        <div className="text-red-400 mb-2">{error}</div>
+                        <button 
+                          onClick={() => {
+                            const optimizationId = result.walkforward_optimization_id || result.optimization_id;
+                            if (optimizationId) {
+                              loadPlotViaAPI(optimizationId, plotType);
+                            }
+                          }}
+                          className="bg-[#85e1fe] text-black px-4 py-2 rounded-md hover:bg-[#6bcae2] text-sm"
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })}
+
+            {/* Fallback: Legacy Plot Rendering */}
+            {Object.keys(apiPlots).length === 0 && (
+              <>
+                {/* Comprehensive Plot Rendering - Try all possible locations */}
+                {(() => {
+                  const plotConfigs = [
+                    {
+                      name: 'Train Validation Split Graph',
+                      keys: [
+                        'train_validation_split_graph.html',
+                        'split_graph_html',
+                        'plots_html.train_validation_split_graph.html',
+                        'plots.split_graph'
+                      ]
+                    },
+                    {
+                      name: 'Train Validation Equity Final',
+                      keys: [
+                        'train_validation_Equity Final [$].html',
+                        'equity_trend_html',
+                        'plots_html.train_validation_Equity Final [$].html',
+                        'plots.equity_trend'
+                      ]
+                    },
+                    {
+                      name: 'Train Validation Return (Ann.)',
+                      keys: [
+                        'train_validation_Return (Ann.) [%].html',
+                        'return_trend_html',
+                        'plots_html.train_validation_Return (Ann.) [%].html',
+                        'plots.return_trend'
+                      ]
+                    }
+                  ];
+
+                  return plotConfigs.map((config, index) => {
+                    let plotHtml = null;
+                    let source = '';
+
+                    // Try each possible key location
+                    for (const key of config.keys) {
+                      if (key.includes('.')) {
+                        // Handle nested keys like 'plots_html.train_validation_split_graph.html'
+                        const [parentKey, childKey] = key.split('.');
+                        if (result[parentKey] && result[parentKey][childKey]) {
+                          plotHtml = result[parentKey][childKey];
+                          source = `${parentKey}.${childKey}`;
+                          break;
+                        }
+                      } else {
+                        // Handle direct keys
+                        if (result[key]) {
+                          plotHtml = result[key];
+                          source = key;
+                          break;
+                        }
+                      }
+                    }
+
+                    if (plotHtml && typeof plotHtml === 'string' && plotHtml.includes('<html')) {
+                      return (
+                        <div key={index}>
+                          <div className="mb-2 font-bold text-white text-base">
+                            {config.name} <span className="text-xs text-gray-400">(from {source})</span>
+                          </div>
+                          <iframe
+                            title={config.name}
+                            className="w-full h-[400px] bg-white"
+                            style={{ border: 'none' }}
+                            srcDoc={plotHtml}
+                          />
+                        </div>
+                      );
+                    }
+                    return null;
+                  });
+                })()}
+
+                {/* Variable Trends */}
+                {result.variable_trends_html && (
+                  <div>
+                    <div className="mb-2 font-bold text-white text-base">Variable Trends</div>
+                    <iframe
+                      title="Variable Trends"
+                      className="w-full h-[400px] bg-white"
+                      style={{ border: 'none' }}
+                      srcDoc={result.variable_trends_html}
+                    />
+                  </div>
+                )}
+
+                {/* Render all plots from plots_html object */}
+                {Object.entries(plots).map(([name, html]) => {
+                  if (typeof html === 'string' && html.includes('<html')) {
+                    return (
+                      <div key={name}>
+                        <div className="mb-2 font-bold text-white text-base">{name} <span className="text-xs text-gray-400">(from plots_html)</span></div>
+                        <iframe
+                          title={name}
+                          className="w-full h-[400px] bg-white"
+                          style={{ border: 'none' }}
+                          srcDoc={html}
+                        />
+                      </div>
+                    );
+                  }
+                  return null;
+                })}
+
+                {/* Render any other HTML fields that might contain plots */}
+                {Object.entries(result).map(([key, value]) => {
+                  if (typeof value === 'string' && value.includes('<html') && 
+                      (key.includes('html') || key.includes('plot') || key.includes('graph'))) {
+                    return (
+                      <div key={key}>
+                        <div className="mb-2 font-bold text-white text-base">{key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} <span className="text-xs text-gray-400">(direct field)</span></div>
+                        <iframe
+                          title={key}
+                          className="w-full h-[400px] bg-white"
+                          style={{ border: 'none' }}
+                          srcDoc={value}
+                        />
+                      </div>
+                    );
+                  }
+                  return null;
+                })}
+              </>
+            )}
           </div>
         )}
 
