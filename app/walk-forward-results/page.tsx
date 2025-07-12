@@ -28,6 +28,11 @@ function WalkForwardResultsContent() {
       console.log('🔍 DEBUG: Full result structure:', result);
       console.log('🔍 DEBUG: Looking for plot fields...');
       
+      // Debug: Check for z-statistic, p-value, and hypothesis_decision
+      console.log('🔍 DEBUG: z_statistic:', result.z_statistic, typeof result.z_statistic);
+      console.log('🔍 DEBUG: p_value:', result.p_value, typeof result.p_value);
+      console.log('🔍 DEBUG: hypothesis_decision:', result.hypothesis_decision, typeof result.hypothesis_decision);
+      
       // Check for the specific plot names
       const plotNames = [
         'train_validation_split_graph.html',
@@ -58,8 +63,15 @@ function WalkForwardResultsContent() {
       });
 
       // Load plots via API if we have an optimization ID
-      if (result.walkforward_optimization_id || result.optimization_id) {
-        loadPlotsViaAPI(result.walkforward_optimization_id || result.optimization_id);
+      const optimizationId = result.walkforward_optimization_id || result.optimization_id;
+      if (optimizationId) {
+        console.log('🚀 DEBUG: Loading plots via API for optimization ID:', optimizationId);
+        loadPlotsViaAPI(optimizationId);
+      } else {
+        console.log('❌ DEBUG: No optimization ID found in result:', {
+          walkforward_optimization_id: result.walkforward_optimization_id,
+          optimization_id: result.optimization_id
+        });
       }
     }
   }, [result]);
@@ -292,15 +304,25 @@ function WalkForwardResultsContent() {
                 </div>
                 <div className="bg-[#141721] rounded-lg p-4">
                   <div className="text-gray-400 text-sm mb-2">z-statistic</div>
-                  <div className="text-white font-semibold">{result.z_statistic}</div>
+                  <div className="text-white font-semibold">
+                    {result.z_statistic !== undefined && result.z_statistic !== null 
+                      ? result.z_statistic.toFixed(4) 
+                      : 'N/A'}
+                  </div>
                 </div>
                 <div className="bg-[#141721] rounded-lg p-4">
                   <div className="text-gray-400 text-sm mb-2">p-value</div>
-                  <div className="text-white font-semibold">{result.p_value}</div>
+                  <div className="text-white font-semibold">
+                    {result.p_value !== undefined && result.p_value !== null 
+                      ? result.p_value.toFixed(4) 
+                      : 'N/A'}
+                  </div>
                 </div>
                 <div className="bg-[#141721] rounded-lg p-4">
                   <div className="text-gray-400 text-sm mb-2">Hypothesis Decision</div>
-                  <div className="text-white font-semibold">{result.hypothesis_decision}</div>
+                  <div className="text-white font-semibold">
+                    {result.hypothesis_decision || 'N/A'}
+                  </div>
                 </div>
                 <div className="bg-[#141721] rounded-lg p-4">
                   <div className="text-gray-400 text-sm mb-2">Message</div>
@@ -483,7 +505,42 @@ function WalkForwardResultsContent() {
         {tab === 'graph' && (
           <div className="w-full grid grid-cols-1 gap-8">
             {/* Debug: Show available plots */}
-           
+            <div className="mb-4 p-4 bg-[#141721] rounded-lg">
+              <div className="text-[#85e1fe] font-semibold mb-2">Debug Info:</div>
+              <div className="text-xs text-gray-400">
+                <div className="mb-2">
+                  <div className="text-[#85e1fe]">API Loaded Plots:</div>
+                  {Object.keys(apiPlots).map(key => (
+                    <div key={key} className="ml-2">• {key}: ✅ Loaded</div>
+                  ))}
+                  {Object.keys(plotLoading).filter(key => plotLoading[key]).map(key => (
+                    <div key={key} className="ml-2">• {key}: 🔄 Loading...</div>
+                  ))}
+                  {Object.keys(plotErrors).filter(key => plotErrors[key]).map(key => (
+                    <div key={key} className="ml-2">• {key}: ❌ Error</div>
+                  ))}
+                </div>
+                <div className="mb-2">
+                  <div className="text-[#85e1fe]">Optimization ID:</div>
+                  <div className="ml-2">• walkforward_optimization_id: {result?.walkforward_optimization_id || 'N/A'}</div>
+                  <div className="ml-2">• optimization_id: {result?.optimization_id || 'N/A'}</div>
+                </div>
+                <div className="mb-2">
+                  <div className="text-[#85e1fe]">Result Object Plots:</div>
+                  {Object.keys(result || {}).filter(key => key.includes('html') || key.includes('plot') || key.includes('graph')).map(key => (
+                    <div key={key} className="ml-2">• {key}: {result[key] ? 'Available' : 'Not available'}</div>
+                  ))}
+                </div>
+                {Object.keys(plots).length > 0 && (
+                  <div className="mt-2">
+                    <div className="text-[#85e1fe]">Legacy Plots Object:</div>
+                    {Object.keys(plots).map(key => (
+                      <div key={key} className="ml-2">• {key}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
 
             {/* API Loaded Plots - Primary Method */}
             {Object.entries(apiPlots).map(([plotType, plotHtml]) => (
