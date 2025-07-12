@@ -742,11 +742,16 @@ export default function StrategyTestingPage() {
       // Check if we have a successful result (either nested or direct)
       const resultData = result?.result || result;
       
+      console.log("🔍 DEBUG: Full result data:", resultData);
+      console.log("🔍 DEBUG: Available fields:", Object.keys(resultData || {}));
+      
       if (resultData && (resultData.status === 'success' || resultData.message?.toLowerCase().includes('success'))) {
         console.log("Success detected, navigating to results page");
         // Store only the optimization ID in sessionStorage and navigate to results page
-        if (resultData.optimization_id) {
-          sessionStorage.setItem('walkForwardOptimizationId', resultData.optimization_id.toString());
+        const optimizationId = resultData.walkforward_optimization_id || resultData.optimization_id;
+        if (optimizationId) {
+          console.log("✅ Storing optimization ID:", optimizationId);
+          sessionStorage.setItem('walkForwardOptimizationId', optimizationId.toString());
           // Add a small delay to ensure sessionStorage is set
           setTimeout(() => {
             router.push('/walk-forward-results');
@@ -754,10 +759,11 @@ export default function StrategyTestingPage() {
         } else {
           // Fallback: store minimal data in sessionStorage
           const minimalData = {
-            id: resultData.id || resultData.optimization_id,
+            id: resultData.id || resultData.walkforward_optimization_id || resultData.optimization_id,
             status: resultData.status,
             message: resultData.message
           };
+          console.log("⚠️ Storing minimal data:", minimalData);
           sessionStorage.setItem('walkForwardMinimalData', JSON.stringify(minimalData));
           // Add a small delay to ensure sessionStorage is set
           setTimeout(() => {
@@ -771,8 +777,10 @@ export default function StrategyTestingPage() {
       if (resultData) {
         console.log("Result data found, navigating to results page");
         // Store only the optimization ID in sessionStorage
-        if (resultData.optimization_id) {
-          sessionStorage.setItem('walkForwardOptimizationId', resultData.optimization_id.toString());
+        const optimizationId = resultData.walkforward_optimization_id || resultData.optimization_id;
+        if (optimizationId) {
+          console.log("✅ Storing optimization ID:", optimizationId);
+          sessionStorage.setItem('walkForwardOptimizationId', optimizationId.toString());
           // Add a small delay to ensure sessionStorage is set
           setTimeout(() => {
             router.push('/walk-forward-results');
@@ -780,10 +788,11 @@ export default function StrategyTestingPage() {
         } else {
           // Fallback: store minimal data
           const minimalData = {
-            id: resultData.id || resultData.optimization_id,
+            id: resultData.id || resultData.walkforward_optimization_id || resultData.optimization_id,
             status: resultData.status,
             message: resultData.message
           };
+          console.log("⚠️ Storing minimal data:", minimalData);
           sessionStorage.setItem('walkForwardMinimalData', JSON.stringify(minimalData));
           // Add a small delay to ensure sessionStorage is set
           setTimeout(() => {
