@@ -72,6 +72,7 @@ function WalkForwardResultsContent() {
           walkforward_optimization_id: result.walkforward_optimization_id,
           optimization_id: result.optimization_id
         });
+        console.log('🔍 DEBUG: All result keys:', Object.keys(result));
       }
     }
   }, [result]);
@@ -127,6 +128,8 @@ function WalkForwardResultsContent() {
     const resultParam = searchParams.get('result');
     const idParam = searchParams.get('id');
     
+    console.log('🔍 DEBUG: URL params - resultParam:', resultParam, 'idParam:', idParam);
+    
     if (resultParam) {
       try {
         setResult(JSON.parse(decodeURIComponent(resultParam)));
@@ -153,6 +156,8 @@ function WalkForwardResultsContent() {
       // Check sessionStorage for optimization ID or minimal data
       const optimizationId = sessionStorage.getItem('walkForwardOptimizationId');
       const minimalData = sessionStorage.getItem('walkForwardMinimalData');
+      
+      console.log('🔍 DEBUG: SessionStorage - optimizationId:', optimizationId, 'minimalData:', minimalData);
       
       if (optimizationId) {
         // Fetch the result by optimization ID
@@ -185,6 +190,7 @@ function WalkForwardResultsContent() {
       } else {
         // Fallback to localStorage - check both keys (for backward compatibility)
         const storedResult = localStorage.getItem('walkForwardResult') || localStorage.getItem('walkForwardResultDetail');
+        console.log('🔍 DEBUG: localStorage fallback - storedResult:', storedResult ? 'exists' : 'not found');
         if (storedResult) {
           try {
             setResult(JSON.parse(storedResult));
