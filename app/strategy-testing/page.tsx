@@ -739,8 +739,8 @@ export default function StrategyTestingPage() {
       console.log("Result status:", result?.status)
       console.log("Result message:", result?.message)
 
-      // Check if we have a successful result (either nested or direct)
-      const resultData = result?.result || result;
+      // The API response structure is direct, not nested under 'result'
+      const resultData = result;
       
       console.log("🔍 DEBUG: Full result data:", resultData);
       console.log("🔍 DEBUG: Available fields:", Object.keys(resultData || {}));
@@ -749,6 +749,8 @@ export default function StrategyTestingPage() {
         console.log("Success detected, navigating to results page");
         // Store only the optimization ID in sessionStorage and navigate to results page
         const optimizationId = resultData.walkforward_optimization_id || resultData.optimization_id;
+        console.log("🔍 DEBUG: Found optimization ID:", optimizationId);
+        
         if (optimizationId) {
           console.log("✅ Storing optimization ID:", optimizationId);
           sessionStorage.setItem('walkForwardOptimizationId', optimizationId.toString());
@@ -778,6 +780,8 @@ export default function StrategyTestingPage() {
         console.log("Result data found, navigating to results page");
         // Store only the optimization ID in sessionStorage
         const optimizationId = resultData.walkforward_optimization_id || resultData.optimization_id;
+        console.log("🔍 DEBUG: Found optimization ID:", optimizationId);
+        
         if (optimizationId) {
           console.log("✅ Storing optimization ID:", optimizationId);
           sessionStorage.setItem('walkForwardOptimizationId', optimizationId.toString());
