@@ -622,6 +622,14 @@ export const getStrategyOptimizationResults = async (strategyStatementId, params
 export const runWalkForwardOptimisation = async ({ statement, files, strategy_statement_id = null, wait = false, walk_forward_setting = null }) => {
   const formData = new FormData()
 
+  // Log the payload being sent
+  console.log("🚀 WALK FORWARD OPTIMIZATION PAYLOAD:");
+  console.log("📋 Statement:", statement);
+  console.log("📁 Files:", Object.keys(files));
+  console.log("🆔 Strategy Statement ID:", strategy_statement_id);
+  console.log("⏳ Wait:", wait);
+  console.log("⚙️ Walk Forward Settings:", walk_forward_setting);
+
   // Attach the statement JSON as a string
   formData.append("statement", JSON.stringify(statement))
 
@@ -643,6 +651,17 @@ export const runWalkForwardOptimisation = async ({ statement, files, strategy_st
   // Attach each file using its timeframe key
   for (const [timeframe, file] of Object.entries(files)) {
     formData.append(timeframe, file)
+    console.log(`📎 Attached file: ${timeframe} -> ${file.name} (${file.size} bytes)`);
+  }
+
+  // Log the FormData contents
+  console.log("📦 FormData contents:");
+  for (let [key, value] of formData.entries()) {
+    if (typeof value === 'string') {
+      console.log(`  ${key}: ${value.substring(0, 200)}${value.length > 200 ? '...' : ''}`);
+    } else {
+      console.log(`  ${key}: [File] ${value.name} (${value.size} bytes)`);
+    }
   }
 
   try {
@@ -656,10 +675,10 @@ export const runWalkForwardOptimisation = async ({ statement, files, strategy_st
       throw new Error(error?.error || "Failed to start walk forward optimisation")
     }
     const data = await response.json();
-    console.log("Walk Forward Optimisation response:", data);
+    console.log("✅ Walk Forward Optimisation response:", data);
     return data;
   } catch (err) {
-    console.error("Walk Forward Optimisation request failed:", err);
+    console.error("❌ Walk Forward Optimisation request failed:", err);
     throw err;
   }
 };
