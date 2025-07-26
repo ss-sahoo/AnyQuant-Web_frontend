@@ -17,91 +17,106 @@ function WalkForwardResultsContent() {
   const [checkedRows, setCheckedRows] = useState<{ [key: number]: boolean }>({});
   const [isLoading, setIsLoading] = useState(false);
 
-  // State for individual plots loaded via API
-  const [apiPlots, setApiPlots] = useState<{ [key: string]: string }>({});
+  // State for plot images loaded via API
+  const [plotImages, setPlotImages] = useState<{ [key: string]: string }>({});
   const [plotLoading, setPlotLoading] = useState<{ [key: string]: boolean }>({});
   const [plotErrors, setPlotErrors] = useState<{ [key: string]: string }>({});
 
   // Debug: Log the entire result structure to understand how plots are stored
   useEffect(() => {
-    if (result) {
-      console.log('🔍 DEBUG: Full result structure:', result);
-      console.log('🔍 DEBUG: Looking for plot fields...');
-      
-      // Debug: Check for z-statistic, p-value, and hypothesis_decision
-      console.log('🔍 DEBUG: z_statistic:', result.z_statistic, typeof result.z_statistic);
-      console.log('🔍 DEBUG: p_value:', result.p_value, typeof result.p_value);
-      console.log('🔍 DEBUG: hypothesis_decision:', result.hypothesis_decision, typeof result.hypothesis_decision);
-      
-      // Check for the specific plot names
-      const plotNames = [
-        'train_validation_split_graph.html',
-        'train_validation_Equity Final [$].html',
-        'train_validation_Return (Ann.) [%].html'
-      ];
-      
-      plotNames.forEach(name => {
-        console.log(`🔍 DEBUG: Checking for ${name}:`, result[name] ? '✅ Found' : '❌ Not found');
-        if (result[name]) {
-          console.log(`🔍 DEBUG: ${name} content length:`, result[name].length);
-        }
-      });
-      
-      // Check plots_html object
-      console.log('🔍 DEBUG: plots_html object:', result.plots_html);
-      if (result.plots_html) {
-        Object.keys(result.plots_html).forEach(key => {
-          console.log(`🔍 DEBUG: plots_html.${key}:`, result.plots_html[key] ? '✅ Found' : '❌ Not found');
+    const loadPlotsForResult = async () => {
+      if (result) {
+        console.log('🔍 DEBUG: Full result structure:', result);
+        console.log('🔍 DEBUG: Looking for plot fields...');
+        
+        // Debug: Check for z-statistic, p-value, and hypothesis_decision
+        console.log('🔍 DEBUG: z_statistic:', result.z_statistic, typeof result.z_statistic);
+        console.log('🔍 DEBUG: p_value:', result.p_value, typeof result.p_value);
+        console.log('🔍 DEBUG: hypothesis_decision:', result.hypothesis_decision, typeof result.hypothesis_decision);
+        
+        // Check for the specific plot names
+        const plotNames = [
+          'train_validation_split_graph.html',
+          'train_validation_Equity Final [$].html',
+          'train_validation_Return (Ann.) [%].html'
+        ];
+        
+        plotNames.forEach(name => {
+          console.log(`🔍 DEBUG: Checking for ${name}:`, result[name] ? '✅ Found' : '❌ Not found');
+          if (result[name]) {
+            console.log(`🔍 DEBUG: ${name} content length:`, result[name].length);
+          }
         });
-      }
-      
-      // Check for any other HTML fields
-      Object.keys(result).forEach(key => {
-        if (key.includes('html') || key.includes('plot') || key.includes('graph')) {
-          console.log(`🔍 DEBUG: Found HTML field: ${key}`, typeof result[key]);
+        
+        // Check plots_html object
+        console.log('🔍 DEBUG: plots_html object:', result.plots_html);
+        if (result.plots_html) {
+          Object.keys(result.plots_html).forEach(key => {
+            console.log(`🔍 DEBUG: plots_html.${key}:`, result.plots_html[key] ? '✅ Found' : '❌ Not found');
+          });
         }
-      });
+        
+        // Check for any other HTML fields
+        Object.keys(result).forEach(key => {
+          if (key.includes('html') || key.includes('plot') || key.includes('graph')) {
+            console.log(`🔍 DEBUG: Found HTML field: ${key}`, typeof result[key]);
+          }
+        });
 
-      // Load plots via API if we have an optimization ID
-      const optimizationId = result.walkforward_optimization_id || result.optimization_id;
-      if (optimizationId) {
-        console.log('🚀 DEBUG: Loading plots via API for optimization ID:', optimizationId);
-        loadPlotsViaAPI(optimizationId);
-      } else {
-        console.log('❌ DEBUG: No optimization ID found in result:', {
-          walkforward_optimization_id: result.walkforward_optimization_id,
-          optimization_id: result.optimization_id
-        });
-        console.log('🔍 DEBUG: All result keys:', Object.keys(result));
+        // Load plots via API if we have an optimization ID
+        const optimizationId = result.walkforward_optimization_id || result.optimization_id;
+        if (optimizationId) {
+          console.log('🚀 DEBUG: Loading plots via API for optimization ID:', optimizationId);
+          
+          // Try the full result approach first, then fallback to individual plot loading
+          try {
+            await fetchFullResultWithPlots(optimizationId);
+          } catch (error) {
+            console.log('⚠️ Full result approach failed, trying individual plot loading...');
+            await loadPlotsViaAPI(optimizationId);
+          }
+        } else {
+          console.log('❌ DEBUG: No optimization ID found in result:', {
+            walkforward_optimization_id: result.walkforward_optimization_id,
+            optimization_id: result.optimization_id
+          });
+          console.log('🔍 DEBUG: All result keys:', Object.keys(result));
+        }
       }
-    }
+    };
+
+    loadPlotsForResult();
   }, [result]);
 
-  const baseUrl = "https://anyquant.co.uk"
+  const baseUrl = "http://127.0.0.1:8000"
 
-  // Function to load individual plot via API
-  const loadPlotViaAPI = async (optimizationId: number, plotType: string) => {
+  // Function to load individual plot image via API
+  const loadPlotImageViaAPI = async (optimizationId: number, plotType: string) => {
     setPlotLoading(prev => ({ ...prev, [plotType]: true }));
     setPlotErrors(prev => ({ ...prev, [plotType]: '' }));
 
     try {
-      console.log(`🔄 Loading plot: ${plotType} for optimization ID: ${optimizationId}`);
+      console.log(`🔄 Loading plot image: ${plotType} for optimization ID: ${optimizationId}`);
       
-      const response = await fetch(`${baseUrl}/api/walkforward-optimization-result/${optimizationId}/plot/${plotType}/`);
+      const response = await fetch(`${baseUrl}/api/walkforward-optimization-result/${optimizationId}/plot-image/${plotType}/`);
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
       
       const data = await response.json();
-      console.log(`✅ Loaded plot ${plotType}:`, data);
+      console.log(`✅ Loaded plot image ${plotType}:`, data);
       
-      setApiPlots(prev => ({
-        ...prev,
-        [plotType]: data.plot_html
-      }));
+      if (data.image_url) {
+        setPlotImages(prev => ({
+          ...prev,
+          [plotType]: data.image_url
+        }));
+      } else {
+        throw new Error('No image_url found in response');
+      }
     } catch (error: any) {
-      console.error(`❌ Error loading plot ${plotType}:`, error);
+      console.error(`❌ Error loading plot image ${plotType}:`, error);
       setPlotErrors(prev => ({
         ...prev,
         [plotType]: `Failed to load ${plotType}: ${error.message}`
@@ -111,16 +126,54 @@ function WalkForwardResultsContent() {
     }
   };
 
-  // Function to load all plots via API
+  // Function to load all plot images via API
   const loadPlotsViaAPI = async (optimizationId: number) => {
-    console.log('🚀 Loading all plots via API for optimization ID:', optimizationId);
+    console.log('🚀 Loading all plot images via API for optimization ID:', optimizationId);
     
-    const plotTypes = ['split_graph', 'equity_trend', 'return_trend'];
+    const plotTypes = ['split_graph', 'equity_trend', 'return_trend', 'max_drawdown', 'sharpe_ratio', 'trades'];
     
     // Load all plots in parallel
     await Promise.all(
-      plotTypes.map(plotType => loadPlotViaAPI(optimizationId, plotType))
+      plotTypes.map(plotType => loadPlotImageViaAPI(optimizationId, plotType))
     );
+  };
+
+  // Function to fetch full result data with plots (alternative approach)
+  const fetchFullResultWithPlots = async (optimizationId: number) => {
+    try {
+      console.log('🔄 Fetching full result with plots for optimization ID:', optimizationId);
+      
+      const response = await fetch(`${baseUrl}/api/walkforward-optimization-results/${optimizationId}/`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      console.log('✅ Fetched full result with plots:', data);
+      
+      // Extract plot image URLs from the response
+      if (data.plots) {
+        const newPlotImages: { [key: string]: string } = {};
+        Object.entries(data.plots).forEach(([plotType, plotData]: [string, any]) => {
+          if (plotData && plotData.image_url) {
+            newPlotImages[plotType] = plotData.image_url;
+          }
+        });
+        
+        setPlotImages(prev => ({
+          ...prev,
+          ...newPlotImages
+        }));
+        
+        console.log('✅ Extracted plot images:', newPlotImages);
+      }
+      
+      return data;
+    } catch (error: any) {
+      console.error('❌ Error fetching full result with plots:', error);
+      throw error;
+    }
   };
 
   // Get result from URL params, sessionStorage, or fetch by ID
@@ -282,7 +335,27 @@ function WalkForwardResultsContent() {
       </div>
       
       {/* Save Button below tab bar, right-aligned */}
-      <div className="px-20 pb-4 flex justify-end">
+      <div className="px-20 pb-4 flex justify-end gap-2">
+        {/* Debug button to manually load plots */}
+        {result && (result.walkforward_optimization_id || result.optimization_id) && (
+          <button 
+            onClick={async () => {
+              const optimizationId = result.walkforward_optimization_id || result.optimization_id;
+              if (optimizationId) {
+                console.log('🔄 Manual plot loading triggered for ID:', optimizationId);
+                try {
+                  await fetchFullResultWithPlots(optimizationId);
+                } catch (error) {
+                  console.log('⚠️ Full result approach failed, trying individual plot loading...');
+                  await loadPlotsViaAPI(optimizationId);
+                }
+              }
+            }}
+            className="bg-[#ff6b6b] text-white px-3 py-1.5 rounded-md hover:bg-[#ff5252] font-medium mt-2 text-sm"
+          >
+            Reload Plots
+          </button>
+        )}
         <button 
           onClick={() => router.push('/strategy-testing')} 
           className="bg-[#85e1fe] text-black px-3 py-1.5 rounded-md hover:bg-[#6bcae2] font-medium mt-2 text-sm"
@@ -510,63 +583,31 @@ function WalkForwardResultsContent() {
         {/* Graph Tab */}
         {tab === 'graph' && (
           <div className="w-full grid grid-cols-1 gap-8">
-            {/* Debug: Show available plots */}
-            <div className="mb-4 p-4 bg-[#141721] rounded-lg">
-              <div className="text-[#85e1fe] font-semibold mb-2">Debug Info:</div>
-              <div className="text-xs text-gray-400">
-                <div className="mb-2">
-                  <div className="text-[#85e1fe]">API Loaded Plots:</div>
-                  {Object.keys(apiPlots).map(key => (
-                    <div key={key} className="ml-2">• {key}: ✅ Loaded</div>
-                  ))}
-                  {Object.keys(plotLoading).filter(key => plotLoading[key]).map(key => (
-                    <div key={key} className="ml-2">• {key}: 🔄 Loading...</div>
-                  ))}
-                  {Object.keys(plotErrors).filter(key => plotErrors[key]).map(key => (
-                    <div key={key} className="ml-2">• {key}: ❌ Error</div>
-                  ))}
-                </div>
-                <div className="mb-2">
-                  <div className="text-[#85e1fe]">Optimization ID:</div>
-                  <div className="ml-2">• walkforward_optimization_id: {result?.walkforward_optimization_id || 'N/A'}</div>
-                  <div className="ml-2">• optimization_id: {result?.optimization_id || 'N/A'}</div>
-                </div>
-                <div className="mb-2">
-                  <div className="text-[#85e1fe]">Result Object Plots:</div>
-                  {Object.keys(result || {}).filter(key => key.includes('html') || key.includes('plot') || key.includes('graph')).map(key => (
-                    <div key={key} className="ml-2">• {key}: {result[key] ? 'Available' : 'Not available'}</div>
-                  ))}
-                </div>
-                {Object.keys(plots).length > 0 && (
-                  <div className="mt-2">
-                    <div className="text-[#85e1fe]">Legacy Plots Object:</div>
-                    {Object.keys(plots).map(key => (
-                      <div key={key} className="ml-2">• {key}</div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
+            
+        
 
-            {/* API Loaded Plots - Primary Method */}
-            {Object.entries(apiPlots).map(([plotType, plotHtml]) => (
+            {/* API Loaded Plot Images - Primary Method */}
+            {Object.entries(plotImages).map(([plotType, imageUrl]) => (
               <div key={plotType}>
                 <div className="mb-2 font-bold text-white text-base">
                   {plotType === 'split_graph' && 'Train/Validation Split Graph'}
                   {plotType === 'equity_trend' && 'Equity Trend Over Folds'}
                   {plotType === 'return_trend' && 'Return Trend Over Folds'}
+                  {plotType === 'max_drawdown' && 'Maximum Drawdown Over Folds'}
+                  {plotType === 'sharpe_ratio' && 'Sharpe Ratio Over Folds'}
+                  {plotType === 'trades' && 'Number of Trades Over Folds'}
                   <span className="text-xs text-gray-400"> (API Loaded)</span>
                 </div>
-                <iframe
-                  title={plotType}
-                  className="w-full h-[400px] bg-white"
-                  style={{ border: 'none' }}
-                  srcDoc={plotHtml}
+                <img
+                  src={imageUrl}
+                  alt={plotType}
+                  className="w-full h-[400px] object-contain bg-white rounded-lg"
+                  style={{ maxWidth: '100%' }}
                 />
               </div>
             ))}
 
-            {/* Loading States for API Plots */}
+            {/* Loading States for API Plot Images */}
             {Object.entries(plotLoading).map(([plotType, isLoading]) => {
               if (isLoading) {
                 return (
@@ -575,6 +616,9 @@ function WalkForwardResultsContent() {
                       {plotType === 'split_graph' && 'Train/Validation Split Graph'}
                       {plotType === 'equity_trend' && 'Equity Trend Over Folds'}
                       {plotType === 'return_trend' && 'Return Trend Over Folds'}
+                      {plotType === 'max_drawdown' && 'Maximum Drawdown Over Folds'}
+                      {plotType === 'sharpe_ratio' && 'Sharpe Ratio Over Folds'}
+                      {plotType === 'trades' && 'Number of Trades Over Folds'}
                       <span className="text-xs text-gray-400"> (Loading...)</span>
                     </div>
                     <div className="w-full h-[400px] bg-[#141721] flex items-center justify-center">
@@ -589,7 +633,7 @@ function WalkForwardResultsContent() {
               return null;
             })}
 
-            {/* Error States for API Plots */}
+            {/* Error States for API Plot Images */}
             {Object.entries(plotErrors).map(([plotType, error]) => {
               if (error) {
                 return (
@@ -598,6 +642,9 @@ function WalkForwardResultsContent() {
                       {plotType === 'split_graph' && 'Train/Validation Split Graph'}
                       {plotType === 'equity_trend' && 'Equity Trend Over Folds'}
                       {plotType === 'return_trend' && 'Return Trend Over Folds'}
+                      {plotType === 'max_drawdown' && 'Maximum Drawdown Over Folds'}
+                      {plotType === 'sharpe_ratio' && 'Sharpe Ratio Over Folds'}
+                      {plotType === 'trades' && 'Number of Trades Over Folds'}
                       <span className="text-xs text-red-400"> (Error)</span>
                     </div>
                     <div className="w-full h-[400px] bg-[#141721] flex items-center justify-center">
@@ -607,7 +654,7 @@ function WalkForwardResultsContent() {
                           onClick={() => {
                             const optimizationId = result.walkforward_optimization_id || result.optimization_id;
                             if (optimizationId) {
-                              loadPlotViaAPI(optimizationId, plotType);
+                              loadPlotImageViaAPI(optimizationId, plotType);
                             }
                           }}
                           className="bg-[#85e1fe] text-black px-4 py-2 rounded-md hover:bg-[#6bcae2] text-sm"
@@ -622,8 +669,30 @@ function WalkForwardResultsContent() {
               return null;
             })}
 
+            {/* Dynamic Plot Rendering - All Available Plots */}
+            {Object.keys(plotImages).length > 0 && (
+              <div className="mb-8">
+                <div className="mb-4 text-lg font-semibold text-[#85e1fe]">All Available Plots</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {Object.entries(plotImages).map(([plotType, imageUrl]) => (
+                    <div key={plotType} className="bg-[#141721] rounded-lg p-4">
+                      <h4 className="text-white font-semibold mb-3">
+                        {plotType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                      </h4>
+                      <img 
+                        src={imageUrl} 
+                        alt={plotType} 
+                        style={{ maxWidth: '100%' }}
+                        className="w-full h-auto rounded"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Fallback: Legacy Plot Rendering */}
-            {Object.keys(apiPlots).length === 0 && (
+            {Object.keys(plotImages).length === 0 && (
               <>
                 {/* Comprehensive Plot Rendering - Try all possible locations */}
                 {(() => {

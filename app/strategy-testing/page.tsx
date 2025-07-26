@@ -341,7 +341,7 @@ export default function StrategyTestingPage() {
   // Simple toast notification system
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     const toast = document.createElement('div');
-    toast.className = `fixed bottom-10 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded shadow-lg z-50 text-white ${type === 'success' ? 'bg-green-600' : 'bg-red-600'}`;
+    toast.className = `fixed bottom-10 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded shadow-lg z-50 text-black ${type === 'success' ? 'bg-[#85e1fe]' : 'bg-red-600'}`;
     toast.textContent = message;
     document.body.appendChild(toast);
     setTimeout(() => {
@@ -789,7 +789,7 @@ export default function StrategyTestingPage() {
           setTimeout(() => {
             router.push('/walk-forward-results');
           }, 100);
-        } else {
+      } else {
           // Fallback: store minimal data
           const minimalData = {
             id: resultData.id || resultData.walkforward_optimization_id || resultData.optimization_id,

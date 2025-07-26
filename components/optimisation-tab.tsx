@@ -288,7 +288,7 @@ export function OptimisationTab({
             <div className="text-white">Optimized parameter</div>
             <div className="relative">
               <select
-                className="appearance-none bg-transparent text-white pr-8 focus:outline-none"
+                className="appearance-none bg-[#141721] text-white pr-8 focus:outline-none py-2 px-4 rounded-md"
                 value={selectedMaximiseOption}
                 onChange={(e) => setSelectedMaximiseOption(e.target.value)}
               >

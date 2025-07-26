@@ -329,15 +329,34 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     }
   }, [strategyData, strategyId])
 
+  // Define allowed price options as in PriceSettingsModal
+  const allowedPriceOptions = [
+    { id: "open", label: "Price Open" },
+    { id: "close", label: "Price Close" },
+    { id: "low", label: "Price Low" },
+    { id: "high", label: "Price High" },
+  ];
+
   // Modify the handleSearchInput function to reset the selected index when search results change
   const handleSearchInput = (statementIndex: number, value: string) => {
     setSearchTerm(value)
     setActiveStatementIndex(statementIndex)
-    // Reset selected index when search term changes
     setSelectedSearchIndex(-1)
 
     if (value.trim() === "") {
       setSearchResults([])
+      return
+    }
+
+    // Declare searchLower once
+    const searchLower = value.toLowerCase()
+
+    // If searching for price, only show allowed price options
+    if (searchLower.includes("price")) {
+      const priceResults = allowedPriceOptions
+        .filter(opt => opt.label.toLowerCase().includes(searchLower))
+        .map(opt => opt.label)
+      setSearchResults(priceResults)
       return
     }
 
@@ -353,7 +372,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     ]
 
     // Filter components based on search term with parent-child relationships
-    const searchLower = value.toLowerCase()
     const results = allComponents.filter((component) => {
       const componentLower = component.toLowerCase()
 
@@ -998,6 +1016,23 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     const newStatements = [...statements]
     const currentStatement = newStatements[statementIndex]
 
+    // If the component is a price option, add as inp1 with correct structure
+    if (["Price Open", "Price Close", "Price Low", "Price High"].includes(component)) {
+      const priceType = component.split(" ")[1].toLowerCase()
+      const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+      lastCondition.inp1 = {
+        type: "C",
+        input: priceType,
+        timeframe: selectedTimeframe || "12min",
+      }
+      setStatements(newStatements)
+      setActiveStatementIndex(statementIndex)
+      setSearchTerm("")
+      setSearchResults([])
+      searchInputRefs.current[statementIndex]?.focus()
+      return
+    }
+
     // Determine what type of component is being added
     if (component.toLowerCase() === "then") {
       // Adding then to the last condition that has a behavior
@@ -1106,16 +1141,24 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
           // We're adding to inp2
           if (component.toLowerCase() === "rsi") {
+            // Safely extract previous inp1 input_params if they exist
+            let prevParams = {};
+            if (
+              lastCondition.inp1 &&
+              typeof lastCondition.inp1 === "object" &&
+              lastCondition.inp1.input_params &&
+              typeof lastCondition.inp1.input_params === "object"
+            ) {
+              prevParams = lastCondition.inp1.input_params;
+            }
+
             lastCondition.inp2 = {
               type: "I",
               name: "RSI",
               timeframe: timeframe,
               input_params: {
-                timeperiod: 14,
-                source: "close", 
-                ma_type: "SMA",
-                ma_length: 14,
-                bb_stddev: 2.0,// Add default source
+                timeperiod: prevParams.timeperiod || 14,
+                source: prevParams.source || "close",
               },
             }
           } else if (component.toLowerCase() === "volume") {
@@ -1137,9 +1180,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               input_params: {
                 rsi_length: rsiLength,
                 rsi_source: "Close",
-                ma_type: "SMA",
-                ma_length: 14,
-                bb_stddev: 2.0,
               },
             }
           } else if (component.toLowerCase() === "general pa" || component.toLowerCase() === "general-pa") {
@@ -1174,8 +1214,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 // For BBANDS, use type "C" with input "close" format
                 lastCondition.inp2 = {
                   type: "C",
-                  input: "close",
-                  timeframe: "36min",
+                  input: lastCondition.inp1.input || "close",
+                  timeframe: timeframe,
                 }
               } else {
                 lastCondition.inp2 = {
@@ -1210,16 +1250,24 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
           // Special case for RSI indicator
           if (component.toLowerCase() === "rsi") {
+            // Safely extract previous inp1 input_params if they exist
+            let prevParams = {};
+            if (
+              lastCondition.inp1 &&
+              typeof lastCondition.inp1 === "object" &&
+              lastCondition.inp1.input_params &&
+              typeof lastCondition.inp1.input_params === "object"
+            ) {
+              prevParams = lastCondition.inp1.input_params;
+            }
+
             lastCondition.inp1 = {
               type: "I",
-              name: "RSI", // Uppercase name
+              name: "RSI",
               timeframe: timeframe,
               input_params: {
-                timeperiod: 14, // Numeric value, not string
-                source: "close", 
-                ma_type: "SMA",
-                ma_length: 14,
-                bb_stddev: 2.0,// Add default source
+                timeperiod: prevParams.timeperiod || 14,
+                source: prevParams.source || "close",
               },
             }
           } else if (component.toLowerCase() === "volume") {
@@ -1241,9 +1289,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               input_params: {
                 rsi_length: rsiLength,
                 rsi_source: "Close",
-                ma_type: "SMA",
-                ma_length: 14,
-                bb_stddev: 2.0,
               },
             }
           } else if (component.toLowerCase() === "general pa" || component.toLowerCase() === "general-pa") {
@@ -1519,9 +1564,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               rsi_length: inp1.input_params?.timeperiod || 14,
               source: inp1.input_params?.source || "close", // Add source to tooltip
               ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
-              ma_type: inp1.input_params?.ma_type || "SMA",
-              ma_length: inp1.input_params?.ma_length || 14,
-              bb_stddev: inp1.input_params?.bb_stddev || 2.0,
+            
             },
           }
         } else if (inp1.name === "RSI_MA") {
@@ -1608,9 +1651,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             rsi_length: inp2.input_params?.timeperiod || 14,
             source: inp2.input_params?.source || "close", // Add source to tooltip
             ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
-            ma_type: inp2.input_params?.ma_type || "SMA",
-            ma_length: inp2.input_params?.ma_length || 14,
-            bb_stddev: inp2.input_params?.bb_stddev || 2.0,
+          
           },
         }
       } else if ("name" in inp2 && inp2.name === "RSI_MA") {
@@ -2821,29 +2862,64 @@ if (
               } else if (settings.valueType === "indicator" && settings.indicator) {
                 // Handle existing indicator selection with proper JSON structure
                 if (settings.indicator === "rsi") {
+                  let rsiLength = 14;
+                  let rsiSource = "close";
+                  if (lastCondition.inp1 && lastCondition.inp1.name === "RSI") {
+                    rsiLength = lastCondition.inp1.input_params?.timeperiod || 14;
+                    rsiSource = lastCondition.inp1.input_params?.source || "close";
+                  } else if (lastCondition.inp1 && lastCondition.inp1.name === "RSI_MA") {
+                    rsiLength = lastCondition.inp1.input_params?.rsi_length || 14;
+                    rsiSource = lastCondition.inp1.input_params?.rsi_source || "close";
+                  }
                   lastCondition.inp2 = {
                     type: "I",
                     name: "RSI",
                     timeframe: settings.timeframe || "3h",
                     input_params: {
-                      timeperiod: settings.rsiLength || 14,
-                      source: settings.rsiSource?.toLowerCase() || "close", 
-                      ma_type: settings.maType || "SMA",
-                      ma_length: settings.maLength || 14,
-                      bb_stddev: settings.bbStdDev || 2.0,// Add source parameter
+                      timeperiod: rsiLength,
+                      source: rsiSource,
                     },
-                  }
+                  };
                 } else if (settings.indicator === "rsi-ma") {
+                  console.log('🔍 Received settings for RSI_MA from crossing-up modal:', settings);
+                  
+                  // Get saved RSI settings from localStorage for better defaults
+                  let savedRsiSettings = null;
+                  try {
+                    const savedSettings = localStorage.getItem('rsiSettings');
+                    if (savedSettings) {
+                      savedRsiSettings = JSON.parse(savedSettings);
+                      console.log('🔍 Retrieved saved RSI settings for RSI_MA inp2:', savedRsiSettings);
+                    }
+                  } catch (error) {
+                    console.log('Error reading saved RSI settings:', error);
+                  }
+                  
+                  // Priority order: settings from modal > saved settings > defaults
+                  const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
+                  const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
+                  const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
+                  const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
+                  const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
+                  
+                  console.log('🔧 Final RSI_MA inp2 values:', {
+                    rsi_length: finalRsiLength,
+                    rsi_source: finalRsiSource,
+                    ma_length: finalMaLength,
+                    ma_type: finalMaType,
+                    bb_stddev: finalBbStdDev
+                  });
+                  
                   lastCondition.inp2 = {
                     type: "CUSTOM_I",
                     name: "RSI_MA",
                     timeframe: settings.timeframe || "3h",
                     input_params: {
-                      rsi_length: settings.rsiMaLength || 14,
-                      rsi_source: settings.rsiSource || "Close",
-                      ma_type: settings.maType || "SMA",
-                      ma_length: settings.maLength || 14,
-                      bb_stddev: settings.bbStdDev || 2.0,
+                      rsi_length: finalRsiLength,
+                      rsi_source: finalRsiSource,
+                      ma_length: finalMaLength,
+                      ma_type: finalMaType,
+                      bb_stddev: finalBbStdDev,
                     },
                   }
                 } else if (settings.indicator === "volume-ma") {
@@ -2991,14 +3067,14 @@ if (
             statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]?.inp1
           }
           onSave={(settings) => {
-            // Update crossing up settings with the custom value
+            // Update crossing down settings with the custom value
             const newStatements = [...statements]
             const currentStatement = newStatements[activeStatementIndex]
             const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
-            // Update the handleCrossingUpSettings function in strategy-builder.tsx to handle Volume-MA
+            // Update the handleCrossingDownSettings function in strategy-builder.tsx to handle Volume-MA
 
-            // Find this section in the file where it handles the CrossingUpModal save action
+            // Find this section in the file where it handles the CrossingDownModal save action
             if (lastCondition.operator_name === "crossabove" || lastCondition.operator_name === "crossbelow") {
               // Update the inp2 value with the settings from the modal
               if (settings.valueType === "value" && settings.customValue) {
@@ -3009,29 +3085,64 @@ if (
               } else if (settings.valueType === "indicator" && settings.indicator) {
                 // Handle existing indicator selection with proper JSON structure
                 if (settings.indicator === "rsi") {
+                  let rsiLength = 14;
+                  let rsiSource = "close";
+                  if (lastCondition.inp1 && lastCondition.inp1.name === "RSI") {
+                    rsiLength = lastCondition.inp1.input_params?.timeperiod || 14;
+                    rsiSource = lastCondition.inp1.input_params?.source || "close";
+                  } else if (lastCondition.inp1 && lastCondition.inp1.name === "RSI_MA") {
+                    rsiLength = lastCondition.inp1.input_params?.rsi_length || 14;
+                    rsiSource = lastCondition.inp1.input_params?.rsi_source || "close";
+                  }
                   lastCondition.inp2 = {
                     type: "I",
                     name: "RSI",
                     timeframe: settings.timeframe || "3h",
                     input_params: {
-                      timeperiod: settings.rsiLength || 14,
-                      source: settings.rsiSource?.toLowerCase() || "close", 
-                      ma_type: settings.maType || "SMA",
-                      ma_length: settings.maLength || 14,
-                      bb_stddev: settings.bbStdDev || 2.0,// Add source parameter
+                      timeperiod: rsiLength,
+                      source: rsiSource,
                     },
-                  }
+                  };
                 } else if (settings.indicator === "rsi-ma") {
+                  console.log('🔍 Received settings for RSI_MA from crossing-down modal:', settings);
+                  
+                  // Get saved RSI settings from localStorage for better defaults
+                  let savedRsiSettings = null;
+                  try {
+                    const savedSettings = localStorage.getItem('rsiSettings');
+                    if (savedSettings) {
+                      savedRsiSettings = JSON.parse(savedSettings);
+                      console.log('🔍 Retrieved saved RSI settings for RSI_MA inp2 (crossing-down):', savedRsiSettings);
+                    }
+                  } catch (error) {
+                    console.log('Error reading saved RSI settings:', error);
+                  }
+                  
+                  // Priority order: settings from modal > saved settings > defaults
+                  const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
+                  const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
+                  const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
+                  const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
+                  const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
+                  
+                  console.log('🔧 Final RSI_MA inp2 values (crossing-down):', {
+                    rsi_length: finalRsiLength,
+                    rsi_source: finalRsiSource,
+                    ma_length: finalMaLength,
+                    ma_type: finalMaType,
+                    bb_stddev: finalBbStdDev
+                  });
+                  
                   lastCondition.inp2 = {
                     type: "CUSTOM_I",
                     name: "RSI_MA",
                     timeframe: settings.timeframe || "3h",
                     input_params: {
-                      rsi_length: settings.rsiMaLength || 14,
-                      rsi_source: settings.rsiSource || "Close",
-                      ma_type: settings.maType || "SMA",
-                      ma_length: settings.maLength || 14,
-                      bb_stddev: settings.bbStdDev || 2.0,
+                      rsi_length: finalRsiLength,
+                      rsi_source: finalRsiSource,
+                      ma_length: finalMaLength,
+                      ma_type: finalMaType,
+                      bb_stddev: finalBbStdDev,
                     },
                   }
                 } else if (settings.indicator === "volume-ma") {
@@ -3140,13 +3251,10 @@ if (
                   }
                 }
               }
-            }
 
-            setStatements(newStatements)
-            setShowCrossingUpModal(false)
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
+              setStatements(newStatements)
+              setShowCrossingDownModal(false)
+            }
           }}
           onNext={(indicator, timeframe) => {
             setShowCrossingDownModal(false)
@@ -3205,16 +3313,45 @@ if (
                     break
 
                   case "rsi-ma":
+                    console.log('🔍 Received settings for RSI_MA from above modal:', settings);
+                    
+                    // Get saved RSI settings from localStorage for better defaults
+                    let savedRsiSettings = null;
+                    try {
+                      const savedSettings = localStorage.getItem('rsiSettings');
+                      if (savedSettings) {
+                        savedRsiSettings = JSON.parse(savedSettings);
+                        console.log('🔍 Retrieved saved RSI settings for RSI_MA inp2 (above):', savedRsiSettings);
+                      }
+                    } catch (error) {
+                      console.log('Error reading saved RSI settings:', error);
+                    }
+                    
+                    // Priority order: settings from modal > saved settings > defaults
+                    const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
+                    const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
+                    const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
+                    const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
+                    const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
+                    
+                    console.log('🔧 Final RSI_MA inp2 values (above):', {
+                      rsi_length: finalRsiLength,
+                      rsi_source: finalRsiSource,
+                      ma_length: finalMaLength,
+                      ma_type: finalMaType,
+                      bb_stddev: finalBbStdDev
+                    });
+                    
                     lastCondition.inp2 = {
                       type: "CUSTOM_I",
                       name: "RSI_MA",
                       timeframe: tf,
                       input_params: {
-                        rsi_length: settings.rsiMaLength || 14,
-                        rsi_source: settings.rsiSource || "Close",
-                        ma_type: settings.maType || "SMA",
-                        ma_length: settings.maLength || 14,
-                        bb_stddev: settings.bbStdDev || 2.0,
+                        rsi_length: finalRsiLength,
+                        rsi_source: finalRsiSource,
+                        ma_type: finalMaType,
+                        ma_length: finalMaLength,
+                        bb_stddev: finalBbStdDev,
                       },
                     }
                     break
@@ -3340,16 +3477,45 @@ if (
                     break
 
                   case "rsi-ma":
+                    console.log('🔍 Received settings for RSI_MA from below modal:', settings);
+                    
+                    // Get saved RSI settings from localStorage for better defaults
+                    let savedRsiSettings = null;
+                    try {
+                      const savedSettings = localStorage.getItem('rsiSettings');
+                      if (savedSettings) {
+                        savedRsiSettings = JSON.parse(savedSettings);
+                        console.log('🔍 Retrieved saved RSI settings for RSI_MA inp2 (below):', savedRsiSettings);
+                      }
+                    } catch (error) {
+                      console.log('Error reading saved RSI settings:', error);
+                    }
+                    
+                    // Priority order: settings from modal > saved settings > defaults
+                    const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
+                    const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
+                    const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
+                    const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
+                    const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
+                    
+                    console.log('🔧 Final RSI_MA inp2 values (below):', {
+                      rsi_length: finalRsiLength,
+                      rsi_source: finalRsiSource,
+                      ma_length: finalMaLength,
+                      ma_type: finalMaType,
+                      bb_stddev: finalBbStdDev
+                    });
+                    
                     lastCondition.inp2 = {
                       type: "CUSTOM_I",
                       name: "RSI_MA",
                       timeframe: tf,
                       input_params: {
-                        rsi_length: settings.rsiMaLength || 14,
-                        rsi_source: settings.rsiSource || "Close",
-                        ma_type: settings.maType || "SMA",
-                        ma_length: settings.maLength || 14,
-                        bb_stddev: settings.bbStdDev || 2.0,
+                        rsi_length: finalRsiLength,
+                        rsi_source: finalRsiSource,
+                        ma_type: finalMaType,
+                        ma_length: finalMaLength,
+                        bb_stddev: finalBbStdDev,
                       },
                     }
                     break
@@ -3458,9 +3624,7 @@ if (
                     indicatorType: "rsi",
                     rsiLength: String(indicator.input_params?.timeperiod || 14),
                     source: indicator.input_params?.source ? indicator.input_params.source.charAt(0).toUpperCase() + indicator.input_params.source.slice(1) : "Close",
-                    maLength: String(indicator.input_params?.ma_length || 14),
-                    maType: indicator.input_params?.ma_type || "SMA",
-                    bbStdDev: String(indicator.input_params?.bb_stddev || 2.0),
+                    
                     timeframe: indicator.timeframe || "3h",
                   }
                 } else if (indicator.name === "RSI_MA" && "input_params" in indicator) {
@@ -3489,9 +3653,7 @@ if (
                     indicatorType: "rsi",
                     rsiLength: String(indicator.input_params?.timeperiod || 14),
                     source: indicator.input_params?.source ? indicator.input_params.source.charAt(0).toUpperCase() + indicator.input_params.source.slice(1) : "Close",
-                    maLength: String(indicator.input_params?.ma_length || 14),
-                    maType: indicator.input_params?.ma_type || "SMA",
-                    bbStdDev: String(indicator.input_params?.bb_stddev || 2.0),
+                  
                     timeframe: indicator.timeframe || "3h",
                   }
                 } else if (indicator.name === "RSI_MA" && "input_params" in indicator) {
@@ -3556,9 +3718,7 @@ if (
                     input_params: {
                       timeperiod: Number(settings.rsiLength),
                       source: settings.source?.toLowerCase() || "close",
-                      ma_type: settings.maType || "SMA",
-                      ma_length: Number(settings.maLength),
-                      bb_stddev: Number(settings.bbStdDev) || 2.0,
+
                     },
                   }
 
@@ -3597,9 +3757,7 @@ if (
                     input_params: {
                       timeperiod: Number(settings.rsiLength),
                       source: settings.source?.toLowerCase() || "close",
-                      ma_type: settings.maType || "SMA",
-                      ma_length: Number(settings.maLength),
-                      bb_stddev: Number(settings.bbStdDev) || 2.0,
+
                     },
                   }
                 }
@@ -4218,9 +4376,7 @@ if (
                 input_params: {
                   timeperiod: Number(settings.rsiLength),
                   source: settings.source?.toLowerCase() || "close",
-                  ma_type: settings.maType || "SMA",
-                  ma_length: Number(settings.maLength) || 14,
-                  bb_stddev: Number(settings.bbStdDev) || 2.0,
+                
                 },
               }
             }
