@@ -141,7 +141,7 @@ export const WalkForwardOptimisationView: React.FC<WalkForwardOptimisationViewPr
                       <tr className="bg-[#1A1D2D] text-white">
                         <th className="px-2 py-2 text-left">Generation</th>
                         <th className="px-2 py-2 text-left">Best Parameters</th>
-                        <th className="px-2 py-2 text-left">Equity Final [$]</th>
+                        <th className="px-2 py-2 text-left"></th>
                       </tr>
                     </thead>
                     <tbody>

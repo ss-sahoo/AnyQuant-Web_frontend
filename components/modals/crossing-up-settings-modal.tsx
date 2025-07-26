@@ -122,7 +122,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
         setRsiLength(currentInp1.input_params?.timeperiod || 14)
         setRsiMaLength(currentInp1.input_params?.timeperiod || 14)
         setMaLength(currentInp1.input_params?.ma_length || 14)
-        setRsiSource(currentInp1.input_params?.rsi_source || "Close")
+        setRsiSource(currentInp1.input_params?.source || "Close")
         setMaType(currentInp1.input_params?.ma_type || "SMA")
         setBbStdDev(currentInp1.input_params?.bb_stddev || 2.0)
       } else if (currentInp1.name === "RSI_MA") {
@@ -151,13 +151,55 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
   }, [currentInp1])
 
   const handleSave = () => {
-    // For RSI_MA indicator, ensure we use the correct RSI length and MA length from currentInp1 if it's RSI
+    console.log('🔍 handleSave called with indicator:', indicator, 'valueType:', valueType);
+    console.log('🔍 currentInp1:', currentInp1);
+    
+    // For RSI_MA indicator, use saved localStorage values instead of currentInp1
+    if (valueType === "indicator" && indicator === "rsi-ma") {
+      // Get saved RSI settings from localStorage
+      let savedRsiSettings = null;
+      try {
+        const savedSettings = localStorage.getItem('rsiSettings');
+        console.log('🔍 Retrieved saved RSI settings in handleSave:', savedSettings);
+        if (savedSettings) {
+          savedRsiSettings = JSON.parse(savedSettings);
+          console.log('🔍 Parsed saved RSI settings:', savedRsiSettings);
+        }
+      } catch (error) {
+        console.log('Error reading saved RSI settings in handleSave:', error);
+      }
+      
+      // Use saved values with fallbacks
+      const finalRsiMaLength = savedRsiSettings?.rsiLength || 14;
+      const finalMaLength = savedRsiSettings?.maLength || 14;
+      const finalRsiSource = savedRsiSettings?.source || "Close";
+      const finalMaType = savedRsiSettings?.maType || "SMA";
+      const finalBbStdDev = savedRsiSettings?.bbStdDev || 2;
+      
+      console.log('🔧 Final values for RSI_MA in handleSave:', {
+        rsiMaLength: finalRsiMaLength,
+        maLength: finalMaLength,
+        rsiSource: finalRsiSource,
+        maType: finalMaType,
+        bbStdDev: finalBbStdDev
+      });
+      
+      onSave({
+        valueType,
+        indicator,
+        timeframe: timeframe === "custom" ? customTimeframe : timeframe,
+        rsiMaLength: finalRsiMaLength,
+        maLength: finalMaLength,
+        rsiSource: finalRsiSource,
+        maType: finalMaType,
+        bbStdDev: finalBbStdDev,
+      });
+      return;
+    }
+    
+    // For other indicators, use the form values
     let finalRsiMaLength = rsiMaLength
     let finalMaLength = maLength
-    if (indicator === "rsi-ma" && currentInp1?.name === "RSI") {
-      finalRsiMaLength = currentInp1.input_params?.timeperiod || 14
-      finalMaLength = currentInp1.input_params?.ma_length || 14
-    }
     
     onSave({
       valueType,
@@ -184,33 +226,99 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
   }
 
   // Add a helper to get read-only parameter values for existing indicators
-  const getReadOnlyParams = () => {
+  const getReadOnlyParams = (): {
+    rsiLength?: number;
+    rsiSource?: string;
+    maLength?: number;
+    maType?: string;
+    bbStdDev?: number;
+    volumeMaLength?: number;
+  } => {
     if (!currentInp1) return {}
     if (indicator === "rsi") {
-      return {
-        rsiLength: currentInp1.input_params?.timeperiod || 14,
-        rsiSource: currentInp1.input_params?.source || "close",
-      }
-    }
-    if (indicator === "rsi-ma") {
-      // If currentInp1 is RSI, use its timeperiod for RSI_MA's rsi_length
-      // If currentInp1 is RSI_MA, use its rsi_length
-      const rsiLength = currentInp1.name === "RSI" 
-        ? currentInp1.input_params?.timeperiod || 14
-        : currentInp1.input_params?.rsi_length || 14
+      // If inp1 is RSI, use its timeperiod. If inp1 is RSI_MA, use its rsi_length.
+      let rsiLength = 14;
+      let rsiSource = "close";
       
-      return {
-        rsiLength: rsiLength,
-        maLength: currentInp1.input_params?.ma_length || 14,
-        rsiSource: currentInp1.input_params?.rsi_source || currentInp1.input_params?.source || "Close",
-        maType: currentInp1.input_params?.ma_type || "SMA",
-        bbStdDev: currentInp1.input_params?.bb_stddev || 2.0,
+      // Try to get saved RSI settings from localStorage first
+      try {
+        const savedRsiSettings = localStorage.getItem('rsiSettings');
+        console.log('🔍 Raw localStorage data for rsiSettings:', savedRsiSettings);
+        if (savedRsiSettings) {
+          const parsedSettings = JSON.parse(savedRsiSettings);
+          console.log('📖 Parsed RSI settings:', parsedSettings);
+          // For RSI, use rsiLength if available, otherwise fall back to defaults
+          rsiLength = parsedSettings.rsiLength || 14;
+          rsiSource = parsedSettings.source || "close";
+          console.log('📖 Retrieved saved RSI settings for RSI - rsiLength:', rsiLength, 'rsiSource:', rsiSource);
+        } else {
+          console.log('📖 No saved RSI settings found in localStorage');
+        }
+      } catch (error) {
+        console.log('Error reading saved RSI settings:', error);
       }
-    }
-    if (indicator === "volume-ma") {
+      
+      if (currentInp1.name === "RSI") {
+        rsiLength = currentInp1.input_params?.timeperiod || rsiLength;
+        rsiSource = currentInp1.input_params?.source || rsiSource;
+      } else if (currentInp1.name === "RSI_MA") {
+        rsiLength = currentInp1.input_params?.rsi_length || rsiLength;
+        rsiSource = currentInp1.input_params?.rsi_source || rsiSource;
+      }
+      return {
+        rsiLength,
+        rsiSource,
+      }
+    } else if (indicator === "rsi-ma") {
+      // For RSI_MA, get all parameters including MA values
+      let rsiLength = 14;
+      let rsiSource = "Close";
+      let maLength = 14;
+      let maType = "SMA";
+      let bbStdDev = 2;
+      
+      // Try to get saved RSI settings from localStorage first
+      try {
+        const savedRsiSettings = localStorage.getItem('rsiSettings');
+        if (savedRsiSettings) {
+          const parsedSettings = JSON.parse(savedRsiSettings);
+          rsiLength = parsedSettings.rsiLength || 14;
+          rsiSource = parsedSettings.source || "Close";
+          maLength = parsedSettings.maLength || 14;
+          maType = parsedSettings.maType || "SMA";
+          bbStdDev = parsedSettings.bbStdDev || 2;
+          console.log('📖 Retrieved saved RSI settings for RSI_MA:', parsedSettings);
+        }
+      } catch (error) {
+        console.log('Error reading saved RSI settings:', error);
+      }
+      
+      if (currentInp1.name === "RSI_MA") {
+        rsiLength = currentInp1.input_params?.rsi_length || rsiLength;
+        rsiSource = currentInp1.input_params?.rsi_source || rsiSource;
+        maLength = currentInp1.input_params?.ma_length || maLength;
+        maType = currentInp1.input_params?.ma_type || maType;
+        bbStdDev = currentInp1.input_params?.bb_stddev || bbStdDev;
+      } else if (currentInp1.name === "RSI") {
+        rsiLength = currentInp1.input_params?.timeperiod || rsiLength;
+        rsiSource = currentInp1.input_params?.source || rsiSource;
+        // For RSI, use saved MA values from localStorage
+      }
+      return {
+        rsiLength,
+        rsiSource,
+        maLength,
+        maType,
+        bbStdDev,
+      }
+    } else if (indicator === "volume-ma") {
       return {
         volumeMaLength: currentInp1.input_params?.ma_length || 20,
       }
+    } else if (["open", "high", "low", "close"].includes(indicator)) {
+      return {}
+    } else if (indicator === "volume") {
+      return {}
     }
     return {}
   }

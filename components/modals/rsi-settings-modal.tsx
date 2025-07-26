@@ -47,6 +47,47 @@ export function RsiSettingsModal({ onClose, onSave, initialSettings }: RsiSettin
     }
   }, [initialSettings])
 
+  // Load saved RSI settings from localStorage when modal opens
+  useEffect(() => {
+    try {
+      const savedRsiSettings = localStorage.getItem('rsiSettings');
+      console.log('🔍 Current localStorage rsiSettings:', savedRsiSettings);
+      if (savedRsiSettings) {
+        const parsedSettings = JSON.parse(savedRsiSettings);
+        console.log('📖 Loading saved RSI settings on modal open:', parsedSettings);
+        
+        // Only load saved settings if no initialSettings are provided
+        if (!initialSettings) {
+          if (parsedSettings.indicatorType) {
+            setIndicatorType(parsedSettings.indicatorType);
+          }
+          if (parsedSettings.rsiLength !== undefined) {
+            setRsiLength(parsedSettings.rsiLength.toString());
+          }
+          if (parsedSettings.source) {
+            setSource(parsedSettings.source);
+          }
+          if (parsedSettings.maLength !== undefined) {
+            setMaLength(parsedSettings.maLength.toString());
+          }
+          if (parsedSettings.maType) {
+            setMaType(parsedSettings.maType);
+          }
+          if (parsedSettings.bbStdDev !== undefined) {
+            setBbStdDev(parsedSettings.bbStdDev.toString());
+          }
+          if (parsedSettings.timeframe) {
+            setTimeframe(parsedSettings.timeframe);
+          }
+        }
+      } else {
+        console.log('📖 No saved RSI settings found in localStorage');
+      }
+    } catch (error) {
+      console.log('Error loading saved RSI settings:', error);
+    }
+  }, [initialSettings]);
+
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
@@ -86,16 +127,44 @@ export function RsiSettingsModal({ onClose, onSave, initialSettings }: RsiSettin
   }, [])
 
   const handleSave = () => {
-    // Always save all fields, but only use MA settings for RSI MA in parent logic
-    onSave({
+    // Save all RSI settings to localStorage for future use
+    const rsiSettings = {
       indicatorType,
-      rsiLength,
+      rsiLength: Number(rsiLength), // Always save rsiLength
       source,
-      maLength,
-      maType,
-      bbStdDev,
+      maLength: Number(maLength), // Always save maLength
+      maType, // Always save maType
+      bbStdDev: Number(bbStdDev), // Always save bbStdDev
       timeframe,
-    })
+      lastUpdated: Date.now()
+    };
+    
+    // Save to localStorage with a unique key
+    localStorage.setItem('rsiSettings', JSON.stringify(rsiSettings));
+    console.log('💾 RSI Settings saved to localStorage:', rsiSettings);
+    console.log('💾 RSI Length being saved:', rsiLength, 'as number:', Number(rsiLength));
+    console.log('💾 MA Length being saved:', maLength, 'as number:', Number(maLength));
+    console.log('💾 Indicator type being saved:', indicatorType);
+    
+    // Only send timeperiod and source for RSI, all fields for RSI MA
+    if (indicatorType === "rsi") {
+      onSave({
+        indicatorType,
+        rsiLength: Number(rsiLength),
+        source,
+        timeframe,
+      });
+    } else {
+      onSave({
+        indicatorType,
+        rsiLength: Number(rsiLength),
+        source,
+        maLength: Number(maLength),
+        maType,
+        bbStdDev: Number(bbStdDev),
+        timeframe,
+      });
+    }
   }
 
   const sources = ["Close", "Open", "High", "Low", "HL2", "HLC3", "OHLC4"]
