@@ -412,10 +412,11 @@ export async function updateStrategyTradingType(id, tradingtype) {
     // Create the base trading type object
     const tradingTypeObj = {
       NewTrade: tradingtype.NewTrade,
-      commission: 0.0002,
+      commission: tradingtype.commission, // Use dynamic commission from form
       margin: tradingtype.margin,
       lot: tradingtype.lot,
       cash: tradingtype.cash,
+      Asset_type: tradingtype.Asset_type, // Add the asset type
     }
 
     // Only include nTrade_max if it exists in the tradingtype object

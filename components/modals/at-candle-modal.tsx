@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { ChevronDown, X } from "lucide-react"
+import { X } from "lucide-react"
 
 interface AtCandleModalProps {
   onClose: () => void
@@ -13,10 +13,18 @@ export function AtCandleModal({ onClose, onSave, initialValue = 1 }: AtCandleMod
   const [selectedCandle, setSelectedCandle] = useState<string>(initialValue ? initialValue.toString() : "")
 
   const handleSave = () => {
-    if (selectedCandle) {
+    if (selectedCandle && !isNaN(Number(selectedCandle)) && Number(selectedCandle) > 0) {
       onSave(Number(selectedCandle))
     }
     onClose()
+  }
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value
+    // Only allow positive integers
+    if (value === "" || (/^\d+$/.test(value) && Number(value) > 0)) {
+      setSelectedCandle(value)
+    }
   }
 
   return (
@@ -30,23 +38,22 @@ export function AtCandleModal({ onClose, onSave, initialValue = 1 }: AtCandleMod
         </div>
 
         <div className="mb-6">
-          <h3 className="text-lg text-black font-medium mb-2">Select Candle</h3>
+          <h3 className="text-lg text-black font-medium mb-2">Enter Candle Number</h3>
           <div className="relative">
-            <select
-              className="w-full p-3 border rounded-lg appearance-none bg-white text-gray-700"
-              onChange={(e) => setSelectedCandle(e.target.value)}
-              value={selectedCandle}
-            >
-              <option value="" disabled>
-                Select Candle
-              </option>
-              <option value="1">Candle 1</option>
-              <option value="2">Candle 2</option>
-              <option value="3">Candle 3</option>
-              <option value="4">Candle 4</option>
-              <option value="5">Candle 5</option>
-            </select>
-            <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none text-gray-500" />
+            <div className="flex items-center">
+              <span className="text-black text-lg font-medium mr-2">-</span>
+              <input
+                type="text"
+                className="w-full p-3 border rounded-lg bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#85e1fe]"
+                placeholder="Enter candle number (e.g., 1, 2, 3...)"
+                value={selectedCandle}
+                onChange={handleInputChange}
+                min="1"
+              />
+            </div>
+            <p className="text-sm text-gray-600 mt-2">
+              Enter a positive integer. The negative sign will be added automatically.
+            </p>
           </div>
         </div>
 
@@ -57,7 +64,7 @@ export function AtCandleModal({ onClose, onSave, initialValue = 1 }: AtCandleMod
           <button
             onClick={handleSave}
             className="px-6 py-2 bg-[#85e1fe] rounded-full text-black"
-            disabled={!selectedCandle}
+            disabled={!selectedCandle || isNaN(Number(selectedCandle)) || Number(selectedCandle) <= 0}
           >
             Save
           </button>

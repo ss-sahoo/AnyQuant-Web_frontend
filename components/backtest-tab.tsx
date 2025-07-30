@@ -22,6 +22,16 @@ interface BacktestTabProps {
   setMaxTrades: React.Dispatch<React.SetStateAction<string>>
   saveBacktestSettings: () => Promise<void>
   isSaving: boolean
+  lot: string
+  setLot: React.Dispatch<React.SetStateAction<string>>
+  commission: string
+  setCommission: React.Dispatch<React.SetStateAction<string>>
+  margin: string
+  setMargin: React.Dispatch<React.SetStateAction<string>>
+  initialCash: string
+  setInitialCash: React.Dispatch<React.SetStateAction<string>>
+  assetType: string
+  setAssetType: React.Dispatch<React.SetStateAction<string>>
 }
 
 export function BacktestTab({
@@ -44,6 +54,16 @@ export function BacktestTab({
   setMaxTrades,
   saveBacktestSettings,
   isSaving,
+  lot,
+  setLot,
+  commission,
+  setCommission,
+  margin,
+  setMargin,
+  initialCash,
+  setInitialCash,
+  assetType,
+  setAssetType,
 }: BacktestTabProps) {
   return (
     <div className="p-6 ml-[63px]">
@@ -238,6 +258,121 @@ export function BacktestTab({
         </div>
       </div>
 
+      {/* TradingType Configuration Section */}
+      <div className="border-t border-[#2b2e38] my-6"></div>
+      
+      <div className="mb-6">
+        <h3 className="text-lg font-medium text-white mb-4">Trading Configuration</h3>
+        
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
+          {/* Commission */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Commission</label>
+            <input
+              type="number"
+              step="0.0001"
+              value={commission}
+              onChange={(e) => setCommission(e.target.value)}
+              className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
+            />
+          </div>
+
+          {/* Margin */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Margin</label>
+            <input
+              type="number"
+              step="0.1"
+              value={margin}
+              onChange={(e) => setMargin(e.target.value)}
+              className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
+            />
+          </div>
+
+          {/* Lot Size */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Lot Size</label>
+            <div className="relative">
+              <select
+                value={lot}
+                onChange={(e) => setLot(e.target.value)}
+                className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 pr-10 appearance-none focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
+              >
+                <option value="mini">Mini (0.01)</option>
+                <option value="micro">Micro (0.001)</option>
+                <option value="standard">Standard (1.0)</option>
+              </select>
+              <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
+                <svg
+                  className="w-5 h-5 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path>
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          {/* Initial Cash */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Initial Cash</label>
+            <input
+              type="number"
+              step="1000"
+              value={initialCash}
+              onChange={(e) => setInitialCash(e.target.value)}
+              className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
+            />
+          </div>
+
+          {/* Max Trades (if not MTOOTAAT) */}
+          {selectedTradingMode !== "MTOOTAAT" && (
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">Max Trades</label>
+              <input
+                type="number"
+                value={maxTrades}
+                onChange={(e) => setMaxTrades(e.target.value)}
+                min="1"
+                className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
+              />
+            </div>
+          )}
+
+          {/* Asset Type */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Asset Type</label>
+            <div className="relative">
+              <select
+                value={assetType}
+                onChange={(e) => setAssetType(e.target.value)}
+                className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 pr-10 appearance-none focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
+              >
+                <option value="gold">Gold</option>
+                <option value="forex">Forex</option>
+                <option value="crypto">Crypto</option>
+                <option value="stocks">Stocks</option>
+                <option value="indices">Indices</option>
+              </select>
+              <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
+                <svg
+                  className="w-5 h-5 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Save Button */}
       <div className="w-full mt-6 flex justify-end">
         <button
@@ -282,4 +417,4 @@ export function BacktestTab({
       </div>
     </div>
   )
-}
+} 

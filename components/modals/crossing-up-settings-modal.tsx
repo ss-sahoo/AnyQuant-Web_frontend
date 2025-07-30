@@ -63,6 +63,23 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
   // Volume-MA parameters
   const [volumeMaLength, setVolumeMaLength] = useState(20)
 
+  // Load saved Volume settings from localStorage on component mount
+  useEffect(() => {
+    try {
+      const savedVolumeSettings = localStorage.getItem('volumeSettings');
+      if (savedVolumeSettings) {
+        const parsedSettings = JSON.parse(savedVolumeSettings);
+        console.log('🔍 Loaded saved Volume settings in crossing-up modal:', parsedSettings);
+        if (parsedSettings.maLength) {
+          setVolumeMaLength(parsedSettings.maLength);
+          console.log('🔍 DEBUG: Set initial volumeMaLength to saved value:', parsedSettings.maLength);
+        }
+      }
+    } catch (error) {
+      console.log('Error reading saved Volume settings in crossing-up modal:', error);
+    }
+  }, []);
+
   // Additional indicator parameters
   const [fastPeriod, setFastPeriod] = useState(12)
   const [slowPeriod, setSlowPeriod] = useState(26)
@@ -117,6 +134,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
 
   // Initialize parameters based on current inp1
   useEffect(() => {
+    console.log('🔍 DEBUG: useEffect triggered with currentInp1:', currentInp1);
     if (currentInp1) {
       if (currentInp1.name === "RSI") {
         setRsiLength(currentInp1.input_params?.timeperiod || 14)
@@ -138,10 +156,36 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
         currentInp1.name === "Volume_MA" ||
         (currentInp1.type === "CUSTOM_I" && currentInp1.name === "Volume_MA")
       ) {
-        setVolumeMaLength(currentInp1.input_params?.ma_length || 20)
+        console.log('🔍 DEBUG: Found Volume_MA in currentInp1:', currentInp1);
+        console.log('🔍 DEBUG: Volume_MA input_params:', currentInp1.input_params);
+        
+        // Get saved Volume settings as fallback
+        let savedVolumeMaLength = 20;
+        try {
+          const savedVolumeSettings = localStorage.getItem('volumeSettings');
+          if (savedVolumeSettings) {
+            const parsedSettings = JSON.parse(savedVolumeSettings);
+            savedVolumeMaLength = parsedSettings.maLength || 20;
+          }
+        } catch (error) {
+          console.log('Error reading saved Volume settings:', error);
+        }
+        
+        // Always use saved settings for Volume_MA, unless currentInp1 has a specific ma_length
+        let finalVolumeMaLength = savedVolumeMaLength;
+        if (currentInp1.input_params?.ma_length) {
+          finalVolumeMaLength = currentInp1.input_params.ma_length;
+        }
+        console.log('🔍 DEBUG: Setting Volume_MA length to:', finalVolumeMaLength, '(saved:', savedVolumeMaLength, ', current:', currentInp1.input_params?.ma_length, ')');
+        setVolumeMaLength(finalVolumeMaLength)
+        // Volume_MA should never have maType, so explicitly clear it
+        setMaType("")
         if (valueType === "indicator" || valueType === "other") {
           setIndicator("volume-ma")
         }
+      } else {
+        // For any other indicators, don't set maType to avoid contamination
+        // Only RSI and RSI_MA should have maType
       }
 
       if (currentInp1.timeframe) {
@@ -153,6 +197,8 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
   const handleSave = () => {
     console.log('🔍 handleSave called with indicator:', indicator, 'valueType:', valueType);
     console.log('🔍 currentInp1:', currentInp1);
+    console.log('🔍 DEBUG: maType value before save:', maType);
+    console.log('🔍 DEBUG: volumeMaLength value before save:', volumeMaLength);
     
     // For RSI_MA indicator, use saved localStorage values instead of currentInp1
     if (valueType === "indicator" && indicator === "rsi-ma") {
@@ -201,7 +247,8 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
     let finalRsiMaLength = rsiMaLength
     let finalMaLength = maLength
     
-    onSave({
+    // Create the save object without maType for Volume_MA
+    const saveObject: any = {
       valueType,
       customValue,
       indicator,
@@ -212,7 +259,6 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
       rsiMaLength: finalRsiMaLength,
       maLength: finalMaLength,
       rsiSource,
-      maType,
       bbStdDev,
       bbSource,
       volumeMaLength,
@@ -222,7 +268,37 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
       kPeriod,
       dPeriod,
       period,
-    })
+    }
+    
+    console.log('🔍 DEBUG: Save object before maType check:', saveObject);
+    console.log('🔍 DEBUG: indicator value:', indicator);
+    console.log('🔍 DEBUG: indicator !== "volume-ma":', indicator !== "volume-ma");
+    
+    // Only include maType if it's not Volume_MA and maType is not empty
+    if (indicator !== "volume-ma" && maType && maType.trim() !== "") {
+      saveObject.maType = maType
+      console.log('🔍 DEBUG: Added maType to save object:', maType);
+    } else {
+      console.log('🔍 DEBUG: Skipped adding maType for Volume_MA or empty maType');
+    }
+    
+    console.log('🔍 DEBUG: Final save object:', saveObject);
+    
+    // Save Volume settings to localStorage if Volume_MA is being used
+    if (indicator === "volume-ma" && volumeMaLength) {
+      try {
+        const volumeSettings = {
+          indicatorType: "volume-ma",
+          maLength: volumeMaLength,
+        };
+        localStorage.setItem('volumeSettings', JSON.stringify(volumeSettings));
+        console.log('🔍 Saved Volume settings to localStorage:', volumeSettings);
+      } catch (error) {
+        console.log('Error saving Volume settings:', error);
+      }
+    }
+    
+    onSave(saveObject)
   }
 
   // Add a helper to get read-only parameter values for existing indicators
@@ -312,8 +388,21 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
         bbStdDev,
       }
     } else if (indicator === "volume-ma") {
+      // Get saved Volume settings from localStorage
+      let savedVolumeMaLength = 20;
+      try {
+        const savedVolumeSettings = localStorage.getItem('volumeSettings');
+        if (savedVolumeSettings) {
+          const parsedSettings = JSON.parse(savedVolumeSettings);
+          savedVolumeMaLength = parsedSettings.maLength || 20;
+          console.log('🔍 DEBUG: Using saved Volume settings in getReadOnlyParams:', parsedSettings);
+        }
+      } catch (error) {
+        console.log('Error reading saved Volume settings in getReadOnlyParams:', error);
+      }
+      
       return {
-        volumeMaLength: currentInp1.input_params?.ma_length || 20,
+        volumeMaLength: currentInp1.input_params?.ma_length || savedVolumeMaLength,
       }
     } else if (["open", "high", "low", "close"].includes(indicator)) {
       return {}

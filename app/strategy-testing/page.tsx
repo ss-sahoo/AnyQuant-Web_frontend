@@ -64,7 +64,7 @@ export default function StrategyTestingPage() {
   const [side, setSide] = useState("buy")
   const [saveResult, setSaveResult] = useState("true")
   const [nTradeMax, setNTradeMax] = useState(2)
-  const [assetType, setAssetType] = useState("currency")
+
   const [lot, setLot] = useState("mini")
   const [parsedStatement, setParsedStatement] = useState<any>(null)
 
@@ -83,8 +83,14 @@ export default function StrategyTestingPage() {
   const [tournamentSize, setTournamentSize] = useState("5")
 
   // Add new state variables for trading modes
-  const [selectedTradingMode, setSelectedTradingMode] = useState("OOTAAT")
-  const [maxTrades, setMaxTrades] = useState("2")
+  const [selectedTradingMode, setSelectedTradingMode] = useState("MTOOTAAT")
+  const [maxTrades, setMaxTrades] = useState("1")
+  
+  // Add state variables for TradingType configuration
+  const [commission, setCommission] = useState("0.00007")
+  const [margin, setMargin] = useState("1")
+  const [initialCash, setInitialCash] = useState("100000")
+  const [assetType, setAssetType] = useState("gold")
 
   // New states for OptimisationTab
   const [selectedMaximiseOption, setSelectedMaximiseOption] = useState<string>("")
@@ -200,6 +206,60 @@ export default function StrategyTestingPage() {
         try {
           const parsed = JSON.parse(savedStrategy)
           setParsedStatement(parsed)
+          
+          // Load TradingType settings from the strategy
+          if (parsed && parsed.TradingType) {
+            console.log("🔍 Loading TradingType settings from strategy:", parsed.TradingType)
+            setSelectedTradingMode(parsed.TradingType.NewTrade || "MTOOTAAT")
+            setMaxTrades(parsed.TradingType.nTrade_max?.toString() || "1")
+            setAccountDeposit(parsed.TradingType.cash?.toString() || "100000")
+            setLot(parsed.TradingType.lot || "mini")
+            
+            // Load additional TradingType configuration values
+            // Use dynamic commission from the strategy or default
+            const currentCommission = parsed.TradingType.commission?.toString() || "0.00007"
+            console.log("🔍 Commission update check:", { currentCommission })
+            setCommission(currentCommission)
+            setMargin(parsed.TradingType.margin?.toString() || "1")
+            setInitialCash(parsed.TradingType.cash?.toString() || "100000")
+            setAssetType(parsed.TradingType.Asset_type || "gold")
+            
+            // Update the parsed statement with the dynamic commission value
+            const updatedStatement = {
+              ...parsed,
+              TradingType: {
+                ...parsed.TradingType,
+                commission: Number.parseFloat(currentCommission),
+                Asset_type: parsed.TradingType.Asset_type || "gold"
+              }
+            }
+            setParsedStatement(updatedStatement)
+            localStorage.setItem("savedStrategy", JSON.stringify(updatedStatement))
+            console.log("🔍 Updated parsed statement with correct commission:", updatedStatement.TradingType)
+            
+            // Calculate leverage from margin
+            if (parsed.TradingType.margin) {
+              const margin = parsed.TradingType.margin
+              const leverage = margin === 1.0 ? "1:1" : 
+                             margin === 0.5 ? "1:2" : 
+                             margin === 0.2 ? "1:5" : 
+                             margin === 0.1 ? "1:10" : 
+                             margin === 0.05 ? "1:20" : 
+                             margin === 0.04 ? "1:25" : 
+                             margin === 0.033 ? "1:30" : 
+                             margin === 0.02 ? "1:50" : 
+                             margin === 0.013 ? "1:75" : 
+                             margin === 0.01 ? "1:100" : "1:1"
+              setLeverage(leverage)
+              
+              // Set slider value based on leverage
+              const leverageMap: { [key: string]: number } = {
+                "1:1": 1, "1:2": 2, "1:5": 3, "1:10": 4, "1:20": 5,
+                "1:25": 6, "1:30": 7, "1:50": 8, "1:75": 9, "1:100": 10
+              }
+              setLeverageSliderValue(leverageMap[leverage] || 1)
+            }
+          }
         } catch (err) {
           console.error("Error parsing saved strategy:", err)
         }
@@ -1059,15 +1119,25 @@ export default function StrategyTestingPage() {
 
       // Extract numeric value for API call
       const cash = Number.parseFloat(accountDeposit.replace(/,/g, ""))
-      const margin = getLeverageMargin(leverage)
+      const leverageMargin = getLeverageMargin(leverage)
 
       // Create the data object with trading mode consideration
+      // Use dynamic commission from the form
       const tradingtype: any = {
-        margin: margin,
-        lot: "mini",
-        cash: cash,
+        margin: Number.parseFloat(margin),
+        lot: lot,
+        cash: Number.parseFloat(initialCash),
+        commission: Number.parseFloat(commission), // Use dynamic commission from form
         NewTrade: selectedTradingMode, // Add the selected trading mode
+        Asset_type: assetType, // Add the asset type
       }
+      
+      console.log("🔍 Commission being sent to API:", { 
+        commission, 
+        parsedCommission: Number.parseFloat(commission),
+        commissionState: commission,
+        parsedStatementCommission: parsedStatement?.TradingType?.commission
+      })
 
       // Only add nTrade_max for MTOOTAAT mode
       if (selectedTradingMode === "MTOOTAAT") {
@@ -1076,16 +1146,26 @@ export default function StrategyTestingPage() {
 
       await updateStrategyTradingType(Number.parseInt(strategy_id), tradingtype)
 
-      // Show success message
-      // const successMessage = document.createElement("div")
-      // successMessage.className =
-      //   "fixed bottom-20 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-md shadow-lg z-50"
-      // successMessage.textContent = "Backtest settings saved successfully"
-      // document.body.appendChild(successMessage)
-
-      // setTimeout(() => {
-      //   document.body.removeChild(successMessage)
-      // }, 3000)
+              // Update the local strategy object with the new TradingType settings
+        if (parsedStatement) {
+          const updatedStatement = {
+            ...parsedStatement,
+            TradingType: {
+              ...parsedStatement.TradingType,
+              ...tradingtype,
+              lot: lot,
+              commission: Number.parseFloat(commission), // Use dynamic commission from form
+              Asset_type: assetType, // Add the asset type
+            }
+          }
+        
+        // Update the parsed statement and save to localStorage
+        setParsedStatement(updatedStatement)
+        localStorage.setItem("savedStrategy", JSON.stringify(updatedStatement))
+        
+        console.log("🔍 Updated strategy TradingType settings:", updatedStatement.TradingType)
+        showToast("Backtest settings saved successfully!", 'success')
+      }
     } catch (error) {
       console.error("Error saving backtest settings:", error)
       alert("Failed to save backtest settings")
@@ -1275,27 +1355,37 @@ export default function StrategyTestingPage() {
                 )}
 
                 {activeTab === "backtest" && (
-                  <BacktestTab
-                    dateRange={dateRange}
-                    setDateRange={setDateRange}
-                    selectedInstruments={selectedInstruments}
-                    toggleInstrument={toggleInstrument}
-                    instruments={instruments}
-                    accountDeposit={accountDeposit}
-                    handleAccountDepositChange={handleAccountDepositChange}
-                    currency={currency}
-                    setCurrency={setCurrency}
-                    leverage={leverage}
-                    leverageSliderValue={leverageSliderValue}
-                    handleSliderChange={handleSliderChange}
-                    getThumbPosition={getThumbPosition}
-                    selectedTradingMode={selectedTradingMode}
-                    setSelectedTradingMode={setSelectedTradingMode}
-                    maxTrades={maxTrades}
-                    setMaxTrades={setMaxTrades}
-                    saveBacktestSettings={saveBacktestSettings}
-                    isSaving={isSaving}
-                  />
+                              <BacktestTab
+              dateRange={dateRange}
+              setDateRange={setDateRange}
+              selectedInstruments={selectedInstruments}
+              toggleInstrument={toggleInstrument}
+              instruments={instruments}
+              accountDeposit={accountDeposit}
+              handleAccountDepositChange={handleAccountDepositChange}
+              currency={currency}
+              setCurrency={setCurrency}
+              leverage={leverage}
+              leverageSliderValue={leverageSliderValue}
+              handleSliderChange={handleSliderChange}
+              getThumbPosition={getThumbPosition}
+              selectedTradingMode={selectedTradingMode}
+              setSelectedTradingMode={setSelectedTradingMode}
+              maxTrades={maxTrades}
+              setMaxTrades={setMaxTrades}
+              saveBacktestSettings={saveBacktestSettings}
+              isSaving={isSaving}
+              lot={lot}
+              setLot={setLot}
+              commission={commission}
+              setCommission={setCommission}
+              margin={margin}
+              setMargin={setMargin}
+              initialCash={initialCash}
+              setInitialCash={setInitialCash}
+              assetType={assetType}
+              setAssetType={setAssetType}
+            />
                 )}
 
                 {activeTab === "optimisation" && showOptimisationResults && optimisationResult && (
