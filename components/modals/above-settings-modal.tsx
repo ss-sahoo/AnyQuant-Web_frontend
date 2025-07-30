@@ -63,6 +63,22 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave, onNext }: Abo
   // Volume-MA parameters
   const [volumeMaLength, setVolumeMaLength] = useState(20)
 
+  // Load saved Volume settings from localStorage on component mount
+  useEffect(() => {
+    try {
+      const savedVolumeSettings = localStorage.getItem('volumeSettings');
+      if (savedVolumeSettings) {
+        const parsedSettings = JSON.parse(savedVolumeSettings);
+        console.log('🔍 Loaded saved Volume settings in above modal:', parsedSettings);
+        if (parsedSettings.maLength) {
+          setVolumeMaLength(parsedSettings.maLength);
+        }
+      }
+    } catch (error) {
+      console.log('Error reading saved Volume settings in above modal:', error);
+    }
+  }, []);
+
   // Additional indicator parameters
   const [fastPeriod, setFastPeriod] = useState(12)
   const [slowPeriod, setSlowPeriod] = useState(26)
@@ -138,10 +154,33 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave, onNext }: Abo
         currentInp1.name === "Volume_MA" ||
         (currentInp1.type === "CUSTOM_I" && currentInp1.name === "Volume_MA")
       ) {
-        setVolumeMaLength(currentInp1.input_params?.ma_length || 20)
+        // Get saved Volume settings as fallback
+        let savedVolumeMaLength = 20;
+        try {
+          const savedVolumeSettings = localStorage.getItem('volumeSettings');
+          if (savedVolumeSettings) {
+            const parsedSettings = JSON.parse(savedVolumeSettings);
+            savedVolumeMaLength = parsedSettings.maLength || 20;
+          }
+        } catch (error) {
+          console.log('Error reading saved Volume settings:', error);
+        }
+        
+        // Always use saved settings for Volume_MA, unless currentInp1 has a specific ma_length
+        let finalVolumeMaLength = savedVolumeMaLength;
+        if (currentInp1.input_params?.ma_length) {
+          finalVolumeMaLength = currentInp1.input_params.ma_length;
+        }
+        console.log('🔍 DEBUG: Setting Volume_MA length to:', finalVolumeMaLength, '(saved:', savedVolumeMaLength, ', current:', currentInp1.input_params?.ma_length, ')');
+        setVolumeMaLength(finalVolumeMaLength)
+        // Volume_MA should never have maType, so explicitly clear it
+        setMaType("")
         if (valueType === "indicator" || valueType === "other") {
           setIndicator("volume-ma")
         }
+      } else {
+        // For any other indicators, don't set maType to avoid contamination
+        // Only RSI and RSI_MA should have maType
       }
 
       if (currentInp1.timeframe) {
@@ -214,7 +253,8 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave, onNext }: Abo
     let finalRsiMaLength = rsiMaLength
     let finalMaLength = maLength
     
-    onSave({
+    // Create the save object without maType for Volume_MA
+    const saveObject: any = {
       valueType,
       customValue,
       indicator,
@@ -225,7 +265,6 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave, onNext }: Abo
       rsiMaLength: finalRsiMaLength,
       maLength: finalMaLength,
       rsiSource,
-      maType,
       bbStdDev,
       bbSource,
       volumeMaLength,
@@ -235,7 +274,28 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave, onNext }: Abo
       kPeriod,
       dPeriod,
       period,
-    })
+    }
+    
+    // Only include maType if it's not Volume_MA and maType is not empty
+    if (indicator !== "volume-ma" && maType && maType.trim() !== "") {
+      saveObject.maType = maType
+    }
+    
+    // Save Volume settings to localStorage if Volume_MA is being used
+    if (indicator === "volume-ma" && volumeMaLength) {
+      try {
+        const volumeSettings = {
+          indicatorType: "volume-ma",
+          maLength: volumeMaLength,
+        };
+        localStorage.setItem('volumeSettings', JSON.stringify(volumeSettings));
+        console.log('🔍 Saved Volume settings to localStorage:', volumeSettings);
+      } catch (error) {
+        console.log('Error saving Volume settings:', error);
+      }
+    }
+    
+    onSave(saveObject)
     onClose()
   }
 
@@ -294,8 +354,21 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave, onNext }: Abo
       }
     }
     if (indicator === "volume-ma") {
+      // Get saved Volume settings from localStorage
+      let savedVolumeMaLength = 20;
+      try {
+        const savedVolumeSettings = localStorage.getItem('volumeSettings');
+        if (savedVolumeSettings) {
+          const parsedSettings = JSON.parse(savedVolumeSettings);
+          savedVolumeMaLength = parsedSettings.maLength || 20;
+          console.log('🔍 DEBUG: Using saved Volume settings in getReadOnlyParams:', parsedSettings);
+        }
+      } catch (error) {
+        console.log('Error reading saved Volume settings in getReadOnlyParams:', error);
+      }
+      
       return {
-        volumeMaLength: currentInp1.input_params?.ma_length || 20,
+        volumeMaLength: currentInp1.input_params?.ma_length || savedVolumeMaLength,
       }
     }
     return {}

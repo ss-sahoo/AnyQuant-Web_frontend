@@ -135,9 +135,9 @@ interface StrategyStatement {
     NewTrade?: string
     commission?: number
     margin?: number
-    asset_type?: string
     lot?: string
     cash?: number
+    nTrade_max?: number
   }
 }
 
@@ -167,7 +167,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const [showAtCandleModal, setShowAtCandleModal] = useState(false)
   const [selectedCandleNumber, setSelectedCandleNumber] = useState<number | null>(null)
 
-  // Initialize with a statement structure that includes "if" and a timeframe
+  // Initialize with a statement structure that includes "if" and default TradingType settings
   const [statements, setStatements] = useState<StrategyStatement[]>([
     {
       side: "S",
@@ -179,6 +179,14 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         },
       ],
       Equity: [],
+      TradingType: {
+        NewTrade: "MTOOTAAT",
+        commission: 0.00007,
+        margin: 1,
+        lot: "mini",
+        cash: 100000,
+        nTrade_max: 1,
+      },
     },
   ])
 
@@ -209,6 +217,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   // Add these new state variables inside the StrategyBuilder component
   const [showCustomTimeframeModal, setShowCustomTimeframeModal] = useState(false)
   const [customTimeframes, setCustomTimeframes] = useState<string[]>([])
+
+
 
   // Add this after the existing state declarations
   const [hoveredComponent, setHoveredComponent] = useState<{
@@ -1746,6 +1756,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     setShowTimeframeDropdown(false)
   }
 
+
+
   // Modify the handleTimeframeSelect function to handle the "Add Custom" option
   const handleTimeframeSelect = (timeframe: string) => {
     if (timeframe === "add-custom") {
@@ -1834,20 +1846,33 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       setIsSavingDraft(true)
       const currentStatement = statements[activeStatementIndex]
 
+      // Clean up any Volume_MA indicators before saving
+      const cleanedStrategy = currentStatement.strategy.map((condition: any) => ({
+        ...condition,
+        inp1: cleanupVolumeMAIndicator(condition.inp1),
+        inp2: cleanupVolumeMAIndicator(condition.inp2),
+      }))
+
       // Create the statement object to send to the API with the structure you want
-      const apiStatement = {
+      const apiStatement: any = {
         name: name,
         side: currentStatement.side,
         saveresult: currentStatement.saveresult || "Statement 1",
-        strategy: currentStatement.strategy,
+        strategy: cleanedStrategy,
         Equity: currentStatement.Equity || [],
         instrument: initialInstrument,
+        TradingType: currentStatement.TradingType || {
+          NewTrade: "MTOOTAAT",
+          commission: 0.00007,
+          margin: 1,
+          lot: "mini",
+          cash: 100000,
+          nTrade_max: 1,
+        },
       }
 
-      // Only add TradingType if it has properties
-      if (currentStatement.TradingType && Object.keys(currentStatement.TradingType).length > 0) {
-        apiStatement.TradingType = currentStatement.TradingType
-      }
+      // Debug: Log the API statement to verify TradingType is included
+      console.log("🔍 DEBUG: API Statement being sent:", JSON.stringify(apiStatement, null, 2))
 
       let result
 
@@ -1887,20 +1912,33 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       setIsProceeding(true)
       const currentStatement = statements[activeStatementIndex]
 
+      // Clean up any Volume_MA indicators before saving
+      const cleanedStrategy = currentStatement.strategy.map((condition: any) => ({
+        ...condition,
+        inp1: cleanupVolumeMAIndicator(condition.inp1),
+        inp2: cleanupVolumeMAIndicator(condition.inp2),
+      }))
+
       // Create the statement object to send to the API with the structure you want
-      const apiStatement = {
+      const apiStatement: any = {
         name: name,
         side: currentStatement.side,
         saveresult: currentStatement.saveresult || "Statement 1",
-        strategy: currentStatement.strategy,
+        strategy: cleanedStrategy,
         Equity: currentStatement.Equity || [],
         instrument: initialInstrument,
+        TradingType: currentStatement.TradingType || {
+          NewTrade: "MTOOTAAT",
+          commission: 0.00007,
+          margin: 1,
+          lot: "mini",
+          cash: 100000,
+          nTrade_max: 1,
+        },
       }
 
-      // Only add TradingType if it has properties
-      if (currentStatement.TradingType && Object.keys(currentStatement.TradingType).length > 0) {
-        apiStatement.TradingType = currentStatement.TradingType
-      }
+      // Debug: Log the API statement to verify TradingType is included
+      console.log("🔍 DEBUG: API Statement being sent (Proceed to Testing):", JSON.stringify(apiStatement, null, 2))
 
       // Save the complete statement for local use
       localStorage.setItem("savedStrategy", JSON.stringify(apiStatement))
@@ -2105,7 +2143,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 className="bg-[#4A4D62] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[160px] border border-[#2A2D42] opacity-70"
                 data-candle-index={index}
               >
-                <span className="text-gray-300">Candle {displayNumber} (pending)</span>
+                <span className="text-gray-300">Candle -{displayNumber} (pending)</span>
                 <ChevronDown className="ml-1 w-4 h-4" />
               </button>
               <button
@@ -2142,7 +2180,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[160px] border border-[#2A2D42]"
               data-candle-index={index}
             >
-              <span className="text-gray-400">Candle {candleNumber}</span>
+              <span className="text-gray-400">Candle -{candleNumber}</span>
               <ChevronDown className="ml-1 w-4 h-4" />
             </button>
             <button
@@ -2436,7 +2474,7 @@ if (
               className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[160px] border border-[#2A2D42]"
               data-candle-index={index}
             >
-              <span className="text-gray-400">Candle {candleNumber}</span>
+              <span className="text-gray-400">Candle -{candleNumber}</span>
               <ChevronDown className="ml-1 w-4 h-4" />
             </button>
             <button
@@ -2598,6 +2636,75 @@ if (
   const [showIndicatorModal, setShowIndicatorModal] = useState(false)
   const [pendingOtherIndicator, setPendingOtherIndicator] = useState<string | null>(null)
   const [pendingTimeframe, setPendingTimeframe] = useState<string>("3h")
+
+  // Utility function to ensure Volume_MA only gets ma_length parameter
+  // Volume_MA should NEVER have ma_type, bb_stddev, or any other parameters
+  const createVolumeMAIndicator = (timeframe: string, maLength: number) => {
+    // Get saved Volume settings as fallback
+    const savedVolumeSettings = getSavedVolumeSettings();
+    const finalMaLength = maLength || savedVolumeSettings?.maLength || 20;
+    
+    return {
+      type: "CUSTOM_I" as const,
+      name: "Volume_MA" as const,
+      timeframe,
+      input_params: {
+        ma_length: finalMaLength,
+      },
+    }
+  }
+
+  // Utility function to get saved Volume settings from localStorage
+  const getSavedVolumeSettings = () => {
+    try {
+      const savedVolumeSettings = localStorage.getItem('volumeSettings');
+      if (savedVolumeSettings) {
+        const parsedSettings = JSON.parse(savedVolumeSettings);
+        console.log('🔍 DEBUG: Retrieved saved Volume settings:', parsedSettings);
+        return parsedSettings;
+      }
+    } catch (error) {
+      console.log('Error reading saved Volume settings:', error);
+    }
+    return null;
+  }
+
+  // Utility function to clean up Volume_MA indicators that have extra parameters
+  const cleanupVolumeMAIndicator = (indicator: any) => {
+    if (indicator && indicator.name === "Volume_MA" && indicator.input_params) {
+      console.log('🔍 DEBUG: Cleaning up Volume_MA indicator:', indicator);
+      
+      // Get saved Volume settings as fallback
+      const savedVolumeSettings = getSavedVolumeSettings();
+      const finalMaLength = indicator.input_params.ma_length || savedVolumeSettings?.maLength || 20;
+      
+      // Only keep ma_length, remove any other parameters like ma_type
+      const cleanedIndicator = {
+        ...indicator,
+        input_params: {
+          ma_length: finalMaLength,
+        },
+      }
+      console.log('🔍 DEBUG: Cleaned Volume_MA indicator:', cleanedIndicator);
+      return cleanedIndicator
+    }
+    return indicator
+  }
+
+  // Clean up any existing Volume_MA indicators that might have extra parameters
+  useEffect(() => {
+    if (strategyData) {
+      const cleanedStatements = strategyData.map((statement: any) => ({
+        ...statement,
+        strategy: statement.strategy.map((condition: any) => ({
+          ...condition,
+          inp1: cleanupVolumeMAIndicator(condition.inp1),
+          inp2: cleanupVolumeMAIndicator(condition.inp2),
+        })),
+      }))
+      setStatements(cleanedStatements)
+    }
+  }, [strategyData])
 
   // Add this state near other useState hooks
   const [pendingBollingerForInp2, setPendingBollingerForInp2] = useState<null | { statementIndex: number; conditionIndex: number; timeframe: string }>(null);
@@ -2844,6 +2951,11 @@ if (
             statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]?.inp1
           }
           onSave={(settings) => {
+            console.log('🔍 DEBUG: Strategy builder received settings:', settings);
+            console.log('🔍 DEBUG: settings.indicator:', settings.indicator);
+            console.log('🔍 DEBUG: settings.maType:', settings.maType);
+            console.log('🔍 DEBUG: settings.volumeMaLength:', settings.volumeMaLength);
+            
             // Update crossing up settings with the custom value
             const newStatements = [...statements]
             const currentStatement = newStatements[activeStatementIndex]
@@ -4424,9 +4536,6 @@ if (
                 input_params: {
                   timeperiod: Number(settings.rsiLength),
                   source: settings.source?.toLowerCase() || "close",
-                  ma_type: settings.maType || "SMA",
-                  ma_length: Number(settings.maLength) || 14,
-                  bb_stddev: Number(settings.bbStdDev) || 2.0,
                 },
               }
             }
@@ -4453,6 +4562,8 @@ if (
           }}
         />
       )}
+
+
     </div>
   )
 }

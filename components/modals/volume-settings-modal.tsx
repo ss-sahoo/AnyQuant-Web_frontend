@@ -10,8 +10,27 @@ interface VolumeSettingsModalProps {
 
 export function VolumeSettingsModal({ onClose, onSave }: VolumeSettingsModalProps) {
   const [indicatorType, setIndicatorType] = useState("volume")
-  const [maLength, setMaLength] = useState("2")
+  const [maLength, setMaLength] = useState("20")
   const modalRef = useRef<HTMLDivElement>(null)
+
+  // Load saved Volume settings from localStorage on component mount
+  useEffect(() => {
+    try {
+      const savedVolumeSettings = localStorage.getItem('volumeSettings');
+      if (savedVolumeSettings) {
+        const parsedSettings = JSON.parse(savedVolumeSettings);
+        console.log('🔍 Loaded saved Volume settings:', parsedSettings);
+        if (parsedSettings.maLength) {
+          setMaLength(parsedSettings.maLength.toString());
+        }
+        if (parsedSettings.indicatorType) {
+          setIndicatorType(parsedSettings.indicatorType);
+        }
+      }
+    } catch (error) {
+      console.log('Error reading saved Volume settings:', error);
+    }
+  }, []);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -36,6 +55,19 @@ export function VolumeSettingsModal({ onClose, onSave }: VolumeSettingsModalProp
   }, [onClose])
 
   const handleSave = () => {
+    // Save Volume settings to localStorage
+    const volumeSettings = {
+      indicatorType,
+      maLength: Number(maLength),
+    };
+    
+    try {
+      localStorage.setItem('volumeSettings', JSON.stringify(volumeSettings));
+      console.log('🔍 Saved Volume settings to localStorage:', volumeSettings);
+    } catch (error) {
+      console.log('Error saving Volume settings:', error);
+    }
+    
     onSave({
       indicatorType,
       maLength,
