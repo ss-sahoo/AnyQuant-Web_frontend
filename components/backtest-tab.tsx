@@ -32,6 +32,8 @@ interface BacktestTabProps {
   setInitialCash: React.Dispatch<React.SetStateAction<string>>
   assetType: string
   setAssetType: React.Dispatch<React.SetStateAction<string>>
+  showTradesSummary?: boolean
+  onShowTradesSummary?: () => void
 }
 
 export function BacktestTab({
@@ -64,6 +66,8 @@ export function BacktestTab({
   setInitialCash,
   assetType,
   setAssetType,
+  showTradesSummary = false,
+  onShowTradesSummary,
 }: BacktestTabProps) {
   return (
     <div className="p-6 ml-[63px]">
@@ -373,8 +377,41 @@ export function BacktestTab({
         </div>
       </div>
 
-      {/* Save Button */}
-      <div className="w-full mt-6 flex justify-end">
+      {/* Action Buttons */}
+      <div className="w-full mt-6 flex justify-between items-center">
+        {/* View Trades Summary Button */}
+        {showTradesSummary && onShowTradesSummary && (
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 px-3 py-1 bg-green-500/20 border border-green-500/30 rounded-full">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              <span className="text-green-400 text-sm">Trades data available</span>
+            </div>
+            <button
+              className="flex items-center gap-2 px-4 py-2 bg-[#2b2e38] text-white rounded-md hover:bg-[#3a3e4a] transition-colors"
+              onClick={onShowTradesSummary}
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path
+                  d="M3 3v18h18"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              View Trades Summary
+            </button>
+          </div>
+        )}
+
+        {/* Save Button */}
         <button
           className="bg-[#85e1fe] hover:bg-[#6bcae2] text-black rounded-full px-8 py-3 text-sm font-medium flex items-center"
           onClick={saveBacktestSettings}
