@@ -61,6 +61,7 @@ interface StrategyCondition {
   statement: string
   inp1?: IndicatorInput | { name: string }
   operator_name?: string
+  operator_display?: string // Store the original display label for UI
   inp2?:
     | {
         type: string
@@ -530,6 +531,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
         // Finally remove the entire condition if it's not the first "if" statement
         if (i > 0 && condition.statement && condition.statement.toLowerCase() !== "if") {
+          console.log("Removing statement:", condition.statement, "at index:", i)
           removeComponent(statementIndex, i, "statement")
           return
         }
@@ -607,8 +609,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const behaviours = [
     { id: "crossing-up", label: "Crossing up" },
     { id: "crossing-down", label: "Crossing down" },
-    { id: "greater-than", label: "Greater than" },
-    { id: "less-than", label: "Less than" },
+    { id: "greater-than", label: "Greater Than" },
+    { id: "less-than", label: "Less Than" },
     { id: "inside-channel", label: "Inside Channel" },
     { id: "moving-up", label: "Moving up" },
     { id: "moving-down", label: "Moving down" },
@@ -671,8 +673,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     if (behavior.toLowerCase() === "crossing down") return "crossbelow"
     if (behavior.toLowerCase() === "moving up") return "moving_up"
     if (behavior.toLowerCase() === "moving down") return "moving_down"
-    if (behavior.toLowerCase() === "greater than") return "greater_than"
-    if (behavior.toLowerCase() === "less than") return "less_than"
+    if (behavior.toLowerCase() === "greater than") return "above"
+    if (behavior.toLowerCase() === "less than") return "below"
     if (behavior.toLowerCase() === "inside channel") return "inside_channel"
     if (behavior.toLowerCase() === "above") return "above"
     if (behavior.toLowerCase() === "below") return "below"
@@ -934,43 +936,55 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       const newStatements = [...prevStatements]
       const statement = { ...newStatements[statementIndex] }
       const strategy = [...statement.strategy]
-      const condition = { ...strategy[conditionIndex] }
 
       switch (componentType) {
         case "then":
-          delete condition.Then
+          const conditionThen = { ...strategy[conditionIndex] }
+          delete conditionThen.Then
+          strategy[conditionIndex] = conditionThen
           break
         case "accumulate":
-          delete condition.Accumulate
+          const conditionAccumulate = { ...strategy[conditionIndex] }
+          delete conditionAccumulate.Accumulate
+          strategy[conditionIndex] = conditionAccumulate
           break
         case "inp2":
-          delete condition.inp2
+          const conditionInp2 = { ...strategy[conditionIndex] }
+          delete conditionInp2.inp2
+          strategy[conditionIndex] = conditionInp2
           break
         case "operator":
-          delete condition.operator_name
-          delete condition.operator
+          const conditionOperator = { ...strategy[conditionIndex] }
+          delete conditionOperator.operator_name
+          delete conditionOperator.operator
+          strategy[conditionIndex] = conditionOperator
           break
         case "inp1":
-          delete condition.inp1
+          const conditionInp1 = { ...strategy[conditionIndex] }
+          delete conditionInp1.inp1
+          strategy[conditionIndex] = conditionInp1
           break
         case "timeframe":
+          const conditionTimeframe = { ...strategy[conditionIndex] }
           // Remove timeframe from both condition level and inp1 level
-          delete condition.timeframe
-          if (condition.inp1 && typeof condition.inp1 === "object" && "timeframe" in condition.inp1) {
-            delete condition.inp1.timeframe
+          delete conditionTimeframe.timeframe
+          if (conditionTimeframe.inp1 && typeof conditionTimeframe.inp1 === "object" && "timeframe" in conditionTimeframe.inp1) {
+            delete conditionTimeframe.inp1.timeframe
           }
-          if (condition.inp2 && typeof condition.inp2 === "object" && "timeframe" in condition.inp2) {
-            delete condition.inp2.timeframe
+          if (conditionTimeframe.inp2 && typeof conditionTimeframe.inp2 === "object" && "timeframe" in conditionTimeframe.inp2) {
+            delete conditionTimeframe.inp2.timeframe
           }
+          strategy[conditionIndex] = conditionTimeframe
           break
         case "statement":
+          console.log("Before splice - strategy length:", strategy.length, "conditionIndex:", conditionIndex)
           strategy.splice(conditionIndex, 1)
+          console.log("After splice - strategy length:", strategy.length)
           break
         default:
           break
       }
 
-      strategy[conditionIndex] = condition
       statement.strategy = strategy
       newStatements[statementIndex] = statement
 
@@ -1435,6 +1449,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
         // Add the behavior to the last condition
         lastCondition.operator_name = getOperatorName(component)
+        lastCondition.operator_display = component // Store the original display label
 
         // Add default inp2 value for behaviors except moving_up and moving_down
         if (lastCondition.operator_name !== "moving_up" && lastCondition.operator_name !== "moving_down") {
@@ -2078,7 +2093,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           >
             {condition.statement.toUpperCase()}
             <button
-              onClick={() => removeComponent(activeStatementIndex, index, "statement")}
+              onClick={() => {
+                console.log("Removing statement:", condition.statement, "at index:", index, "activeStatementIndex:", activeStatementIndex)
+                removeComponent(activeStatementIndex, index, "statement")
+              }}
               className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
             >
               <X className="w-3 h-3" />
@@ -2256,7 +2274,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             onMouseLeave={handleMouseLeave}
             onClick={() => handleComponentClick(activeStatementIndex, index, "operator")}
           >
-            {condition.operator_name.replace("_", " ")}
+            {condition.operator_display || condition.operator_name.replace("_", " ")}
             <button
               onClick={(e) => {
                 e.stopPropagation()

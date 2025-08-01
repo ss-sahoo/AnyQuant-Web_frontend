@@ -34,6 +34,7 @@ import { PreviousOptimisationView } from '@/components/PreviousOptimisationView'
 import { OptimisationHistoryList } from '@/components/OptimisationHistoryList'
 import { WalkForwardOptimizationResults } from '@/components/walk-forward-optimization-results'
 import { WalkForwardOptimisationView } from "@/components/walk-forward-optimization-results-view";
+import { TradesSummary } from "@/components/trades-summary";
 
 export default function StrategyTestingPage() {
   const router = useRouter()
@@ -127,6 +128,16 @@ export default function StrategyTestingPage() {
   const [showWalkForwardOptimizationResults, setShowWalkForwardOptimizationResults] = useState(false);
   const [selectedWalkForwardResult, setSelectedWalkForwardResult] = useState<any>(null);
   const [walkForwardDetailResult, setWalkForwardDetailResult] = useState<any>(null);
+
+  // Add trades summary states
+  const [showTradesSummary, setShowTradesSummary] = useState(false);
+  const [tradesData, setTradesData] = useState({
+    tradesCsv: '',
+    tradesCsvFilename: '',
+    tradesCsvDownloadUrl: '',
+    stdout: '',
+    stderr: ''
+  });
 
   // Add progress bar states
   const [progress, setProgress] = useState(0); // For backtest
@@ -538,10 +549,36 @@ export default function StrategyTestingPage() {
         files: timeframeFiles,
       })
 
+      console.log("Backtest result:", result)
+
+      // Handle plot HTML
       if (result?.plot_html) {
         setPlotHtml(result.plot_html)
-      } else {
-        showToast("Backtest failed or no chart returned", 'error')
+      }
+
+      // Handle trades CSV data
+      if (result?.trades_csv) {
+        setTradesData({
+          tradesCsv: result.trades_csv,
+          tradesCsvFilename: result.trades_csv_filename || 'trades.csv',
+          tradesCsvDownloadUrl: result.trades_csv_download_url || '',
+          stdout: result.stdout || '',
+          stderr: result.stderr || ''
+        })
+        setShowTradesSummary(true)
+        showToast("Trades data available! View summary for details.", 'success')
+      }
+
+      // Handle stdout/stderr
+      if (result?.stdout) {
+        console.log("Backtest stdout:", result.stdout)
+      }
+      if (result?.stderr) {
+        console.log("Backtest stderr:", result.stderr)
+      }
+
+      if (!result?.plot_html && !result?.trades_csv) {
+        showToast("Backtest completed but no data returned", 'error')
       }
     } catch (error: any) {
       showToast("Backtest Error: " + (error.message || "Unknown error"), 'error')
@@ -1355,37 +1392,39 @@ export default function StrategyTestingPage() {
                 )}
 
                 {activeTab === "backtest" && (
-                              <BacktestTab
-              dateRange={dateRange}
-              setDateRange={setDateRange}
-              selectedInstruments={selectedInstruments}
-              toggleInstrument={toggleInstrument}
-              instruments={instruments}
-              accountDeposit={accountDeposit}
-              handleAccountDepositChange={handleAccountDepositChange}
-              currency={currency}
-              setCurrency={setCurrency}
-              leverage={leverage}
-              leverageSliderValue={leverageSliderValue}
-              handleSliderChange={handleSliderChange}
-              getThumbPosition={getThumbPosition}
-              selectedTradingMode={selectedTradingMode}
-              setSelectedTradingMode={setSelectedTradingMode}
-              maxTrades={maxTrades}
-              setMaxTrades={setMaxTrades}
-              saveBacktestSettings={saveBacktestSettings}
-              isSaving={isSaving}
-              lot={lot}
-              setLot={setLot}
-              commission={commission}
-              setCommission={setCommission}
-              margin={margin}
-              setMargin={setMargin}
-              initialCash={initialCash}
-              setInitialCash={setInitialCash}
-              assetType={assetType}
-              setAssetType={setAssetType}
-            />
+                  <BacktestTab
+                    dateRange={dateRange}
+                    setDateRange={setDateRange}
+                    selectedInstruments={selectedInstruments}
+                    toggleInstrument={toggleInstrument}
+                    instruments={instruments}
+                    accountDeposit={accountDeposit}
+                    handleAccountDepositChange={handleAccountDepositChange}
+                    currency={currency}
+                    setCurrency={setCurrency}
+                    leverage={leverage}
+                    leverageSliderValue={leverageSliderValue}
+                    handleSliderChange={handleSliderChange}
+                    getThumbPosition={getThumbPosition}
+                    selectedTradingMode={selectedTradingMode}
+                    setSelectedTradingMode={setSelectedTradingMode}
+                    maxTrades={maxTrades}
+                    setMaxTrades={setMaxTrades}
+                    saveBacktestSettings={saveBacktestSettings}
+                    isSaving={isSaving}
+                    lot={lot}
+                    setLot={setLot}
+                    commission={commission}
+                    setCommission={setCommission}
+                    margin={margin}
+                    setMargin={setMargin}
+                    initialCash={initialCash}
+                    setInitialCash={setInitialCash}
+                    assetType={assetType}
+                    setAssetType={setAssetType}
+                    showTradesSummary={showTradesSummary}
+                    onShowTradesSummary={() => setShowTradesSummary(true)}
+                  />
                 )}
 
                 {activeTab === "optimisation" && showOptimisationResults && optimisationResult && (
@@ -1918,6 +1957,24 @@ export default function StrategyTestingPage() {
             onClose={() => setWalkForwardDetailResult(null)}
             isFullScreen={true}
           />
+        )}
+
+        {/* Trades Summary Modal */}
+        {showTradesSummary && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-6xl max-h-[90vh] overflow-hidden">
+              <div className="p-6 overflow-y-auto max-h-[90vh]">
+                <TradesSummary
+                  tradesCsv={tradesData.tradesCsv}
+                  tradesCsvFilename={tradesData.tradesCsvFilename}
+                  tradesCsvDownloadUrl={tradesData.tradesCsvDownloadUrl}
+                  stdout={tradesData.stdout}
+                  stderr={tradesData.stderr}
+                  onClose={() => setShowTradesSummary(false)}
+                />
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </AuthGuard>
