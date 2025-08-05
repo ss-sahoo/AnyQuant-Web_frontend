@@ -2711,15 +2711,16 @@ if (
 
   // Clean up any existing Volume_MA indicators that might have extra parameters
   useEffect(() => {
-    if (strategyData) {
-      const cleanedStatements = strategyData.map((statement: any) => ({
-        ...statement,
-        strategy: statement.strategy.map((condition: any) => ({
+    if (strategyData && strategyData.strategy) {
+      // strategyData is an object, not an array, so we need to work with its strategy property
+      const cleanedStatements = [{
+        ...strategyData,
+        strategy: strategyData.strategy.map((condition: any) => ({
           ...condition,
           inp1: cleanupVolumeMAIndicator(condition.inp1),
           inp2: cleanupVolumeMAIndicator(condition.inp2),
         })),
-      }))
+      }]
       setStatements(cleanedStatements)
     }
   }, [strategyData])
