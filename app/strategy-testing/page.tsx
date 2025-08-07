@@ -569,12 +569,21 @@ export default function StrategyTestingPage() {
       if (useMetaAPI) {
         // Use MetaAPI for backtesting with environment variables
         const symbol = metaAPIConfig?.symbol || "XAUUSD"
+        const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
+        const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
+        
         console.log("🔍 Using trading symbol for MetaAPI backtest:", symbol)
+        console.log("🔍 MetaAPI Token available:", !!token)
+        console.log("🔍 MetaAPI Account ID available:", !!accountId)
+        
+        if (!token || !accountId) {
+          throw new Error("MetaAPI credentials not configured. Please check environment variables.")
+        }
         
         result = await runBacktestWithMetaAPI(
           parsedStatement,
-          process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || "",
-          process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || "",
+          token,
+          accountId,
           symbol
         )
       } else {
