@@ -228,6 +228,27 @@ export const runBacktest = async ({ statement, files }) => {
 // NOTE: 'Fetch' is a custom wrapper for the browser fetch API, used for consistent error handling and headers.
 // If you want to use the native fetch, replace all 'Fetch' with 'fetch'.
 
+// Add this new function for MetaAPI integration
+export const runBacktestWithMetaAPI = async (strategy, token, accountId, symbol) => {
+  const formData = new FormData();
+  formData.append('statement', JSON.stringify(strategy));
+  formData.append('metaapi_token', token);
+  formData.append('metaapi_account_id', accountId);
+  formData.append('symbol', symbol);
+  
+  const response = await Fetch('/api/run-backtest/', {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error?.error || 'Failed to start backtest with MetaAPI');
+  }
+
+  return response.json();
+};
+
 /**
  * Run optimisation (async or sync)
  * @param {Object} params
@@ -416,7 +437,7 @@ export async function updateStrategyTradingType(id, tradingtype) {
       margin: tradingtype.margin,
       lot: tradingtype.lot,
       cash: tradingtype.cash,
-      Asset_type: tradingtype.Asset_type, // Add the asset type
+      asset_type: tradingtype.asset_type, // Add the asset type
     }
 
     // Only include nTrade_max if it exists in the tradingtype object
