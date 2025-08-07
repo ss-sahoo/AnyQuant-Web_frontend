@@ -28,7 +28,7 @@ interface ConstraintGroup {
 }
 
 interface EquityConstraint {
-  type: "Final_Equity" | "Max_Drawdown_Percent"
+  type: "Final_Equity" | "Max_Drawdown_Percent" | "Sharpe_Ratio"
   min?: number
   max?: number
   enabled: boolean
@@ -73,7 +73,8 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
   const [constraintGroups, setConstraintGroups] = useState<ConstraintGroup[]>([])
   const [equityConstraints, setEquityConstraints] = useState<EquityConstraint[]>([
     { type: "Final_Equity", min: undefined, max: undefined, enabled: false },
-    { type: "Max_Drawdown_Percent", min: undefined, max: undefined, enabled: false }
+    { type: "Max_Drawdown_Percent", min: undefined, max: undefined, enabled: false },
+    { type: "Sharpe_Ratio", min: undefined, max: undefined, enabled: false }
   ])
   const [isSaving, setIsSaving] = useState(false)
   const [showEquityConstraints, setShowEquityConstraints] = useState(false)
@@ -133,7 +134,23 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
 
           // Load equity constraints
           if (optimisationForm.EquityConstraints) {
-            setEquityConstraints(optimisationForm.EquityConstraints)
+            // Map existing constraints to our format
+            const mappedConstraints: EquityConstraint[] = [
+              { type: "Final_Equity", min: undefined, max: undefined, enabled: false },
+              { type: "Max_Drawdown_Percent", min: undefined, max: undefined, enabled: false },
+              { type: "Sharpe_Ratio", min: undefined, max: undefined, enabled: false }
+            ]
+            
+            optimisationForm.EquityConstraints.forEach((constraint: any) => {
+              const existingConstraint = mappedConstraints.find(c => c.type === constraint.type)
+              if (existingConstraint) {
+                existingConstraint.min = constraint.min
+                existingConstraint.max = constraint.max
+                existingConstraint.enabled = constraint.enabled
+              }
+            })
+            
+            setEquityConstraints(mappedConstraints)
           }
         } catch (error) {
           console.error("Error parsing optimisation_form from localStorage in PropertiesTab:", error)
@@ -356,7 +373,15 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
       // Add equity constraints
       const enabledEquityConstraints = equityConstraints.filter(constraint => constraint.enabled)
       if (enabledEquityConstraints.length > 0) {
-        currentOptimisationForm.EquityConstraints = enabledEquityConstraints
+        currentOptimisationForm.EquityConstraints = enabledEquityConstraints.map(constraint => {
+          if (constraint.type === "Sharpe_Ratio" && constraint.min !== undefined) {
+            return {
+              ...constraint,
+              constraint: `Sharpe Ratio > ${constraint.min}`
+            }
+          }
+          return constraint
+        })
       }
 
       // Transform parameters to Parameters object
@@ -432,7 +457,9 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
                     className="border-[#85e1fe] data-[state=checked]:bg-[#85e1fe] data-[state=checked]:text-black"
                   />
                   <span className="min-w-[120px] text-sm">
-                    {constraint.type === "Final_Equity" ? "Final Equity [$]" : "Max Drawdown [%]"}
+                    {constraint.type === "Final_Equity" ? "Final Equity [$]" : 
+                     constraint.type === "Max_Drawdown_Percent" ? "Max Drawdown [%]" :
+                     "Sharpe Ratio"}
                   </span>
                   <div className="flex items-center gap-2">
                     <input

@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useEffect } from 'react'
-import { Download, BarChart3, TrendingUp, TrendingDown, DollarSign, Percent } from 'lucide-react'
+import { Download, BarChart3, TrendingUp, TrendingDown, DollarSign, Percent, AlertCircle } from 'lucide-react'
 import { 
   parseTradesCSV, 
   calculateTradesSummary, 
@@ -43,6 +43,7 @@ export function TradesSummary({
     maxLoss: 0,
     totalReturn: 0
   })
+  const [csvError, setCsvError] = useState<string | null>(null)
 
   // Parse CSV data
   useEffect(() => {
@@ -51,13 +52,43 @@ export function TradesSummary({
       const validation = validateTradesCSV(tradesCsv)
       if (!validation.isValid) {
         console.error('Invalid CSV data:', validation.error)
+        setCsvError(validation.error || 'Invalid CSV data')
+        setTrades([])
+        setSummary({
+          totalTrades: 0,
+          winningTrades: 0,
+          losingTrades: 0,
+          totalPnL: 0,
+          winRate: 0,
+          avgWin: 0,
+          avgLoss: 0,
+          maxWin: 0,
+          maxLoss: 0,
+          totalReturn: 0
+        })
         return
       }
 
+      setCsvError(null)
       const parsedTrades = parseTradesCSV(tradesCsv)
       setTrades(parsedTrades)
       const calculatedSummary = calculateTradesSummary(parsedTrades)
       setSummary(calculatedSummary)
+    } else {
+      setCsvError('No trades data available')
+      setTrades([])
+      setSummary({
+        totalTrades: 0,
+        winningTrades: 0,
+        losingTrades: 0,
+        totalPnL: 0,
+        winRate: 0,
+        avgWin: 0,
+        avgLoss: 0,
+        maxWin: 0,
+        maxLoss: 0,
+        totalReturn: 0
+      })
     }
   }, [tradesCsv])
 
@@ -97,138 +128,132 @@ export function TradesSummary({
         </div>
       </div>
 
+      {/* Error Message */}
+      {csvError && (
+        <div className="mb-6 p-4 bg-red-900/20 border border-red-500/30 rounded-md">
+          <div className="flex items-center gap-2 text-red-400">
+            <AlertCircle className="w-5 h-5" />
+            <span className="font-medium">Trades Data Error</span>
+          </div>
+          <p className="text-red-300 text-sm mt-1">{csvError}</p>
+          <p className="text-red-300 text-xs mt-2">
+            This might be due to no trades being executed during the backtest period or an issue with the MetaAPI data.
+          </p>
+        </div>
+      )}
+
       {/* Summary Statistics */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <div className="bg-[#141721] p-4 rounded-lg border border-[#2b2e38]">
-          <div className="flex items-center gap-2 mb-2">
-            <BarChart3 className="w-4 h-4 text-[#85e1fe]" />
-            <span className="text-gray-400 text-sm">Total Trades</span>
+      {!csvError && summary.totalTrades > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div className="bg-[#141721] p-4 rounded-lg border border-[#2b2e38]">
+            <div className="flex items-center gap-2 mb-2">
+              <DollarSign className="w-4 h-4 text-[#85e1fe]" />
+              <span className="text-gray-400 text-sm">Total P&L</span>
+            </div>
+            <p className={`text-lg font-semibold ${summary.totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {formatCurrency(summary.totalPnL)}
+            </p>
           </div>
-          <div className="text-2xl font-bold text-white">{summary.totalTrades}</div>
-        </div>
 
-        <div className="bg-[#141721] p-4 rounded-lg border border-[#2b2e38]">
-          <div className="flex items-center gap-2 mb-2">
-            <TrendingUp className="w-4 h-4 text-green-500" />
-            <span className="text-gray-400 text-sm">Win Rate</span>
+          <div className="bg-[#141721] p-4 rounded-lg border border-[#2b2e38]">
+            <div className="flex items-center gap-2 mb-2">
+              <Percent className="w-4 h-4 text-[#85e1fe]" />
+              <span className="text-gray-400 text-sm">Win Rate</span>
+            </div>
+            <p className="text-lg font-semibold text-white">
+              {formatPercent(summary.winRate)}
+            </p>
           </div>
-          <div className="text-2xl font-bold text-green-500">{formatPercent(summary.winRate)}</div>
-        </div>
 
-        <div className="bg-[#141721] p-4 rounded-lg border border-[#2b2e38]">
-          <div className="flex items-center gap-2 mb-2">
-            <DollarSign className="w-4 h-4 text-[#85e1fe]" />
-            <span className="text-gray-400 text-sm">Total P&L</span>
+          <div className="bg-[#141721] p-4 rounded-lg border border-[#2b2e38]">
+            <div className="flex items-center gap-2 mb-2">
+              <TrendingUp className="w-4 h-4 text-green-400" />
+              <span className="text-gray-400 text-sm">Total Trades</span>
+            </div>
+            <p className="text-lg font-semibold text-white">
+              {summary.totalTrades}
+            </p>
           </div>
-          <div className={`text-2xl font-bold ${summary.totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-            {formatCurrency(summary.totalPnL)}
-          </div>
-        </div>
 
-        <div className="bg-[#141721] p-4 rounded-lg border border-[#2b2e38]">
-          <div className="flex items-center gap-2 mb-2">
-            <Percent className="w-4 h-4 text-[#85e1fe]" />
-            <span className="text-gray-400 text-sm">Total Return</span>
-          </div>
-          <div className={`text-2xl font-bold ${summary.totalReturn >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-            {formatPercent(summary.totalReturn)}
-          </div>
-        </div>
-      </div>
-
-      {/* Detailed Statistics */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-[#141721] p-4 rounded-lg border border-[#2b2e38]">
-          <div className="text-gray-400 text-sm mb-1">Winning Trades</div>
-          <div className="text-lg font-semibold text-green-500">{summary.winningTrades}</div>
-          <div className="text-xs text-gray-500">Avg: {formatCurrency(summary.avgWin)}</div>
-        </div>
-
-        <div className="bg-[#141721] p-4 rounded-lg border border-[#2b2e38]">
-          <div className="text-gray-400 text-sm mb-1">Losing Trades</div>
-          <div className="text-lg font-semibold text-red-500">{summary.losingTrades}</div>
-          <div className="text-xs text-gray-500">Avg: {formatCurrency(summary.avgLoss)}</div>
-        </div>
-
-        <div className="bg-[#141721] p-4 rounded-lg border border-[#2b2e38]">
-          <div className="text-gray-400 text-sm mb-1">Max Win/Loss</div>
-          <div className="text-sm">
-            <div className="text-green-500">+{formatCurrency(summary.maxWin)}</div>
-            <div className="text-red-500">{formatCurrency(summary.maxLoss)}</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Console Output */}
-      {(stdout || stderr) && (
-        <div className="mb-6">
-          <h4 className="text-lg font-semibold text-white mb-3">Console Output</h4>
-          <div className="bg-[#141721] rounded-lg p-4 border border-[#2b2e38]">
-            {stdout && (
-              <div className="mb-3">
-                <div className="text-green-500 text-sm font-semibold mb-1">STDOUT:</div>
-                <pre className="text-sm text-gray-300 whitespace-pre-wrap bg-[#0a0b0f] p-3 rounded border border-[#2b2e38] overflow-x-auto">
-                  {stdout}
-                </pre>
-              </div>
-            )}
-            {stderr && (
-              <div>
-                <div className="text-red-500 text-sm font-semibold mb-1">STDERR:</div>
-                <pre className="text-sm text-gray-300 whitespace-pre-wrap bg-[#0a0b0f] p-3 rounded border border-[#2b2e38] overflow-x-auto">
-                  {stderr}
-                </pre>
-              </div>
-            )}
+          <div className="bg-[#141721] p-4 rounded-lg border border-[#2b2e38]">
+            <div className="flex items-center gap-2 mb-2">
+              <TrendingDown className="w-4 h-4 text-red-400" />
+              <span className="text-gray-400 text-sm">Total Return</span>
+            </div>
+            <p className={`text-lg font-semibold ${summary.totalReturn >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {formatPercent(summary.totalReturn)}
+            </p>
           </div>
         </div>
       )}
 
-      {/* Recent Trades Table */}
-      {trades.length > 0 && (
-        <div>
-          <h4 className="text-lg font-semibold text-white mb-3">Recent Trades</h4>
-          <div className="bg-[#141721] rounded-lg border border-[#2b2e38] overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-[#0a0b0f]">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-gray-400">#</th>
-                    <th className="px-4 py-3 text-left text-gray-400">Entry Time</th>
-                    <th className="px-4 py-3 text-left text-gray-400">Exit Time</th>
-                    <th className="px-4 py-3 text-left text-gray-400">Entry Price</th>
-                    <th className="px-4 py-3 text-left text-gray-400">Exit Price</th>
-                    <th className="px-4 py-3 text-left text-gray-400">P&L</th>
-                    <th className="px-4 py-3 text-left text-gray-400">Return %</th>
-                    <th className="px-4 py-3 text-left text-gray-400">Duration</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {trades.slice(0, 10).map((trade, index) => (
-                    <tr key={index} className="border-t border-[#2b2e38] hover:bg-[#23263a]">
-                      <td className="px-4 py-3 text-white">{index + 1}</td>
-                      <td className="px-4 py-3 text-gray-300">{trade.EntryTime}</td>
-                      <td className="px-4 py-3 text-gray-300">{trade.ExitTime}</td>
-                      <td className="px-4 py-3 text-gray-300">{trade.EntryPrice}</td>
-                      <td className="px-4 py-3 text-gray-300">{trade.ExitPrice}</td>
-                      <td className={`px-4 py-3 font-semibold ${trade.PnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                        {formatCurrency(trade.PnL)}
-                      </td>
-                      <td className={`px-4 py-3 ${trade.ReturnPct >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                        {formatPercent(trade.ReturnPct)}
-                      </td>
-                      <td className="px-4 py-3 text-gray-300">{trade.Duration}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {trades.length > 10 && (
-              <div className="px-4 py-3 text-center text-gray-400 text-sm border-t border-[#2b2e38]">
-                Showing first 10 of {trades.length} trades
-              </div>
-            )}
+      {/* No Trades Message */}
+      {!csvError && summary.totalTrades === 0 && (
+        <div className="text-center py-8">
+          <div className="text-gray-400 mb-4">
+            <BarChart3 className="w-16 h-16 mx-auto mb-4 opacity-50" />
+            <h4 className="text-lg font-medium">No Trades Found</h4>
+            <p className="text-sm">No trades were executed during the backtest period.</p>
           </div>
+        </div>
+      )}
+
+      {/* Trades Table */}
+      {!csvError && trades.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-[#141721] text-gray-400">
+                <th className="px-3 py-2 text-left">Entry Time</th>
+                <th className="px-3 py-2 text-left">Exit Time</th>
+                <th className="px-3 py-2 text-right">Size</th>
+                <th className="px-3 py-2 text-right">Entry Price</th>
+                <th className="px-3 py-2 text-right">Exit Price</th>
+                <th className="px-3 py-2 text-right">P&L</th>
+                <th className="px-3 py-2 text-right">Return %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {trades.map((trade, index) => (
+                <tr key={index} className="border-b border-[#2b2e38] hover:bg-[#141721]">
+                  <td className="px-3 py-2 text-gray-300">{trade.EntryTime}</td>
+                  <td className="px-3 py-2 text-gray-300">{trade.ExitTime}</td>
+                  <td className="px-3 py-2 text-right text-gray-300">{trade.Size}</td>
+                  <td className="px-3 py-2 text-right text-gray-300">{trade.EntryPrice}</td>
+                  <td className="px-3 py-2 text-right text-gray-300">{trade.ExitPrice}</td>
+                  <td className={`px-3 py-2 text-right font-medium ${trade.PnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {formatCurrency(trade.PnL)}
+                  </td>
+                  <td className={`px-3 py-2 text-right font-medium ${trade.ReturnPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {formatPercent(trade.ReturnPct)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Console Output */}
+      {(stdout || stderr) && (
+        <div className="mt-6">
+          <h4 className="text-white font-medium mb-3">Console Output</h4>
+          {stdout && (
+            <div className="mb-3">
+              <h5 className="text-green-400 text-sm font-medium mb-1">STDOUT:</h5>
+              <pre className="bg-[#141721] p-3 rounded text-xs text-gray-300 overflow-x-auto">
+                {stdout}
+              </pre>
+            </div>
+          )}
+          {stderr && (
+            <div>
+              <h5 className="text-red-400 text-sm font-medium mb-1">STDERR:</h5>
+              <pre className="bg-[#141721] p-3 rounded text-xs text-red-300 overflow-x-auto">
+                {stderr}
+              </pre>
+            </div>
+          )}
         </div>
       )}
     </div>

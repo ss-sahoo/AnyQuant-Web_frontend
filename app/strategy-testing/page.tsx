@@ -9,6 +9,7 @@ import { MobileSidebar } from "@/components/mobile-sidebar"
 import {
   fetchStatementDetail,
   runBacktest,
+  runBacktestWithMetaAPI,
   runOptimisation,
   updateStrategyTradingType,
   saveOptimisationInput,
@@ -35,6 +36,7 @@ import { OptimisationHistoryList } from '@/components/OptimisationHistoryList'
 import { WalkForwardOptimizationResults } from '@/components/walk-forward-optimization-results'
 import { WalkForwardOptimisationView } from "@/components/walk-forward-optimization-results-view";
 import { TradesSummary } from "@/components/trades-summary";
+import { MetaAPIConfig, type MetaAPIConfig as MetaAPIConfigType } from "@/components/metaapi-config";
 
 export default function StrategyTestingPage() {
   const router = useRouter()
@@ -42,8 +44,11 @@ export default function StrategyTestingPage() {
   const [showIframe, setShowIframe] = useState(false) // This state is not used in the provided code, keeping it for consistency.
 
   const [selectedStrategy, setSelectedStrategy] = useState("xauscalper.py")
+  // MetaAPI Configuration states (replacing file upload states)
+  const [metaAPIConfig, setMetaAPIConfig] = useState<MetaAPIConfigType | null>(null)
+  const [useMetaAPI, setUseMetaAPI] = useState(true) // Toggle between MetaAPI and file upload
+  // Legacy file upload states (kept for backward compatibility)
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([])
-  // Add a state to store the actual File objects
   const [fileObjects, setFileObjects] = useState<Record<string, File>>({})
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [currentFile, setCurrentFile] = useState("")
@@ -88,9 +93,7 @@ export default function StrategyTestingPage() {
   const [maxTrades, setMaxTrades] = useState("1")
   
   // Add state variables for TradingType configuration
-  const [commission, setCommission] = useState("0.00007")
-  const [margin, setMargin] = useState("1")
-  const [initialCash, setInitialCash] = useState("100000")
+  const [commission, setCommission] = useState(0.00007)
   const [assetType, setAssetType] = useState("gold")
 
   // New states for OptimisationTab
@@ -228,11 +231,9 @@ export default function StrategyTestingPage() {
             
             // Load additional TradingType configuration values
             // Use dynamic commission from the strategy or default
-            const currentCommission = parsed.TradingType.commission?.toString() || "0.00007"
+            const currentCommission = parsed.TradingType.commission || 0.00007
             console.log("🔍 Commission update check:", { currentCommission })
             setCommission(currentCommission)
-            setMargin(parsed.TradingType.margin?.toString() || "1")
-            setInitialCash(parsed.TradingType.cash?.toString() || "100000")
             setAssetType(parsed.TradingType.Asset_type || "gold")
             
             // Update the parsed statement with the dynamic commission value
@@ -241,7 +242,7 @@ export default function StrategyTestingPage() {
               TradingType: {
                 ...parsed.TradingType,
                 commission: Number.parseFloat(currentCommission),
-                Asset_type: parsed.TradingType.Asset_type || "gold"
+                asset_type: parsed.TradingType.asset_type || "gold"
               }
             }
             setParsedStatement(updatedStatement)
@@ -364,6 +365,38 @@ export default function StrategyTestingPage() {
             setStrategy(JSON.stringify(strategyData))
             setParsedStatement(strategyData)
 
+            // Extract trading symbol from strategy name
+            if (strategyData.name) {
+              // Extract symbol from strategy name (e.g., "Strategyname" -> "XAUUSD")
+              let symbol = "XAUUSD" // Default symbol
+              
+              // Try to extract symbol from strategy name
+              const name = strategyData.name.toLowerCase()
+              if (name.includes("xau") || name.includes("gold")) {
+                symbol = "XAUUSD"
+              } else if (name.includes("eur")) {
+                symbol = "EURUSD"
+              } else if (name.includes("gbp")) {
+                symbol = "GBPUSD"
+              } else if (name.includes("jpy")) {
+                symbol = "USDJPY"
+              } else if (name.includes("btc") || name.includes("bitcoin")) {
+                symbol = "BTCUSD"
+              } else if (name.includes("eth") || name.includes("ethereum")) {
+                symbol = "ETHUSD"
+              }
+              
+              console.log("🔍 Extracted trading symbol from strategy name:", strategyData.name, "->", symbol)
+              
+              // Update MetaAPI config with the extracted symbol
+              const updatedConfig = {
+                token: process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || "",
+                accountId: process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || "",
+                symbol: symbol
+              }
+              setMetaAPIConfig(updatedConfig)
+            }
+
             if (strategyData.optimisation_form) {
               localStorage.setItem("optimisation_form", JSON.stringify(strategyData.optimisation_form))
               const optimisationForm = strategyData.optimisation_form
@@ -410,9 +443,13 @@ export default function StrategyTestingPage() {
   }
 
   // Simple toast notification system
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => {
     const toast = document.createElement('div');
-    toast.className = `fixed bottom-10 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded shadow-lg z-50 text-black ${type === 'success' ? 'bg-[#85e1fe]' : 'bg-red-600'}`;
+    let bgColor = 'bg-[#85e1fe]';
+    if (type === 'error') bgColor = 'bg-red-600';
+    if (type === 'warning') bgColor = 'bg-yellow-500';
+    
+    toast.className = `fixed bottom-10 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded shadow-lg z-50 text-black ${bgColor}`;
     toast.textContent = message;
     document.body.appendChild(toast);
     setTimeout(() => {
@@ -511,14 +548,15 @@ export default function StrategyTestingPage() {
     return false
   }
 
-  // Updated handleRunBacktest function to use the new API structure
+  // Updated handleRunBacktest function to support both MetaAPI and file upload
   const handleRunBacktest = async () => {
     if (!parsedStatement) {
       showToast("Strategy statement is missing or not parsed!", 'error')
       return
     }
 
-    if (requiredTimeframes.length > uploadedFiles.length) {
+    // Check requirements based on selected method
+    if (!useMetaAPI && requiredTimeframes.length > uploadedFiles.length) {
       showToast("Not enough files uploaded for the required timeframes", 'error')
       return
     }
@@ -526,28 +564,44 @@ export default function StrategyTestingPage() {
     try {
       setIsLoading(true)
 
-      const timeframeFiles: Record<string, File> = {}
+      let result
 
-      // Directly map each required timeframe to the uploaded file in order
-      requiredTimeframes.forEach((timeframe, index) => {
-        const filename = uploadedFiles[index]
-        if (filename && fileObjects[filename]) {
-          timeframeFiles[timeframe] = fileObjects[filename]
-        }
-      })
+      if (useMetaAPI) {
+        // Use MetaAPI for backtesting with environment variables
+        const symbol = metaAPIConfig?.symbol || "XAUUSD"
+        console.log("🔍 Using trading symbol for MetaAPI backtest:", symbol)
+        
+        result = await runBacktestWithMetaAPI(
+          parsedStatement,
+          process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || "",
+          process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || "",
+          symbol
+        )
+      } else {
+        // Use traditional file upload method
+        const timeframeFiles: Record<string, File> = {}
 
-      // Add unmatched remaining files to the form with filename as key (optional fallback)
-      uploadedFiles.forEach((filename) => {
-        if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
-          const key = filename.split(".")[0]
-          timeframeFiles[key] = fileObjects[filename]
-        }
-      })
+        // Directly map each required timeframe to the uploaded file in order
+        requiredTimeframes.forEach((timeframe, index) => {
+          const filename = uploadedFiles[index]
+          if (filename && fileObjects[filename]) {
+            timeframeFiles[timeframe] = fileObjects[filename]
+          }
+        })
 
-      const result = await runBacktest({
-        statement: parsedStatement,
-        files: timeframeFiles,
-      })
+        // Add unmatched remaining files to the form with filename as key (optional fallback)
+        uploadedFiles.forEach((filename) => {
+          if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
+            const key = filename.split(".")[0]
+            timeframeFiles[key] = fileObjects[filename]
+          }
+        })
+
+        result = await runBacktest({
+          statement: parsedStatement,
+          files: timeframeFiles,
+        })
+      }
 
       console.log("Backtest result:", result)
 
@@ -566,7 +620,25 @@ export default function StrategyTestingPage() {
           stderr: result.stderr || ''
         })
         setShowTradesSummary(true)
-        showToast("Trades data available! View summary for details.", 'success')
+        
+        // Check if trades CSV has actual data
+        const csvLines = result.trades_csv.trim().split('\n')
+        if (csvLines.length >= 2) {
+          showToast("Trades data available! View summary for details.", 'success')
+        } else {
+          showToast("Backtest completed but no trades were executed.", 'warning')
+        }
+      } else {
+        // No trades CSV data
+        setTradesData({
+          tradesCsv: '',
+          tradesCsvFilename: '',
+          tradesCsvDownloadUrl: '',
+          stdout: result?.stdout || '',
+          stderr: result?.stderr || ''
+        })
+        setShowTradesSummary(true)
+        showToast("Backtest completed but no trades data available.", 'warning')
       }
 
       // Handle stdout/stderr
@@ -1082,6 +1154,11 @@ export default function StrategyTestingPage() {
     }
   }
 
+  // MetaAPI Configuration Handlers
+  const handleMetaAPIConfigChange = (config: MetaAPIConfigType) => {
+    setMetaAPIConfig(config)
+  }
+
   const [dateRange, setDateRange] = useState("2024.01.02 - 2025.01.02")
   const [selectedInstruments, setSelectedInstruments] = useState(["USD/JPY"])
   const [accountDeposit, setAccountDeposit] = useState("1,000")
@@ -1161,17 +1238,16 @@ export default function StrategyTestingPage() {
       // Create the data object with trading mode consideration
       // Use dynamic commission from the form
       const tradingtype: any = {
-        margin: Number.parseFloat(margin),
+        margin: leverageMargin,
         lot: lot,
-        cash: Number.parseFloat(initialCash),
-        commission: Number.parseFloat(commission), // Use dynamic commission from form
+        cash: cash,
+        commission: commission, // Use dynamic commission from form
         NewTrade: selectedTradingMode, // Add the selected trading mode
-        Asset_type: assetType, // Add the asset type
+        asset_type: assetType, // Add the asset type
       }
       
       console.log("🔍 Commission being sent to API:", { 
         commission, 
-        parsedCommission: Number.parseFloat(commission),
         commissionState: commission,
         parsedStatementCommission: parsedStatement?.TradingType?.commission
       })
@@ -1191,8 +1267,8 @@ export default function StrategyTestingPage() {
               ...parsedStatement.TradingType,
               ...tradingtype,
               lot: lot,
-              commission: Number.parseFloat(commission), // Use dynamic commission from form
-              Asset_type: assetType, // Add the asset type
+              commission: commission, // Use dynamic commission from form
+              asset_type: assetType, // Add the asset type
             }
           }
         
@@ -1372,23 +1448,66 @@ export default function StrategyTestingPage() {
               {/* Content area with overflow to allow scrolling */}
               <div className="flex-1 overflow-y-auto pb-[160px] bg-[#000000] ml-[63px]">
                 {activeTab === "strategy" && (
-                  <StrategyTab
-                    selectedStrategy={selectedStrategy}
-                    setSelectedStrategy={setSelectedStrategy}
-                    requiredTimeframes={requiredTimeframes}
-                    uploadedFiles={uploadedFiles}
-                    matchesTimeframe={matchesTimeframe}
-                    handleFileChange={handleFileChange}
-                    handleDeleteFile={handleDeleteFile}
-                    fileInputRef={fileInputRef}
-                    handleClick={handleClick}
-                    isDragging={isDragging}
-                    handleDragOver={handleDragOver}
-                    handleDragLeave={handleDragLeave}
-                    handleDrop={handleDrop}
-                    setShowSuccessModal={setShowSuccessModal}
-                    currentFile={currentFile}
-                  />
+                  <div className="p-6 space-y-6">
+                    {/* Data Source Toggle */}
+                    <div className="bg-black border border-gray-700 rounded-lg p-4">
+                      <h3 className="text-lg font-semibold text-white mb-4">Data Source</h3>
+                      <div className="flex items-center space-x-4">
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="dataSource"
+                            checked={useMetaAPI}
+                            onChange={() => setUseMetaAPI(true)}
+                            className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500"
+                          />
+                          <span className="text-white">MetaAPI (Recommended)</span>
+                        </label>
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="dataSource"
+                            checked={!useMetaAPI}
+                            onChange={() => setUseMetaAPI(false)}
+                            className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500"
+                          />
+                          <span className="text-white">File Upload (Legacy)</span>
+                        </label>
+                      </div>
+                      <p className="text-sm text-gray-400 mt-2">
+                        {useMetaAPI 
+                          ? "Use MetaAPI to fetch real market data automatically"
+                          : "Upload CSV files manually for backtesting"
+                        }
+                      </p>
+                    </div>
+
+                    {/* MetaAPI Configuration or File Upload */}
+                    {useMetaAPI ? (
+                      <MetaAPIConfig
+                        onConfigChange={handleMetaAPIConfigChange}
+                        initialConfig={metaAPIConfig || undefined}
+                      />
+                    ) : (
+                      <StrategyTab
+                        selectedStrategy={selectedStrategy}
+                        setSelectedStrategy={setSelectedStrategy}
+                        requiredTimeframes={requiredTimeframes}
+                        uploadedFiles={uploadedFiles}
+                        matchesTimeframe={matchesTimeframe}
+                        handleFileChange={handleFileChange}
+                        handleDeleteFile={handleDeleteFile}
+                        fileInputRef={fileInputRef}
+                        handleClick={handleClick}
+                        isDragging={isDragging}
+                        handleDragOver={handleDragOver}
+                        handleDragLeave={handleDragLeave}
+                        handleDrop={handleDrop}
+                        setShowSuccessModal={setShowSuccessModal}
+                        currentFile={currentFile}
+                      />
+                    )}
+                  </div>
                 )}
 
                 {activeTab === "backtest" && (
@@ -1416,10 +1535,6 @@ export default function StrategyTestingPage() {
                     setLot={setLot}
                     commission={commission}
                     setCommission={setCommission}
-                    margin={margin}
-                    setMargin={setMargin}
-                    initialCash={initialCash}
-                    setInitialCash={setInitialCash}
                     assetType={assetType}
                     setAssetType={setAssetType}
                     showTradesSummary={showTradesSummary}
@@ -1618,11 +1733,15 @@ export default function StrategyTestingPage() {
                 {/* Action Buttons */}
                 <div className="p-4 flex gap-4">
                   <button
-                    className="flex-1 py-3 bg-[#141721] rounded-full text-white hover:bg-[#2B2E38]"
+                    className={`flex-1 py-3 rounded-full text-white transition-colors ${
+                      isLoading || (!useMetaAPI && (requiredTimeframes.length > uploadedFiles.length))
+                        ? 'bg-gray-600 cursor-not-allowed'
+                        : 'bg-[#141721] hover:bg-[#2B2E38]'
+                    }`}
                     onClick={handleRunBacktest}
-                    disabled={isLoading}
+                    disabled={isLoading || (!useMetaAPI && (requiredTimeframes.length > uploadedFiles.length))}
                   >
-                    Run Backtest
+                    {isLoading ? 'Running...' : 'Run Backtest'}
                   </button>
                   <button
                     onClick={() => handleOptimisation(false)}

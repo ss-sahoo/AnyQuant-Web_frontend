@@ -24,12 +24,9 @@ interface BacktestTabProps {
   isSaving: boolean
   lot: string
   setLot: React.Dispatch<React.SetStateAction<string>>
-  commission: string
-  setCommission: React.Dispatch<React.SetStateAction<string>>
-  margin: string
-  setMargin: React.Dispatch<React.SetStateAction<string>>
-  initialCash: string
-  setInitialCash: React.Dispatch<React.SetStateAction<string>>
+  commission: number
+  setCommission: React.Dispatch<React.SetStateAction<number>>
+
   assetType: string
   setAssetType: React.Dispatch<React.SetStateAction<string>>
   showTradesSummary?: boolean
@@ -60,10 +57,7 @@ export function BacktestTab({
   setLot,
   commission,
   setCommission,
-  margin,
-  setMargin,
-  initialCash,
-  setInitialCash,
+
   assetType,
   setAssetType,
   showTradesSummary = false,
@@ -276,19 +270,7 @@ export function BacktestTab({
               type="number"
               step="0.0001"
               value={commission}
-              onChange={(e) => setCommission(e.target.value)}
-              className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
-            />
-          </div>
-
-          {/* Margin */}
-          <div>
-            <label className="block text-sm text-gray-400 mb-2">Margin</label>
-            <input
-              type="number"
-              step="0.1"
-              value={margin}
-              onChange={(e) => setMargin(e.target.value)}
+              onChange={(e) => setCommission(parseFloat(e.target.value) || 0)}
               className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
             />
           </div>
@@ -318,18 +300,6 @@ export function BacktestTab({
                 </svg>
               </div>
             </div>
-          </div>
-
-          {/* Initial Cash */}
-          <div>
-            <label className="block text-sm text-gray-400 mb-2">Initial Cash</label>
-            <input
-              type="number"
-              step="1000"
-              value={initialCash}
-              onChange={(e) => setInitialCash(e.target.value)}
-              className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
-            />
           </div>
 
           {/* Max Trades (if not MTOOTAAT) */}
