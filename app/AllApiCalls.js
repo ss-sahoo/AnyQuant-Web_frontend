@@ -230,23 +230,39 @@ export const runBacktest = async ({ statement, files }) => {
 
 // Add this new function for MetaAPI integration
 export const runBacktestWithMetaAPI = async (strategy, token, accountId, symbol) => {
+  // Debug logging
+  console.log('🔍 MetaAPI Debug Info:', {
+    tokenLength: token?.length || 0,
+    accountId: accountId,
+    symbol: symbol,
+    tokenPrefix: token?.substring(0, 20) + '...',
+    hasToken: !!token,
+    hasAccountId: !!accountId
+  });
+
   const formData = new FormData();
   formData.append('statement', JSON.stringify(strategy));
   formData.append('metaapi_token', token);
   formData.append('metaapi_account_id', accountId);
   formData.append('symbol', symbol);
   
-  const response = await Fetch('/api/run-backtest/', {
-    method: 'POST',
-    body: formData,
-  });
+  try {
+    const response = await Fetch('/api/run-backtest/', {
+      method: 'POST',
+      body: formData,
+    });
 
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error?.error || 'Failed to start backtest with MetaAPI');
+    if (!response.ok) {
+      const error = await response.json();
+      console.error('🔍 MetaAPI Backend Error:', error);
+      throw new Error(error?.error || error?.message || 'Failed to start backtest with MetaAPI');
+    }
+
+    return response.json();
+  } catch (error) {
+    console.error('🔍 MetaAPI Request Error:', error);
+    throw error;
   }
-
-  return response.json();
 };
 
 /**
