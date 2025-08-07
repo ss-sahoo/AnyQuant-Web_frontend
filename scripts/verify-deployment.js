@@ -8,6 +8,32 @@
  */
 
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
+
+// Load environment variables from .env.local
+function loadEnvFile() {
+  const envPath = path.join(process.cwd(), '.env.local');
+  
+  if (fs.existsSync(envPath)) {
+    const envContent = fs.readFileSync(envPath, 'utf8');
+    const lines = envContent.split('\n');
+    
+    lines.forEach(line => {
+      const trimmedLine = line.trim();
+      if (trimmedLine && !trimmedLine.startsWith('#')) {
+        const [key, ...valueParts] = trimmedLine.split('=');
+        if (key && valueParts.length > 0) {
+          const value = valueParts.join('=');
+          process.env[key] = value;
+        }
+      }
+    });
+  }
+}
+
+// Load environment variables
+loadEnvFile();
 
 // Configuration
 const METAAPI_ACCOUNT_ID = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID;
