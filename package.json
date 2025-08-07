@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "verify-metaapi": "node scripts/verify-deployment.js"
   },
   "dependencies": {
     "@chakra-ui/react": "^3.19.1",

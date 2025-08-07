@@ -45,7 +45,7 @@ export function MetaAPIConfig({ onConfigChange, initialConfig }: MetaAPIConfigPr
   }
 
   // Check if credentials are configured
-  const isConfigured = config.token && config.accountId
+  const isConfigured = config.token && config.accountId && config.token.length > 100 && config.accountId.length > 20
 
   return (
     <div className="bg-black border border-gray-700 rounded-lg p-6 space-y-6">
