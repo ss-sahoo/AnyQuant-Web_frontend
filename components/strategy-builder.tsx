@@ -607,15 +607,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
   // Update the behaviours array to include crossabove and crossbelow
   const behaviours = [
-    { id: "crossing-up", label: "Crossing up" },
-    { id: "crossing-down", label: "Crossing down" },
+    { id: "crossabove", label: "Cross Above" },
+    { id: "crossbelow", label: "Cross Below" },
     { id: "greater-than", label: "Greater Than" },
     { id: "less-than", label: "Less Than" },
     { id: "inside-channel", label: "Inside Channel" },
     { id: "moving-up", label: "Moving up" },
     { id: "moving-down", label: "Moving down" },
-    { id: "crossabove", label: "Cross Above" },
-    { id: "crossbelow", label: "Cross Below" },
     { id: "above", label: "Above" },
     { id: "below", label: "Below" },
     { id: "atmost-above-pips", label: "At most above pips" },
@@ -669,8 +667,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
   // Update the getOperatorName function to support new operators
   const getOperatorName = (behavior: string) => {
-    if (behavior.toLowerCase() === "crossing up") return "crossabove"
-    if (behavior.toLowerCase() === "crossing down") return "crossbelow"
+    if (behavior.toLowerCase() === "crossing up" || behavior.toLowerCase() === "cross above") return "crossabove"
+    if (behavior.toLowerCase() === "crossing down" || behavior.toLowerCase() === "cross below") return "crossbelow"
     if (behavior.toLowerCase() === "moving up") return "moving_up"
     if (behavior.toLowerCase() === "moving down") return "moving_down"
     if (behavior.toLowerCase() === "greater than") return "above"
@@ -1484,9 +1482,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         }
 
         // Show the appropriate settings modal
-        if (component === "Crossing up" || component === "Cross Above" || component === "Cross Below") {
+        if (component === "Cross Above") {
           setShowCrossingUpModal(true)
-        } else if (component === "Crossing down") {
+        } else if (component === "Cross Below") {
           setShowCrossingDownModal(true)
         } else if (component === "Above") {
           setShowAboveModal(true)

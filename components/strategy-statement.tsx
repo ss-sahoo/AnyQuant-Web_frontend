@@ -9,7 +9,7 @@ export function StrategyStatement() {
   const [candle, setCandle] = useState("Candle 1")
   const [candleDropdown, setCandleDropdown] = useState(false)
   const [indicator, setIndicator] = useState("Price / Close")
-  const [behavior, setBehavior] = useState("Crossing Up")
+  const [behavior, setBehavior] = useState("Cross Above")
   const [compareWith, setCompareWith] = useState("Bands / Basis")
   const [compareWithDropdown, setCompareWithDropdown] = useState(false)
   const [timeframe2, setTimeframe2] = useState("3 Hourly")

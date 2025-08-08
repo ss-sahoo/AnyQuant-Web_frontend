@@ -79,14 +79,12 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
 
   // Complete list of behaviors
   const allBehaviors = [
-    "Crossing up",
-    "Crossing down",
+    "Cross Above",
+    "Cross Below",
     
     // "Inside Channel",
     "Moving up",
     "Moving down",
-    // "Cross Above",
-    // "Cross Below",
     "Above",
     "Below",
     "At most above pips",
