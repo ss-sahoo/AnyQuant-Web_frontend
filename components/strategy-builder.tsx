@@ -1223,9 +1223,15 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               console.warn("Please select an indicator first before adding a derivative")
             }
           } else if (component.includes("MA") || component.includes("_MA")) {
+            // Special handling for Volume_MA to preserve proper casing
+            let indicatorName = component.toUpperCase().replace("-", "_");
+            if (component.toLowerCase() === "volume_ma" || component.toLowerCase() === "volume-ma") {
+              indicatorName = "Volume_MA";
+            }
+            
             lastCondition.inp2 = {
               type: "CUSTOM_I",
-              name: component.toUpperCase().replace("-", "_"),
+              name: indicatorName,
               timeframe: timeframe,
               input_params: { ma_length: 20 },
             }
@@ -1333,9 +1339,15 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             }
           } else if (component.includes("MA") || component.includes("_MA")) {
             // Format for custom indicators like Volume_MA
+            // Special handling for Volume_MA to preserve proper casing
+            let indicatorName = component.toUpperCase().replace("-", "_");
+            if (component.toLowerCase() === "volume_ma" || component.toLowerCase() === "volume-ma") {
+              indicatorName = "Volume_MA";
+            }
+            
             lastCondition.inp1 = {
               type: "CUSTOM_I",
-              name: component.toUpperCase().replace("-", "_"),
+              name: indicatorName,
               timeframe: timeframe,
               input_params: { ma_length: 20 },
             }
