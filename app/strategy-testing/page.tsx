@@ -109,6 +109,9 @@ export default function StrategyTestingPage() {
   const [optimizationResults, setOptimizationResults] = useState<any[]>([])
   const [currentOptimizationId, setCurrentOptimizationId] = useState<string | null>(null)
   const [optimizationStatus, setOptimizationStatus] = useState<string>("")
+  const [optimisationMessage, setOptimisationMessage] = useState<string>("")
+  const [optimisationStdout, setOptimisationStdout] = useState<string>("")
+  const [optimisationStderr, setOptimisationStderr] = useState<string>("")
   const [optimizationTaskId, setOptimizationTaskId] = useState<string | null>(null)
   const [showOptimizationHistory, setShowOptimizationHistory] = useState(false)
   const [selectedOptimizationResult, setSelectedOptimizationResult] = useState<any>(null)
@@ -752,6 +755,11 @@ export default function StrategyTestingPage() {
 
       console.log("Full optimization response:", result)
 
+      // Capture optional message/stdout/stderr from response
+      setOptimisationMessage(result?.message || "")
+      setOptimisationStdout(result?.stdout || "")
+      setOptimisationStderr(result?.stderr || "")
+
       // Handle the response based on whether it's sync or async
       if (wait && result?.result) {
         // Sync mode: use result.result directly
@@ -1007,6 +1015,10 @@ export default function StrategyTestingPage() {
       try {
         const statusResult = await getOptimisationStatus(optimizationId);
         setOptimizationStatus(statusResult.status);
+        // Update optional message/stdout/stderr when present during polling
+        if (statusResult?.message) setOptimisationMessage(statusResult.message);
+        if (statusResult?.stdout) setOptimisationStdout(statusResult.stdout);
+        if (statusResult?.stderr) setOptimisationStderr(statusResult.stderr);
         if (isFinalStatus(statusResult.status)) {
           stopped = true;
           clearInterval(interval);
@@ -1548,11 +1560,51 @@ export default function StrategyTestingPage() {
                     setAssetType={setAssetType}
                     showTradesSummary={showTradesSummary}
                     onShowTradesSummary={() => setShowTradesSummary(true)}
+                    initialTradingSession={parsedStatement?.TradingSession}
+                    onTradingSessionSave={(session) => {
+                      try {
+                        const updated = { ...(parsedStatement || {}), TradingSession: session }
+                        setParsedStatement(updated)
+                        localStorage.setItem("savedStrategy", JSON.stringify(updated))
+                        // optional toast
+                        const toast = document.createElement('div');
+                        toast.className = 'fixed bottom-10 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded shadow-lg z-50 text-black bg-[#85e1fe]';
+                        toast.textContent = 'Trading Session saved';
+                        document.body.appendChild(toast);
+                        setTimeout(() => document.body.removeChild(toast), 2000);
+                      } catch (e) {
+                        console.error('Failed to save TradingSession:', e)
+                      }
+                    }}
                   />
                 )}
 
                 {activeTab === "optimisation" && showOptimisationResults && optimisationResult && (
                   <div className="p-6 bg-[#000000] text-white min-h-[600px]">
+                    {/* Optimisation response info (message/stdout/stderr) */}
+                    {(optimisationMessage || optimisationStdout || optimisationStderr) && (
+                      <div className="mb-4 p-4 bg-[#141721] rounded-md border border-gray-700">
+                        {optimisationMessage && (
+                          <div className="mb-2">
+                            <span className="font-semibold text-white mr-2">Message:</span>
+                            <span className="text-gray-300 break-words">{optimisationMessage}</span>
+                          </div>
+                        )}
+                        {optimisationStdout && (
+                          <div className="mb-2">
+                            <div className="font-semibold text-white mb-1">Stdout:</div>
+                            <pre className="whitespace-pre-wrap break-words text-gray-300 text-xs bg-[#0e1018] p-3 rounded-md border border-gray-800 max-h-60 overflow-auto">{optimisationStdout}</pre>
+                          </div>
+                        )}
+                        {optimisationStderr && (
+                          <div className="mb-2">
+                            <div className="font-semibold text-white mb-1">Stderr:</div>
+                            <pre className="whitespace-pre-wrap break-words text-gray-300 text-xs bg-[#0e1018] p-3 rounded-md border border-gray-800 max-h-60 overflow-auto">{optimisationStderr}</pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* Top-level tabs: Results | Graph | Report */}
                     <div className="flex border-b border-gray-700 mb-6">
                       <button

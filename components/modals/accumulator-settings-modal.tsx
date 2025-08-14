@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { X } from "lucide-react"
 
 interface AccumulatorSettings {
@@ -11,11 +11,19 @@ interface AccumulatorSettings {
 interface AccumulatorSettingsModalProps {
   onClose: () => void
   onSave: (settings: AccumulatorSettings) => void
+  initialSettings?: AccumulatorSettings
 }
 
-export function AccumulatorSettingsModal({ onClose, onSave }: AccumulatorSettingsModalProps) {
+export function AccumulatorSettingsModal({ onClose, onSave, initialSettings }: AccumulatorSettingsModalProps) {
   const [type, setType] = useState<"exactly" | "at least" | "up to">("at least")
   const [value, setValue] = useState(6)
+
+  useEffect(() => {
+    if (initialSettings) {
+      setType(initialSettings.type)
+      setValue(initialSettings.value)
+    }
+  }, [initialSettings])
 
   const handleSave = () => {
     onSave({ type, value })

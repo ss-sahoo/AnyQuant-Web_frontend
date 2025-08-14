@@ -2525,29 +2525,31 @@ if (
       }
 
       // Show accumulator if it exists
-      if (condition.Accumulate) {
-        components.push(
-          <div key={`accumulator-${index}`} className="flex items-center relative group">
-            <div
-              className="bg-[#C5C5C5] text-black px-3 py-2 mt-3 rounded-md mr-2 mb-2 transition-all duration-200 hover:bg-[#D5D5D5] cursor-pointer"
-              onClick={() => handleComponentClick(activeStatementIndex, index, "accumulate")}
-            >
-              Accumulate
-            </div>
-            <button
-              onClick={() => {
-                const newStatements = [...statements]
-                const currentStatement = newStatements[activeStatementIndex]
-                delete currentStatement.strategy[index].Accumulate
-                setStatements(newStatements)
-              }}
-              className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-            >
-              <X className="w-3 h-3" />
-            </button>
-          </div>,
-        )
-      }
+                if (condition.Accumulate) {
+            components.push(
+              <div key={`accumulator-${index}`} className="flex items-center relative group">
+                <div
+                  className="bg-[#C5C5C5] text-black px-3 py-2 mt-3 rounded-md mr-2 mb-2 transition-all duration-200 hover:bg-[#D5D5D5] cursor-pointer"
+                  onClick={() => handleComponentClick(activeStatementIndex, index, "accumulate")}
+                  onMouseEnter={(e) => handleMouseEnter(e, condition, "accumulate", index)}
+                  onMouseLeave={handleMouseLeave}
+                >
+                  {`Accumulate${condition.Accumulate.forPeriod ? `: ${condition.Accumulate.forPeriod}` : ""}`}
+                </div>
+                <button
+                  onClick={() => {
+                    const newStatements = [...statements]
+                    const currentStatement = newStatements[activeStatementIndex]
+                    delete currentStatement.strategy[index].Accumulate
+                    setStatements(newStatements)
+                  }}
+                  className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>,
+            )
+          }
 
       // Show then if it exists
       if (condition.Then) {
@@ -4434,6 +4436,15 @@ if (
       {showAccumulatorModal.show && (
         <AccumulatorSettingsModal
           onClose={() => setShowAccumulatorModal({ show: false, statementIndex: 0, conditionIndex: 0 })}
+          initialSettings={(() => {
+            const cond = statements[showAccumulatorModal.statementIndex]?.strategy[showAccumulatorModal.conditionIndex]
+            const fp = cond?.Accumulate?.forPeriod as string | undefined
+            if (!fp) return undefined
+            if (fp.startsWith("exactly ")) return { type: "exactly" as const, value: Number(fp.replace("exactly ", "")) }
+            if (fp.startsWith("at least ")) return { type: "at least" as const, value: Number(fp.replace("at least ", "")) }
+            if (fp.startsWith("up to ")) return { type: "up to" as const, value: Number(fp.replace("up to ", "")) }
+            return undefined
+          })()}
           onSave={(settings) => {
             const newStatements = [...statements]
             const condition =

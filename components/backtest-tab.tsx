@@ -1,6 +1,8 @@
 "use client"
 
 import type React from "react"
+import { useState, useEffect } from "react"
+import { TradingSessionModal } from "./trading-session-modal"
 
 interface BacktestTabProps {
   dateRange: string
@@ -31,6 +33,9 @@ interface BacktestTabProps {
   setAssetType: React.Dispatch<React.SetStateAction<string>>
   showTradesSummary?: boolean
   onShowTradesSummary?: () => void
+  // New optional props for Trading Session integration
+  initialTradingSession?: any
+  onTradingSessionSave?: (session: any) => void
 }
 
 export function BacktestTab({
@@ -62,9 +67,67 @@ export function BacktestTab({
   setAssetType,
   showTradesSummary = false,
   onShowTradesSummary,
+  initialTradingSession,
+  onTradingSessionSave,
 }: BacktestTabProps) {
+  const [showTradingSessionModal, setShowTradingSessionModal] = useState(false)
+  const [tradingSessionSummary, setTradingSessionSummary] = useState<string>("")
+
+  // Keep a small formatter for summary display
+  const summarize = (session: any) => {
+    if (!session) return ""
+    const tz = session.Timezone || ""
+    const dayInput = session.Day?.input || ""
+    const timeInput = Array.isArray(session.Time?.input) ? session.Time.input[0] : ""
+    return `${tz} | Days: ${dayInput} | Time: ${timeInput}`
+  }
+
+  useEffect(() => {
+    if (initialTradingSession) {
+      setTradingSessionSummary(summarize(initialTradingSession))
+    }
+  }, [initialTradingSession])
+
+  // Map to required day order
+  const DAY_ORDER = ["M", "t", "W", "T", "F", "S", "U"]
+
+  const handleTradingSessionSave = (config: { timezone: string; startTime: string; endTime: string; selectedDays: string[] }) => {
+    // Build ordered day string
+    const selectedSet = new Set(config.selectedDays)
+    const orderedDays = DAY_ORDER.filter((d) => selectedSet.has(d)).join("")
+
+    // Build JSON per spec
+    const sessionJson = {
+      Timezone: config.timezone,
+      Day: {
+        Operator: "is",
+        input: orderedDays,
+      },
+      Time: {
+        Operator: "is",
+        input: [`${config.startTime}-${config.endTime}`],
+      },
+    }
+
+    setTradingSessionSummary(summarize(sessionJson))
+    setShowTradingSessionModal(false)
+    if (onTradingSessionSave) onTradingSessionSave(sessionJson)
+  }
+
   return (
     <div className="p-6 ml-[63px]">
+      {/* Trading Session Panel */}
+      <div className="mb-6 p-4 bg-[#141721] rounded-md border border-[#2b2e38]">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-white font-medium">Trading Session</div>
+            <div className="text-xs text-gray-400 mt-1">{tradingSessionSummary || "Not configured"}</div>
+          </div>
+          <button className="px-4 py-2 bg-[#2b2e38] text-white rounded-md hover:bg-[#3a3e4a]" onClick={() => setShowTradingSessionModal(true)}>
+            Configure
+          </button>
+        </div>
+      </div>
       <div className="flex justify-between items-start mb-6">
         {/* Left side - Dates */}
         <div className="w-[30%]">
@@ -422,6 +485,27 @@ export function BacktestTab({
           )}
         </button>
       </div>
+
+      {/* Attach modal */}
+      {showTradingSessionModal && (
+        <TradingSessionModal
+          onClose={() => setShowTradingSessionModal(false)}
+          onSave={(cfg) => handleTradingSessionSave(cfg)}
+          initial={(() => {
+            if (!initialTradingSession) return undefined
+            const tz = initialTradingSession.Timezone
+            const dayStr: string = initialTradingSession.Day?.input || ""
+            const timeStr: string = Array.isArray(initialTradingSession.Time?.input) ? initialTradingSession.Time.input[0] : ""
+            const [start, end] = (timeStr || "-").split("-")
+            return {
+              timezone: tz,
+              startTime: start || "09:00",
+              endTime: end || "17:00",
+              selectedDays: dayStr.split("").filter(Boolean),
+            }
+          })()}
+        />
+      )}
     </div>
   )
 } 
