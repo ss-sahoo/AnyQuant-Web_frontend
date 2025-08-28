@@ -12,6 +12,7 @@ import {
   runBacktestWithMetaAPI,
   runOptimisation,
   updateStrategyTradingType,
+  editStrategy,
   saveOptimisationInput,
   getOptimisationStatus,
   getOptimizationResults,
@@ -222,6 +223,8 @@ export default function StrategyTestingPage() {
       if (savedStrategy) {
         try {
           const parsed = JSON.parse(savedStrategy)
+          console.log("🔍 DEBUG: Loaded strategy from localStorage:", parsed)
+          console.log("🔍 DEBUG: TradingSession in loaded strategy:", parsed.TradingSession)
           setParsedStatement(parsed)
           
           // Load TradingType settings from the strategy
@@ -1278,26 +1281,52 @@ export default function StrategyTestingPage() {
         tradingtype.nTrade_max = Number.parseInt(maxTrades)
       }
 
-      await updateStrategyTradingType(Number.parseInt(strategy_id), tradingtype)
+      // Get TradingSession from parsedStatement if it exists
+      const tradingSession = parsedStatement?.TradingSession || null
+      
+      console.log("🔍 DEBUG: TradingSession being sent to API:", tradingSession)
+      console.log("🔍 DEBUG: parsedStatement:", parsedStatement)
+      console.log("🔍 DEBUG: parsedStatement.TradingSession:", parsedStatement?.TradingSession)
+      
+      // Use editStrategy to update the complete strategy including TradingSession
+      const updatedStrategyData = {
+        ...parsedStatement,
+        TradingType: {
+          ...parsedStatement.TradingType,
+          ...tradingtype,
+          lot: lot,
+          commission: commission,
+          asset_type: assetType,
+        },
+        // Preserve TradingSession if it exists
+        ...(parsedStatement.TradingSession && { TradingSession: parsedStatement.TradingSession })
+      }
+      
+      console.log("🔍 DEBUG: updatedStrategyData being sent to editStrategy:", updatedStrategyData)
+      console.log("🔍 DEBUG: TradingSession in updatedStrategyData:", updatedStrategyData.TradingSession)
+      
+      const result = await editStrategy(strategy_id, updatedStrategyData)
 
-              // Update the local strategy object with the new TradingType settings
-        if (parsedStatement) {
-          const updatedStatement = {
-            ...parsedStatement,
-            TradingType: {
-              ...parsedStatement.TradingType,
-              ...tradingtype,
-              lot: lot,
-              commission: commission, // Use dynamic commission from form
-              asset_type: assetType, // Add the asset type
-            }
-          }
+      // Update the local strategy object with the response from the API
+      if (result) {
+        // Preserve the TradingSession from the original data since the API doesn't return it
+        const finalResult = {
+          ...result,
+          TradingSession: updatedStrategyData.TradingSession
+        }
         
-        // Update the parsed statement and save to localStorage
-        setParsedStatement(updatedStatement)
-        localStorage.setItem("savedStrategy", JSON.stringify(updatedStatement))
+        setParsedStatement(finalResult)
+        localStorage.setItem("savedStrategy", JSON.stringify(finalResult))
         
-        console.log("🔍 Updated strategy TradingType settings:", updatedStatement.TradingType)
+        // Update strategy_id if it changed
+        if (result.id && result.id.toString() !== strategy_id) {
+          setStrategyId(result.id.toString())
+          localStorage.setItem("strategy_id", result.id.toString())
+          console.log("🔍 Strategy ID updated from", strategy_id, "to", result.id)
+        }
+        
+        console.log("🔍 Updated strategy from API:", result)
+        console.log("🔍 TradingSession preserved locally:", finalResult.TradingSession)
         showToast("Backtest settings saved successfully!", 'success')
       }
     } catch (error) {
