@@ -444,7 +444,7 @@ export const updateStatement = async (statement_id, updatedData) => {
  * @param {number} cash - Account deposit amount
  * @returns {Promise} - Promise with the API response
  */
-export async function updateStrategyTradingType(id, tradingtype) {
+export async function updateStrategyTradingType(id, tradingtype, tradingSession = null) {
   try {
     // Create the base trading type object
     const tradingTypeObj = {
@@ -461,21 +461,35 @@ export async function updateStrategyTradingType(id, tradingtype) {
       tradingTypeObj.nTrade_max = tradingtype.nTrade_max
     }
 
+    // Create the request body
+    const requestBody = {
+      TradingType: tradingTypeObj,
+    }
+
+    // Add TradingSession if provided
+    if (tradingSession) {
+      requestBody.TradingSession = tradingSession
+    }
+
+    // Debug logging
+    console.log("🔍 DEBUG: updateStrategyTradingType request body:", JSON.stringify(requestBody, null, 2))
+    console.log("🔍 DEBUG: TradingSession in request body:", requestBody.TradingSession)
+
     const response = await Fetch(`/api/strategies/${id}/edit/`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        TradingType: tradingTypeObj,
-      }),
+      body: JSON.stringify(requestBody),
     })
 
     if (!response.ok) {
       throw new Error(`Failed to update tradingtype: ${response.status}`)
     }
 
-    return await response.json()
+    const responseData = await response.json()
+    console.log("🔍 DEBUG: updateStrategyTradingType response:", JSON.stringify(responseData, null, 2))
+    return responseData
   } catch (error) {
     console.error("Error updating tradingtype:", error)
     throw error
@@ -491,6 +505,9 @@ export async function updateStrategyTradingType(id, tradingtype) {
  */
 export async function editStrategy(id, data) {
   try {
+    // Debug logging
+    console.log("🔍 DEBUG: editStrategy data being sent:", JSON.stringify(data, null, 2))
+    
     const response = await Fetch(`/api/strategies/${id}/edit/`, {
       method: "PATCH",
       headers: {
@@ -503,7 +520,9 @@ export async function editStrategy(id, data) {
       throw new Error(`Failed to update strategy: ${response.status}`)
     }
 
-    return await response.json()
+    const responseData = await response.json()
+    console.log("🔍 DEBUG: editStrategy response:", JSON.stringify(responseData, null, 2))
+    return responseData
   } catch (error) {
     console.error("Error updating strategy:", error)
     throw error

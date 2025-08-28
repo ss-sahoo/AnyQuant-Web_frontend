@@ -28,6 +28,7 @@ import { BelowSettingsModal } from "@/components/modals/below-settings-modal"
 import { AccumulatorSettingsModal } from "@/components/modals/accumulator-settings-modal"
 import { ThenSettingsModal } from "@/components/modals/then-settings-modal"
 import { AboveSettingsModal } from "./modals/above-settings-modal"
+import { MovingOperatorSettingsModal } from "@/components/modals/moving-operator-settings-modal"
 
 interface StrategyBuilderProps {
   initialName?: string
@@ -62,6 +63,15 @@ interface StrategyCondition {
   inp1?: IndicatorInput | { name: string }
   operator_name?: string
   operator_display?: string // Store the original display label for UI
+  // New operator structure for moving_up and moving_down
+  Operator?: {
+    operator_name: string
+    params: {
+      logical_operator: string
+      value: number
+      unit: string
+    }
+  }
   inp2?:
     | {
         type: string
@@ -252,6 +262,16 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     conditionIndex: 0,
   })
 
+  const [showMovingOperatorModal, setShowMovingOperatorModal] = useState<{
+    show: boolean
+    statementIndex: number
+    conditionIndex: number
+  }>({
+    show: false,
+    statementIndex: 0,
+    conditionIndex: 0,
+  })
+
   // Add a new state variable to track which input (inp1 or inp2) is being targeted for At Candle
   const [targetInput, setTargetInput] = useState<"inp1" | "inp2">("inp1")
 
@@ -286,15 +306,16 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               ],
               Equity: strategyData.Equity || [],
               TradingType: strategyData.TradingType || undefined,
+              TradingSession: strategyData.TradingSession || undefined,
             },
           ]
 
           setStatements(loadedStatements)
 
           // Initialize waitStatus based on loaded strategy data
-          const newWaitStatus: Record<number, boolean> = {}
+          const newWaitStatus: Record<number, { inp1: boolean; inp2: boolean }> = {}
           loadedStatements.forEach((statement, statementIndex) => {
-            let hasWait = false
+            newWaitStatus[statementIndex] = { inp1: false, inp2: false }
 
             // Check each condition in the strategy for wait parameters
             statement.strategy.forEach((condition: StrategyCondition) => {
@@ -305,7 +326,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 "wait" in condition.inp1 &&
                 condition.inp1.wait === "yes"
               ) {
-                hasWait = true
+                newWaitStatus[statementIndex].inp1 = true
               }
 
               // Check inp2 for wait parameter
@@ -315,11 +336,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 "wait" in condition.inp2 &&
                 condition.inp2.wait === "yes"
               ) {
-                hasWait = true
+                newWaitStatus[statementIndex].inp2 = true
               }
             })
-
-            newWaitStatus[statementIndex] = hasWait
           })
 
           setWaitStatus(newWaitStatus)
@@ -757,6 +776,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             statementIndex,
             conditionIndex,
           })
+        } else if (condition.operator_name === "moving_up" || condition.operator_name === "moving_down") {
+          setShowMovingOperatorModal({
+            show: true,
+            statementIndex,
+            conditionIndex,
+          })
         }
         break
 
@@ -955,6 +980,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           const conditionOperator = { ...strategy[conditionIndex] }
           delete conditionOperator.operator_name
           delete conditionOperator.operator
+          delete conditionOperator.Operator
           strategy[conditionIndex] = conditionOperator
           break
         case "inp1":
@@ -1461,8 +1487,16 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         lastCondition.operator_name = getOperatorName(component)
         lastCondition.operator_display = component // Store the original display label
 
-        // Add default inp2 value for behaviors except moving_up and moving_down
-        if (lastCondition.operator_name !== "moving_up" && lastCondition.operator_name !== "moving_down") {
+        // Handle moving operators with new structure
+        if (lastCondition.operator_name === "moving_up" || lastCondition.operator_name === "moving_down") {
+          // Show moving operator settings modal
+          setShowMovingOperatorModal({
+            show: true,
+            statementIndex: activeStatementIndex,
+            conditionIndex: currentStatement.strategy.length - 1,
+          })
+        } else {
+          // Add default inp2 value for other behaviors
           // For atmost_above_pips and atmost_below_pips, add pips property
           if (
             lastCondition.operator_name === "atmost_above_pips" ||
@@ -1533,26 +1567,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       // Set the side based on Long/Short selection
       currentStatement.side = component.toLowerCase() === "long" ? "B" : "S"
     } else if (component.toLowerCase() === "wait") {
-      // Toggle wait status for the current statement
-      const newWaitStatus = {
-        ...waitStatus,
-        [statementIndex]: !waitStatus[statementIndex],
-      }
-      setWaitStatus(newWaitStatus)
-
-      // Also update the JSON structure for the most recent component
-      if (currentStatement.strategy.length > 0) {
-        const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-
-        // Find the most recent inp1 or inp2 to add wait to
-        if (lastCondition.inp2 && typeof lastCondition.inp2 === "object" && "type" in lastCondition.inp2) {
-          // Add wait to inp2 if it exists and is an object
-          lastCondition.inp2.wait = newWaitStatus[statementIndex] ? "yes" : undefined
-        } else if (lastCondition.inp1 && typeof lastCondition.inp1 === "object") {
-          // Add wait to inp1 if inp2 doesn't exist or isn't suitable
-          lastCondition.inp1.wait = newWaitStatus[statementIndex] ? "yes" : undefined
-        }
-      }
+      // This is now handled by individual wait buttons for inp1 and inp2
+      // The old single wait functionality is deprecated
+      console.log("Wait component is now handled by individual wait buttons for inp1 and inp2")
     } else if (component.toLowerCase() === "sl") {
       // Show SL settings modal
       setShowSLTPSettings({ show: true, type: "SL" })
@@ -1732,6 +1749,22 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         },
       }
     }
+    
+    if (
+      componentType === "operator" &&
+      condition.Operator &&
+      (condition.Operator.operator_name === "moving_up" || condition.Operator.operator_name === "moving_down")
+    ) {
+      return {
+        title: "Moving Operator",
+        details: {
+          operator: condition.Operator.operator_name.replace("_", " "),
+          logical_operator: condition.Operator.params.logical_operator,
+          value: condition.Operator.params.value,
+          unit: condition.Operator.params.unit,
+        },
+      }
+    }
     if (componentType === "accumulate" && condition.Accumulate?.forPeriod) {
       return {
         title: "Accumulate Condition",
@@ -1894,10 +1927,21 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           cash: 100000,
           nTrade_max: 1,
         },
+        // Add TradingSession if it exists in the current statement
+        ...(currentStatement.TradingSession && { TradingSession: currentStatement.TradingSession }),
       }
 
-      // Debug: Log the API statement to verify TradingType is included
+      // Debug: Log the API statement to verify TradingType and TradingSession are included
       console.log("🔍 DEBUG: API Statement being sent:", JSON.stringify(apiStatement, null, 2))
+      console.log("🔍 DEBUG: Strategy conditions with wait properties:")
+      apiStatement.strategy.forEach((condition: any, index: number) => {
+        console.log(`  Condition ${index}:`, {
+          inp1_wait: condition.inp1?.wait,
+          inp2_wait: condition.inp2?.wait,
+          inp1: condition.inp1,
+          inp2: condition.inp2
+        })
+      })
 
       let result
 
@@ -1960,10 +2004,21 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           cash: 100000,
           nTrade_max: 1,
         },
+        // Add TradingSession if it exists in the current statement
+        ...(currentStatement.TradingSession && { TradingSession: currentStatement.TradingSession }),
       }
 
-      // Debug: Log the API statement to verify TradingType is included
+      // Debug: Log the API statement to verify TradingType and TradingSession are included
       console.log("🔍 DEBUG: API Statement being sent (Proceed to Testing):", JSON.stringify(apiStatement, null, 2))
+      console.log("🔍 DEBUG: Strategy conditions with wait properties (Proceed to Testing):")
+      apiStatement.strategy.forEach((condition: any, index: number) => {
+        console.log(`  Condition ${index}:`, {
+          inp1_wait: condition.inp1?.wait,
+          inp2_wait: condition.inp2?.wait,
+          inp1: condition.inp1,
+          inp2: condition.inp2
+        })
+      })
 
       // Save the complete statement for local use
       localStorage.setItem("savedStrategy", JSON.stringify(apiStatement))
@@ -2016,45 +2071,52 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   // Update the toggleWaitParameter function to handle adding wait parameter if it doesn't exist
   // This function should be around line 1500-1550
 
-  function toggleWaitParameter(statementIndex: number, conditionIndex: number) {
+  function toggleWaitParameter(statementIndex: number, conditionIndex: number, inputType: "inp1" | "inp2") {
     const newStatements = [...statements]
     const currentStatement = newStatements[statementIndex]
     const condition = currentStatement.strategy[conditionIndex]
 
-    let waitValue = false
+    // Initialize waitStatus for this statement if it doesn't exist
+    if (!waitStatus[statementIndex]) {
+      waitStatus[statementIndex] = { inp1: false, inp2: false }
+    }
 
-    if (condition.inp1) {
+    if (inputType === "inp1" && condition.inp1) {
       // Add or toggle wait parameter for inp1
       if ("wait" in condition.inp1) {
         // Toggle if it already exists
         condition.inp1.wait = condition.inp1.wait === "yes" ? undefined : "yes"
-        waitValue = condition.inp1.wait === "yes"
       } else {
         // Add it if it doesn't exist
         if (typeof condition.inp1 === "object") {
           condition.inp1.wait = "yes"
-          waitValue = true
         }
       }
-    } else if (condition.inp2 && typeof condition.inp2 !== "string" && "type" in condition.inp2) {
+    } else if (inputType === "inp2" && condition.inp2 && typeof condition.inp2 !== "string" && "type" in condition.inp2) {
       // Add or toggle wait for inp2
       if ("wait" in condition.inp2) {
         // Toggle if it already exists
         condition.inp2.wait = condition.inp2.wait === "yes" ? undefined : "yes"
-        waitValue = condition.inp2.wait === "yes"
       } else {
         // Add it if it doesn't exist
         condition.inp2.wait = "yes"
-        waitValue = true
       }
     }
 
     // Update the waitStatus state to reflect the change
-    setWaitStatus({
-      ...waitStatus,
-      [statementIndex]: waitValue,
-    })
+    const newWaitStatus = { ...waitStatus }
+    if (!newWaitStatus[statementIndex]) {
+      newWaitStatus[statementIndex] = { inp1: false, inp2: false }
+    }
+    
+    // Update the specific input wait status
+    if (inputType === "inp1") {
+      newWaitStatus[statementIndex].inp1 = condition.inp1 && "wait" in condition.inp1 && condition.inp1.wait === "yes"
+    } else if (inputType === "inp2") {
+      newWaitStatus[statementIndex].inp2 = condition.inp2 && typeof condition.inp2 === "object" && "wait" in condition.inp2 && condition.inp2.wait === "yes"
+    }
 
+    setWaitStatus(newWaitStatus)
     setStatements(newStatements)
   }
 
@@ -2272,10 +2334,34 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             </button>
           </div>,
         )
+
+        // Add wait button for inp1
+        components.push(
+          <div key={`wait-inp1-${index}`} className="mr-2 mb-2">
+            <button
+              onClick={() => toggleWaitParameter(activeStatementIndex, index, "inp1")}
+              className={`px-2 py-1 text-xs rounded-md transition-all duration-200 ${
+                condition.inp1 && "wait" in condition.inp1 && condition.inp1.wait === "yes"
+                  ? "bg-[#85e1fe] text-black"
+                  : "bg-[#2A2D42] text-white hover:bg-[#3A3D47]"
+              }`}
+            >
+              Wait
+            </button>
+          </div>,
+        )
       }
 
       if (condition.operator_name) {
         // Behaviors with light gray background
+        let operatorDisplay = condition.operator_display || condition.operator_name.replace("_", " ")
+        
+        // For moving operators with new structure, show the full configuration
+        if (condition.Operator && (condition.operator_name === "moving_up" || condition.operator_name === "moving_down")) {
+          const params = condition.Operator.params
+          operatorDisplay = `${condition.Operator.operator_name.replace("_", " ")} ${params.logical_operator} ${params.value}${params.unit}`
+        }
+        
         components.push(
           <div
             key={`operator-${index}`}
@@ -2284,7 +2370,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             onMouseLeave={handleMouseLeave}
             onClick={() => handleComponentClick(activeStatementIndex, index, "operator")}
           >
-            {condition.operator_display || condition.operator_name.replace("_", " ")}
+            {operatorDisplay}
             <button
               onClick={(e) => {
                 e.stopPropagation()
@@ -2490,6 +2576,24 @@ if (
         }
       }
 
+      // Add wait button for inp2 if inp2 exists
+      if (condition.inp2 && typeof condition.inp2 === "object" && "type" in condition.inp2) {
+        components.push(
+          <div key={`wait-inp2-${index}`} className="mr-2 mb-2">
+            <button
+              onClick={() => toggleWaitParameter(activeStatementIndex, index, "inp2")}
+              className={`px-2 py-1 text-xs rounded-md transition-all duration-200 ${
+                condition.inp2 && "wait" in condition.inp2 && condition.inp2.wait === "yes"
+                  ? "bg-[#85e1fe] text-black"
+                  : "bg-[#2A2D42] text-white hover:bg-[#3A3D47]"
+              }`}
+            >
+              Wait
+            </button>
+          </div>,
+        )
+      }
+
       // Render At Candle for inp2 if it has index
       if (condition.inp2 && typeof condition.inp2 === "object" && condition.inp2.index !== undefined) {
         const candleNumber = Math.abs(condition.inp2.index || 1)
@@ -2650,8 +2754,8 @@ if (
     }
   }, [statements]) // Re-add event listener when statements change
 
-  // Add a new state variable to track wait status for each statement after the existing state declarations:
-  const [waitStatus, setWaitStatus] = useState<Record<number, boolean>>({})
+  // Track wait status for each input (inp1 and inp2) separately
+  const [waitStatus, setWaitStatus] = useState<Record<number, { inp1: boolean; inp2: boolean }>>({})
 
   // Add state to store the latest RSI MA settings
   const [rsiMaSettings, setRsiMaSettings] = useState({
@@ -2783,15 +2887,25 @@ if (
                   </span>
                 </div>
                 <div className="relative flex items-center gap-4">
-                  {/* Wait for closes only indicator - only show when wait is active */}
-                  {waitStatus[index] && (
-                    <div className="flex items-center gap-2 text-sm text-gray-300">
-                      <div className="w-4 h-4 border border-gray-300 bg-transparent flex items-center justify-center">
-                        <div className="w-2 h-2 bg-gray-300"></div>
-                      </div>
-                      <label htmlFor={`wait-${index}`} className="text-sm text-gray-300">
-                        Wait for closes only
-                      </label>
+                  {/* Wait for closes only indicators - show for inp1 and inp2 separately */}
+                  {(waitStatus[index]?.inp1 || waitStatus[index]?.inp2) && (
+                    <div className="flex items-center gap-4 text-sm text-gray-300">
+                      {waitStatus[index]?.inp1 && (
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 border border-gray-300 bg-transparent flex items-center justify-center">
+                            <div className="w-2 h-2 bg-gray-300"></div>
+                          </div>
+                          <span>Wait inp1</span>
+                        </div>
+                      )}
+                      {waitStatus[index]?.inp2 && (
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 border border-gray-300 bg-transparent flex items-center justify-center">
+                            <div className="w-2 h-2 bg-gray-300"></div>
+                          </div>
+                          <span>Wait inp2</span>
+                        </div>
+                      )}
                     </div>
                   )}
                   <button
@@ -4580,6 +4694,49 @@ if (
               }
             }
             setStatements(newStatements)
+          }}
+        />
+      )}
+
+      {/* Moving Operator Settings Modal */}
+      {showMovingOperatorModal.show && (
+        <MovingOperatorSettingsModal
+          onClose={() => setShowMovingOperatorModal({ show: false, statementIndex: 0, conditionIndex: 0 })}
+          operatorType={(() => {
+            const condition = statements[showMovingOperatorModal.statementIndex]?.strategy[showMovingOperatorModal.conditionIndex]
+            return condition?.operator_name as "moving_up" | "moving_down"
+          })()}
+          initialSettings={(() => {
+            const condition = statements[showMovingOperatorModal.statementIndex]?.strategy[showMovingOperatorModal.conditionIndex]
+            if (condition?.Operator) {
+              return {
+                logical_operator: condition.Operator.params.logical_operator,
+                value: condition.Operator.params.value,
+                unit: condition.Operator.params.unit,
+              }
+            }
+            return undefined
+          })()}
+          onSave={(settings) => {
+            const newStatements = [...statements]
+            const condition = newStatements[showMovingOperatorModal.statementIndex].strategy[showMovingOperatorModal.conditionIndex]
+            const operatorType = condition.operator_name as "moving_up" | "moving_down"
+            
+            // Update the operator structure
+            condition.Operator = {
+              operator_name: operatorType,
+              params: {
+                logical_operator: settings.logical_operator,
+                value: settings.value,
+                unit: settings.unit,
+              },
+            }
+            
+            setStatements(newStatements)
+            setShowMovingOperatorModal({ show: false, statementIndex: 0, conditionIndex: 0 })
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
           }}
         />
       )}
