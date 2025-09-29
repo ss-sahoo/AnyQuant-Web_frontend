@@ -24,6 +24,12 @@ import {
   getWalkForwardOptimizationResultDetail,
   deleteWalkForwardOptimizationResult,
   getStrategyWalkForwardOptimizationResults,
+  // New optimization droplets API functions
+  getOptimizationCosts,
+  createOptimizationJob,
+  getOptimizationJob,
+  cancelOptimizationJob,
+  listOptimizationJobs,
 } from "../AllApiCalls" // Import new functions
 import { X } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
@@ -38,6 +44,9 @@ import { WalkForwardOptimizationResults } from '@/components/walk-forward-optimi
 import { WalkForwardOptimisationView } from "@/components/walk-forward-optimization-results-view";
 import { TradesSummary } from "@/components/trades-summary";
 import { MetaAPIConfig, type MetaAPIConfig as MetaAPIConfigType } from "@/components/metaapi-config";
+// New optimization droplets components
+import { OptimizationCostDialog } from "@/components/optimization-cost-dialog"
+import { OptimizationJobStatus } from "@/components/optimization-job-status";
 
 export default function StrategyTestingPage() {
   const router = useRouter()
@@ -1409,7 +1418,245 @@ export default function StrategyTestingPage() {
     }
   }, [optimisationResult]);
 
+  // Optimization Droplets states
+  const [showCostDialog, setShowCostDialog] = useState(false)
+  const [showJobStatus, setShowJobStatus] = useState(false)
+  const [currentOptimizationJob, setCurrentOptimizationJob] = useState<any>(null)
+  const [optimizationType, setOptimizationType] = useState<'regular' | 'walk_forward'>('regular')
+  const [jobPollingInterval, setJobPollingInterval] = useState<NodeJS.Timeout | null>(null)
 
+  // New Optimization Droplets Flow Functions
+  
+  /**
+   * Step 1: Handle optimization with droplets - show cost dialog
+   */
+  const handleOptimizationWithDroplets = async (type: 'regular' | 'walk_forward') => {
+    setOptimizationType(type)
+    setShowCostDialog(true)
+  }
+
+  /**
+   * Step 2 & 3: Handle cost confirmation and create optimization job
+   */
+  const handleCostConfirmation = async () => {
+    setShowCostDialog(false)
+    
+    if (!parsedStatement) {
+      showToast("Strategy statement is missing or not parsed!", 'error')
+      return
+    }
+
+    if (requiredTimeframes.length > uploadedFiles.length) {
+      showToast("Not enough files uploaded for the required timeframes", 'error')
+      return
+    }
+
+    try {
+      // Prepare files
+      const timeframeFiles: Record<string, File> = {}
+      requiredTimeframes.forEach((timeframe, index) => {
+        const filename = uploadedFiles[index]
+        if (filename && fileObjects[filename]) {
+          timeframeFiles[timeframe] = fileObjects[filename]
+        }
+      })
+
+      // Add unmatched remaining files
+      uploadedFiles.forEach((filename) => {
+        if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
+          const key = filename.split(".")[0]
+          timeframeFiles[key] = fileObjects[filename]
+        }
+      })
+
+      // Get optimisation form settings
+      const optimisationFormString = localStorage.getItem("optimisation_form")
+      let parametersObject: Record<string, any> = {}
+      let constraintsArray: string[] = []
+      
+      if (optimisationFormString) {
+        try {
+          const optimisationForm = JSON.parse(optimisationFormString)
+          parametersObject = optimisationForm.Parameters || {}
+          constraintsArray = optimisationForm.Constraints || []
+        } catch (error) {
+          console.error("Error parsing optimisation_form from localStorage:", error)
+        }
+      }
+
+      // Construct optimisation statement
+      const hyperParameters = {
+        population_size: Number(populationSize),
+        generations: Number(generations),
+        mutation_rate: Number(mutationRate),
+        tournament_size: Number(tournamentSize),
+      }
+
+      const misc = {
+        Algorithm: selectedAlgorithm,
+        Maximise: selectedMaximiseOption,
+        "Hyper-parameters": hyperParameters,
+      }
+
+      const optimiserParameters = {
+        Parameters: parametersObject,
+        Misc: misc,
+        Constraints: constraintsArray,
+      }
+
+      const optimisationStatement = {
+        ...parsedStatement,
+        optimisation_misc: misc,
+        optimiser_parameters: optimiserParameters,
+      }
+
+      // Prepare API call parameters
+      const apiParams: any = {
+        statement: optimisationStatement,
+        files: timeframeFiles,
+        optimization_type: optimizationType,
+      }
+
+      if (strategy_id && !isNaN(Number(strategy_id))) {
+        apiParams.strategy_statement_id = Number(strategy_id)
+      }
+
+      // Add walk forward settings if needed
+      if (optimizationType === 'walk_forward') {
+        const walkForwardSettingsString = localStorage.getItem("walk_forward_settings")
+        let walkForwardSettings = {
+          warmup_bars: 15,
+          lookback_bars: 1000,
+          validation_bars: 200,
+          anchor: true,
+        }
+
+        if (walkForwardSettingsString) {
+          try {
+            walkForwardSettings = JSON.parse(walkForwardSettingsString)
+          } catch (error) {
+            console.error("Error parsing walk forward settings:", error)
+          }
+        }
+
+        apiParams.walk_forward_setting = walkForwardSettings
+      }
+
+      // Step 3: Create optimization job
+      const jobResult = await createOptimizationJob(apiParams)
+      
+      console.log("Optimization job created:", jobResult)
+      
+      setCurrentOptimizationJob(jobResult)
+      setShowJobStatus(true)
+      
+      // Step 4: Start polling for job status
+      startJobPolling(jobResult.job_id)
+      
+      showToast("Optimization job created successfully!", 'success')
+      
+    } catch (error: any) {
+      // Error Handling: 403, 400, 500, Network errors
+      if (error.message.includes('401') || error.message.includes('403')) {
+        showToast("Authentication failed. Please login again.", 'error')
+        // Redirect to login
+        router.push('/auth')
+      } else if (error.message.includes('400')) {
+        showToast("Invalid parameters: " + (error.message || "Unknown error"), 'error')
+      } else if (error.message.includes('500')) {
+        showToast("Server error. Please try again later.", 'error')
+      } else {
+        showToast("Connection failed: " + (error.message || "Unknown error"), 'error')
+      }
+      console.error("Error creating optimization job:", error)
+    }
+  }
+
+  /**
+   * Step 4: Start job status polling (every 5 seconds)
+   */
+  const startJobPolling = (jobId: string) => {
+    // Clear any existing polling
+    if (jobPollingInterval) {
+      clearInterval(jobPollingInterval)
+      setJobPollingInterval(null)
+    }
+
+    const interval = setInterval(async () => {
+      try {
+        const jobStatus = await getOptimizationJob(jobId)
+        setCurrentOptimizationJob(jobStatus)
+        
+        // Stop polling when job is finished
+        if (['completed', 'failed', 'cancelled'].includes(jobStatus.status)) {
+          clearInterval(interval)
+          setJobPollingInterval(null)
+          
+          if (jobStatus.status === 'completed') {
+            showToast("Optimization completed successfully!", 'success')
+            
+            // Step 5: Display results
+            if (jobStatus.result) {
+              setOptimisationResult(jobStatus.result)
+              setShowOptimisationResults(true)
+              setActiveTab("optimisation")
+              
+              if (jobStatus.result.heatmap_plot_html) {
+                setPlotHeatmapHtml(jobStatus.result.heatmap_plot_html)
+              }
+              if (jobStatus.result.trades_plot_html) {
+                setPlotHtml(jobStatus.result.trades_plot_html)
+              }
+            }
+          } else if (jobStatus.status === 'failed') {
+            showToast("Optimization failed: " + (jobStatus.error_message || "Unknown error"), 'error')
+          } else if (jobStatus.status === 'cancelled') {
+            showToast("Optimization was cancelled", 'warning')
+          }
+        }
+      } catch (error) {
+        console.error("Error polling job status:", error)
+        // Don't stop polling on error, continue trying
+      }
+    }, 5000) // Poll every 5 seconds
+
+    setJobPollingInterval(interval)
+  }
+
+  /**
+   * Step 6: Cancel optimization job
+   */
+  const handleCancelOptimizationJob = async () => {
+    if (!currentOptimizationJob?.job_id) return
+    
+    try {
+      await cancelOptimizationJob(currentOptimizationJob.job_id)
+      showToast("Optimization job cancelled", 'warning')
+      
+      // Stop polling
+      if (jobPollingInterval) {
+        clearInterval(jobPollingInterval)
+        setJobPollingInterval(null)
+      }
+      
+      // Update job status
+      setCurrentOptimizationJob({
+        ...currentOptimizationJob,
+        status: 'cancelled'
+      })
+    } catch (error: any) {
+      showToast("Failed to cancel optimization job: " + (error.message || "Unknown error"), 'error')
+    }
+  }
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (jobPollingInterval) {
+        clearInterval(jobPollingInterval)
+      }
+    }
+  }, [jobPollingInterval])
 
   return (
     <AuthGuard>
@@ -1785,6 +2032,7 @@ export default function StrategyTestingPage() {
                       parsedStatement={parsedStatement} // Strategy statement for API calls
                       onShowWalkForwardResults={() => setShowWalkForwardOptimizationResults(true)}
                       onRunWalkForwardOptimisation={() => handleWalkForwardOptimisation(false)}
+                      onRunWalkForwardOptimisationDroplets={() => handleOptimizationWithDroplets('walk_forward')}
                       isLoading3={isLoading3}
                     />
                   </>
@@ -1838,7 +2086,14 @@ export default function StrategyTestingPage() {
                     className="flex-1 py-3 bg-[#141721] rounded-full text-white hover:bg-[#2B2E38]"
                     disabled={isLoading2}
                   >
-                    Run Optimisation
+                    Run Optimisation (Legacy)
+                  </button>
+                  <button
+                    onClick={() => handleOptimizationWithDroplets('regular')}
+                    className="flex-1 py-3 bg-[#85e1fe] text-black rounded-full hover:bg-[#6bcae2] font-semibold"
+                    disabled={isLoading2}
+                  >
+                    Run Optimization (Droplets)
                   </button>
                 </div>
               </div>
@@ -2185,6 +2440,22 @@ export default function StrategyTestingPage() {
             </div>
           </div>
         )}
+
+        {/* Optimization Cost Dialog */}
+        <OptimizationCostDialog
+          isOpen={showCostDialog}
+          onClose={() => setShowCostDialog(false)}
+          onConfirm={handleCostConfirmation}
+          optimizationType={optimizationType}
+        />
+
+        {/* Optimization Job Status */}
+        <OptimizationJobStatus
+          isOpen={showJobStatus}
+          onClose={() => setShowJobStatus(false)}
+          job={currentOptimizationJob}
+          onCancel={handleCancelOptimizationJob}
+        />
       </div>
     </AuthGuard>
   )
