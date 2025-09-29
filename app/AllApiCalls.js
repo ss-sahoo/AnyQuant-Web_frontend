@@ -838,3 +838,153 @@ export const getStrategyWalkForwardOptimizationResults = async (strategyStatemen
   return response.json();
 };
 
+// Optimization Droplets API Functions
+
+/**
+ * Step 2: Get cost estimates for optimization before starting
+ * Endpoint: GET /api/optimization-costs/
+ * Purpose: Show user estimated costs before starting optimization
+ * Headers: Authorization: Bearer {token}
+ * Response: Cost estimates for regular vs walk-forward optimization
+ */
+export const getOptimizationCosts = async () => {
+  const response = await Fetch("/api/optimization-costs/", {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get optimization costs");
+  }
+
+  return response.json();
+};
+
+/**
+ * Step 3: Create optimization job (start optimization with droplet)
+ * Endpoint: POST /api/optimization-jobs/create/
+ * Purpose: Start the optimization process
+ * Headers: Authorization: Bearer {token}, Content-Type: application/json
+ * Response: Job ID, droplet ID, estimated cost
+ */
+export const createOptimizationJob = async ({ statement, files, optimization_type = "regular", strategy_statement_id = null, walk_forward_setting = null }) => {
+  const formData = new FormData();
+
+  // Attach the statement JSON as a string
+  formData.append("statement", JSON.stringify(statement));
+
+  // Attach optimization type
+  formData.append("optimization_type", optimization_type);
+
+  // Attach strategy statement ID if provided
+  if (strategy_statement_id) {
+    formData.append("strategy_statement_id", strategy_statement_id);
+  }
+
+  // Attach walk forward settings if provided
+  if (walk_forward_setting) {
+    formData.append("walk_forward_setting", JSON.stringify(walk_forward_setting));
+  }
+
+  // Attach each file using its timeframe key
+  for (const [timeframe, file] of Object.entries(files)) {
+    formData.append(timeframe, file);
+  }
+
+  const response = await Fetch("/api/optimization-jobs/create/", {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to create optimization job");
+  }
+
+  return response.json();
+};
+
+/**
+ * Step 4: Get optimization job status and results (for polling)
+ * Endpoint: GET /api/optimization-jobs/{job_id}/
+ * Purpose: Check job progress every 5-10 seconds
+ * Headers: Authorization: Bearer {token}
+ * Status Values: creating_droplet, running, completed, failed, cancelled
+ */
+export const getOptimizationJob = async (jobId) => {
+  const response = await Fetch(`/api/optimization-jobs/${jobId}/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get optimization job");
+  }
+
+  return response.json();
+};
+
+/**
+ * Step 6: Cancel optimization job
+ * Endpoint: POST /api/optimization-jobs/{job_id}/cancel/
+ * Purpose: Allow user to cancel running optimization
+ * Headers: Authorization: Bearer {token}
+ * Response: Confirmation of cancellation
+ */
+export const cancelOptimizationJob = async (jobId) => {
+  const response = await Fetch(`/api/optimization-jobs/${jobId}/cancel/`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to cancel optimization job");
+  }
+
+  return response.json();
+};
+
+/**
+ * Step 7: List all optimization jobs for the user
+ * Endpoint: GET /api/optimization-jobs/
+ * Purpose: Show user's optimization history
+ * Headers: Authorization: Bearer {token}
+ * Query Params: limit=20, offset=0 (for pagination)
+ */
+export const listOptimizationJobs = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+  
+  if (params.limit) {
+    queryParams.append('limit', params.limit);
+  }
+  if (params.offset) {
+    queryParams.append('offset', params.offset);
+  }
+  if (params.status) {
+    queryParams.append('status', params.status);
+  }
+
+  const response = await Fetch(`/api/optimization-jobs/?${queryParams}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to list optimization jobs");
+  }
+
+  return response.json();
+};
+
