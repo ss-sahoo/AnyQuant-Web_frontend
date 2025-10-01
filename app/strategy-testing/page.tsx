@@ -1517,6 +1517,12 @@ export default function StrategyTestingPage() {
         optimization_type: optimizationType,
       }
 
+      // Add CSV file explicitly (use the first uploaded file)
+      const firstFile = Object.values(timeframeFiles)[0]
+      if (firstFile) {
+        apiParams.csvFile = firstFile
+      }
+
       if (strategy_id && !isNaN(Number(strategy_id))) {
         apiParams.strategy_statement_id = Number(strategy_id)
       }
