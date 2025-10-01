@@ -870,7 +870,7 @@ export const getOptimizationCosts = async () => {
  * Headers: Authorization: Bearer {token}, Content-Type: application/json
  * Response: Job ID, droplet ID, estimated cost
  */
-export const createOptimizationJob = async ({ statement, files, optimization_type = "regular", strategy_statement_id = null, walk_forward_setting = null }) => {
+export const createOptimizationJob = async ({ statement, files, optimization_type = "regular", strategy_statement_id = null, walk_forward_setting = null, csvFile = null }) => {
   const formData = new FormData();
 
   // Attach the statement JSON as a string
@@ -892,6 +892,18 @@ export const createOptimizationJob = async ({ statement, files, optimization_typ
   // Attach each file using its timeframe key
   for (const [timeframe, file] of Object.entries(files)) {
     formData.append(timeframe, file);
+  }
+
+  // Attach the CSV file for the backend
+  if (csvFile) {
+    formData.append("csvFile", csvFile);
+  } else {
+    // Fallback: use the first file from the files object if csvFile not provided
+    const fileEntries = Object.entries(files);
+    if (fileEntries.length > 0) {
+      const [, firstFile] = fileEntries[0];
+      formData.append("csvFile", firstFile);
+    }
   }
 
   const response = await Fetch("/api/optimization-jobs/create/", {
