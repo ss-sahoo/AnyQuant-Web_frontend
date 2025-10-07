@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Sidebar } from "@/components/sidebar"
 import { MobileSidebar } from "@/components/mobile-sidebar"
@@ -9,7 +9,7 @@ import { getOptimizationJob } from "../AllApiCalls"
 import { ArrowLeft, RefreshCw } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
 
-export default function OptimizationResultsPage() {
+function OptimizationResultsContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const jobId = searchParams.get('job_id')
@@ -282,14 +282,13 @@ export default function OptimizationResultsPage() {
   };
 
   return (
-    <AuthGuard>
-      <div className="flex min-h-screen bg-[#121420] text-white">
-        <div className="hidden md:block">
-          <Sidebar currentPage="home" />
-        </div>
-        <MobileSidebar currentPage="home" />
+    <div className="flex min-h-screen bg-[#121420] text-white">
+      <div className="hidden md:block">
+        <Sidebar currentPage="home" />
+      </div>
+      <MobileSidebar currentPage="home" />
 
-        <main className="flex-1 p-6 ml-0 md:ml-[63px]">
+      <main className="flex-1 p-6 ml-0 md:ml-[63px]">
           {/* Header with Back Button */}
           <div className="mb-6">
             <button
@@ -541,8 +540,24 @@ export default function OptimizationResultsPage() {
               )}
             </div>
           )}
-        </main>
-      </div>
+      </main>
+    </div>
+  )
+}
+
+export default function OptimizationResultsPage() {
+  return (
+    <AuthGuard>
+      <Suspense fallback={
+        <div className="flex min-h-screen bg-[#121420] text-white items-center justify-center">
+          <div className="flex flex-col items-center">
+            <RefreshCw className="w-16 h-16 animate-spin text-[#85e1fe] mb-4" />
+            <p className="text-xl text-gray-400">Loading optimization results...</p>
+          </div>
+        </div>
+      }>
+        <OptimizationResultsContent />
+      </Suspense>
     </AuthGuard>
   )
 }
