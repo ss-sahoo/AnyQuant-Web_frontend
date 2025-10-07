@@ -19,7 +19,7 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
   const handleItemClick = (item: any) => {
     if (item.through_droplet) {
       // Redirect to optimization-results page for droplet optimizations
-      router.push(`/optimization-results?job_id=${item.id}`);
+      router.push(`/optimization-results?job_id=${item.id}&type=droplet`);
       onClose(); // Close the modal
     } else {
       // Use the legacy onSelect handler for non-droplet optimizations

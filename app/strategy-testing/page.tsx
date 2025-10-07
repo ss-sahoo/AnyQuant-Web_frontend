@@ -1688,9 +1688,9 @@ export default function StrategyTestingPage() {
       
       showToast("Optimization job created! Redirecting to results page...", 'success')
       
-      // Navigate to results page
+      // Navigate to results page with type parameter
       setTimeout(() => {
-        router.push(`/optimization-results?job_id=${jobResult.job_id}`)
+        router.push(`/optimization-results?job_id=${jobResult.job_id}&type=droplet`)
       }, 500)
       
     } catch (error: any) {

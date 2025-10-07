@@ -5,7 +5,7 @@ import { Suspense, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Sidebar } from "@/components/sidebar"
 import { MobileSidebar } from "@/components/mobile-sidebar"
-import { getOptimizationJob } from "../AllApiCalls"
+import { getOptimizationJob, getOptimizationResultDetail } from "../AllApiCalls"
 import { ArrowLeft, RefreshCw } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
 
@@ -13,6 +13,7 @@ function OptimizationResultsContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const jobId = searchParams.get('job_id')
+  const type = searchParams.get('type') // 'droplet' or null/undefined for legacy
 
   const [jobData, setJobData] = useState<any>(null)
   const [optimisationResult, setOptimisationResult] = useState<any>(null)
@@ -21,6 +22,7 @@ function OptimizationResultsContent() {
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null)
   const [selectedTab, setSelectedTab] = useState<'results' | 'graph' | 'report'>('results')
   const [selectedRow, setSelectedRow] = useState<any>(null)
+  const isDroplet = type === 'droplet'
 
   // Simple toast notification
   const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => {
@@ -46,8 +48,18 @@ function OptimizationResultsContent() {
     }
 
     try {
-      const data = await getOptimizationJob(jobId)
-      console.log("📊 Job data:", data)
+      let data;
+      
+      if (isDroplet) {
+        // For droplet optimizations, call the jobs API
+        data = await getOptimizationJob(jobId)
+        console.log("📊 Droplet job data:", data)
+      } else {
+        // For legacy optimizations, call the results API
+        data = await getOptimizationResultDetail(jobId)
+        console.log("📊 Legacy optimization data:", data)
+      }
+      
       setJobData(data)
 
       const normalizedStatus = (data.status || '').toLowerCase()
@@ -82,7 +94,7 @@ function OptimizationResultsContent() {
         setError(data.error_message || `Optimization ${data.status}`)
         setIsLoading(false)
       }
-      // If still running, keep polling
+      // If still running, keep polling (only for droplet)
     } catch (err: any) {
       setError(err?.message || "Failed to fetch job data")
       setIsLoading(false)
@@ -95,29 +107,32 @@ function OptimizationResultsContent() {
 
     fetchJobData()
 
-    const interval = setInterval(async () => {
-      if (!jobId) return
-      
-      try {
-        const data = await getOptimizationJob(jobId)
-        const normalizedStatus = (data.status || '').toLowerCase()
+    // Only poll for droplet optimizations
+    if (isDroplet) {
+      const interval = setInterval(async () => {
+        if (!jobId) return
         
-        if (['completed', 'failed', 'cancelled', 'success'].includes(normalizedStatus)) {
-          clearInterval(interval)
-          setPollingInterval(null)
-          fetchJobData()
+        try {
+          const data = await getOptimizationJob(jobId)
+          const normalizedStatus = (data.status || '').toLowerCase()
+          
+          if (['completed', 'failed', 'cancelled', 'success'].includes(normalizedStatus)) {
+            clearInterval(interval)
+            setPollingInterval(null)
+            fetchJobData()
+          }
+        } catch (err) {
+          console.error("Polling error:", err)
         }
-      } catch (err) {
-        console.error("Polling error:", err)
+      }, 5000)
+
+      setPollingInterval(interval)
+
+      return () => {
+        if (interval) clearInterval(interval)
       }
-    }, 5000)
-
-    setPollingInterval(interval)
-
-    return () => {
-      if (interval) clearInterval(interval)
     }
-  }, [jobId])
+  }, [jobId, isDroplet])
 
   // Helper function to generate convergence plot HTML
   const generateConvergencePlotHTML = (convergenceData: any[]) => {
@@ -306,9 +321,20 @@ function OptimizationResultsContent() {
             <div className="mb-6 p-6 bg-[#141721] rounded-lg border border-gray-700">
               <div className="flex justify-between items-start mb-4">
                 <div>
-                  <h2 className="text-xl font-semibold text-white mb-2">{jobData.strategy_name}</h2>
+                  <h2 className="text-xl font-semibold text-white mb-2">{jobData.strategy_name || jobData.strategy_statement_name}</h2>
                   <p className="text-gray-400">Job ID: {jobData.id}</p>
-                  <p className="text-gray-400">Type: {jobData.type}</p>
+                  <p className="text-gray-400">Type: {isDroplet ? jobData.type : 'Legacy Optimization'}</p>
+                  <p className="text-gray-400">
+                    Method: {isDroplet ? (
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-[#85e1fe] text-black ml-2">
+                        Droplet
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-gray-600 text-white ml-2">
+                        Legacy
+                      </span>
+                    )}
+                  </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`px-4 py-2 rounded-full text-sm font-semibold ${
