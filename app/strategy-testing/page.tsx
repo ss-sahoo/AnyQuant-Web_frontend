@@ -27,9 +27,6 @@ import {
   // New optimization droplets API functions
   getOptimizationCosts,
   createOptimizationJob,
-  getOptimizationJob,
-  cancelOptimizationJob,
-  listOptimizationJobs,
 } from "../AllApiCalls" // Import new functions
 import { X } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
@@ -46,7 +43,6 @@ import { TradesSummary } from "@/components/trades-summary";
 import { MetaAPIConfig, type MetaAPIConfig as MetaAPIConfigType } from "@/components/metaapi-config";
 // New optimization droplets components
 import { OptimizationCostDialog } from "@/components/optimization-cost-dialog"
-import { OptimizationJobStatus } from "@/components/optimization-job-status";
 
 export default function StrategyTestingPage() {
   const router = useRouter()
@@ -1560,10 +1556,7 @@ export default function StrategyTestingPage() {
 
   // Optimization Droplets states
   const [showCostDialog, setShowCostDialog] = useState(false)
-  const [showJobStatus, setShowJobStatus] = useState(false)
-  const [currentOptimizationJob, setCurrentOptimizationJob] = useState<any>(null)
   const [optimizationType, setOptimizationType] = useState<'regular' | 'walk_forward'>('regular')
-  const [jobPollingInterval, setJobPollingInterval] = useState<NodeJS.Timeout | null>(null)
 
   // New Optimization Droplets Flow Functions
   
@@ -1693,13 +1686,12 @@ export default function StrategyTestingPage() {
       
       console.log("Optimization job created:", jobResult)
       
-      setCurrentOptimizationJob(jobResult)
-      setShowJobStatus(true)
+      showToast("Optimization job created! Redirecting to results page...", 'success')
       
-      // Step 4: Start polling for job status
-      startJobPolling(jobResult.job_id)
-      
-      showToast("Optimization job created successfully!", 'success')
+      // Navigate to results page
+      setTimeout(() => {
+        router.push(`/optimization-results?job_id=${jobResult.job_id}`)
+      }, 500)
       
     } catch (error: any) {
       // Error Handling: 403, 400, 500, Network errors
@@ -1718,117 +1710,6 @@ export default function StrategyTestingPage() {
     }
   }
 
-  /**
-   * Step 4: Start job status polling (every 5 seconds)
-   */
-  const startJobPolling = (jobId: string) => {
-    // Clear any existing polling
-    if (jobPollingInterval) {
-      clearInterval(jobPollingInterval)
-      setJobPollingInterval(null)
-    }
-
-    const interval = setInterval(async () => {
-      try {
-        const jobStatus = await getOptimizationJob(jobId)
-        console.log("📊 Job status update:", jobStatus)
-        setCurrentOptimizationJob(jobStatus)
-        
-        // Normalize status to lowercase for comparison
-        const normalizedStatus = (jobStatus.status || '').toLowerCase()
-        
-        // Stop polling when job is finished (check for both capitalized and lowercase)
-        if (['completed', 'failed', 'cancelled', 'success'].includes(normalizedStatus)) {
-          console.log("✅ Job finished with status:", jobStatus.status, "- Stopping polling")
-          clearInterval(interval)
-          setJobPollingInterval(null)
-          
-          if (['completed', 'success'].includes(normalizedStatus)) {
-            showToast("Optimization completed successfully!", 'success')
-            
-            // Step 5: Display results - handle the full results object
-            if (jobStatus.results) {
-              // Transform the results to match the expected format
-              const transformedResult = {
-                convergence_data: jobStatus.results.convergence_data || [],
-                optimization_heatmap_data: jobStatus.results.optimization_heatmap_data || [],
-                trade_results: jobStatus.results.trade_results || [],
-                full_optimization_results: jobStatus.results.convergence_data || [],
-                table: jobStatus.results.convergence_data || [],
-                optimiser_file: jobStatus.results.optimiser_file,
-                output_dir: jobStatus.results.output_dir,
-                time_taken: jobStatus.results.time_taken,
-                num_trades: jobStatus.results.num_trades,
-                final_equity: jobStatus.results.final_equity,
-                sharpe_ratio: jobStatus.results.sharpe_ratio,
-                sortino_ratio: jobStatus.results.sortino_ratio,
-                calmar_ratio: jobStatus.results.calmar_ratio,
-              }
-              
-              console.log("📈 Transformed optimization result:", transformedResult)
-              setOptimisationResult(transformedResult)
-              setShowOptimisationResults(true)
-              setActiveTab("optimisation")
-              setShowPreviousOptimisationView(false)
-              
-              // Add to optimization results list
-              setOptimizationResults(prev => Array.isArray(prev) ? [...prev, transformedResult] : [transformedResult])
-              
-              // Note: plots are generated from the data in the frontend
-              // We'll need to generate plots from convergence_data and optimization_heatmap_data
-            }
-          } else if (normalizedStatus === 'failed') {
-            showToast("Optimization failed: " + (jobStatus.error_message || "Unknown error"), 'error')
-          } else if (normalizedStatus === 'cancelled') {
-            showToast("Optimization was cancelled", 'warning')
-          }
-        }
-      } catch (error: any) {
-        console.error("Error polling job status:", error)
-        // Stop polling on error to prevent infinite loops
-        clearInterval(interval)
-        setJobPollingInterval(null)
-        showToast("Error checking job status: " + (error?.message || "Unknown error"), 'error')
-      }
-    }, 5000) // Poll every 5 seconds
-
-    setJobPollingInterval(interval)
-  }
-
-  /**
-   * Step 6: Cancel optimization job
-   */
-  const handleCancelOptimizationJob = async () => {
-    if (!currentOptimizationJob?.job_id) return
-    
-    try {
-      await cancelOptimizationJob(currentOptimizationJob.job_id)
-      showToast("Optimization job cancelled", 'warning')
-      
-      // Stop polling
-      if (jobPollingInterval) {
-        clearInterval(jobPollingInterval)
-        setJobPollingInterval(null)
-      }
-      
-      // Update job status
-      setCurrentOptimizationJob({
-        ...currentOptimizationJob,
-        status: 'cancelled'
-      })
-    } catch (error: any) {
-      showToast("Failed to cancel optimization job: " + (error.message || "Unknown error"), 'error')
-    }
-  }
-
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => {
-      if (jobPollingInterval) {
-        clearInterval(jobPollingInterval)
-      }
-    }
-  }, [jobPollingInterval])
 
   return (
     <AuthGuard>
@@ -2029,56 +1910,6 @@ export default function StrategyTestingPage() {
 
                 {activeTab === "optimisation" && showOptimisationResults && optimisationResult && (
                   <div className="p-6 bg-[#000000] text-white min-h-[600px]">
-                    {/* Optimization Job Summary */}
-                    {currentOptimizationJob && (
-                      <div className="mb-6 p-4 bg-[#141721] rounded-md border border-gray-700">
-                        <h3 className="text-lg font-semibold text-white mb-3">Optimization Job Summary</h3>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                          <div>
-                            <p className="text-gray-400 text-sm">Status</p>
-                            <p className="text-white font-semibold">{currentOptimizationJob.status}</p>
-                          </div>
-                          <div>
-                            <p className="text-gray-400 text-sm">Time Taken</p>
-                            <p className="text-white font-semibold">
-                              {optimisationResult.time_taken || 
-                               (currentOptimizationJob.runtime_minutes ? `${currentOptimizationJob.runtime_minutes} min` : '-')}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-gray-400 text-sm">Estimated Cost</p>
-                            <p className="text-white font-semibold">${currentOptimizationJob.estimated_cost || '-'}</p>
-                          </div>
-                          <div>
-                            <p className="text-gray-400 text-sm">Actual Cost</p>
-                            <p className="text-white font-semibold">${currentOptimizationJob.actual_cost || '-'}</p>
-                          </div>
-                          <div>
-                            <p className="text-gray-400 text-sm">Final Equity</p>
-                            <p className="text-white font-semibold">
-                              ${optimisationResult.final_equity?.toFixed(2) || '-'}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-gray-400 text-sm">Total Trades</p>
-                            <p className="text-white font-semibold">{optimisationResult.num_trades || '-'}</p>
-                          </div>
-                          <div>
-                            <p className="text-gray-400 text-sm">Sharpe Ratio</p>
-                            <p className="text-white font-semibold">
-                              {optimisationResult.sharpe_ratio?.toFixed(2) || '-'}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-gray-400 text-sm">Calmar Ratio</p>
-                            <p className="text-white font-semibold">
-                              {optimisationResult.calmar_ratio?.toFixed(2) || '-'}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    
                     {/* Optimisation response info (message/stdout/stderr) */}
                     {(optimisationMessage || optimisationStdout || optimisationStderr) && (
                       <div className="mb-4 p-4 bg-[#141721] rounded-md border border-gray-700">
@@ -2726,14 +2557,6 @@ export default function StrategyTestingPage() {
           onClose={() => setShowCostDialog(false)}
           onConfirm={handleCostConfirmation}
           optimizationType={optimizationType}
-        />
-
-        {/* Optimization Job Status */}
-        <OptimizationJobStatus
-          isOpen={showJobStatus}
-          onClose={() => setShowJobStatus(false)}
-          job={currentOptimizationJob}
-          onCancel={handleCancelOptimizationJob}
         />
       </div>
     </AuthGuard>
