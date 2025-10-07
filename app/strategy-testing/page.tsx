@@ -1412,11 +1412,151 @@ export default function StrategyTestingPage() {
 
   // When optimisation results load, set the first row as selected by default
   useEffect(() => {
-    const rows = (optimisationResult?.full_optimization_results || optimisationResult?.table || []);
+    const rows = (optimisationResult?.convergence_data || optimisationResult?.full_optimization_results || optimisationResult?.table || []);
     if (rows.length > 0) {
       setSelectedOptimisationRow(rows[0]);
     }
   }, [optimisationResult]);
+
+  // Helper function to generate convergence plot HTML
+  const generateConvergencePlotHTML = (convergenceData: any[]) => {
+    if (!convergenceData || convergenceData.length === 0) return null;
+    
+    // Extract generations and equity values
+    const generations = convergenceData.map((d, idx) => d.generation ?? idx);
+    const equityValues = convergenceData.map(d => d['Equity Final [$]']);
+    
+    const plotlyData = JSON.stringify([{
+      x: generations,
+      y: equityValues,
+      type: 'scatter',
+      mode: 'lines+markers',
+      marker: { color: '#85e1fe' },
+      line: { color: '#85e1fe', width: 2 },
+      name: 'Equity Final'
+    }]);
+    
+    const layout = JSON.stringify({
+      title: 'Convergence Plot',
+      xaxis: { title: 'Generation', gridcolor: '#333' },
+      yaxis: { title: 'Equity Final [$]', gridcolor: '#333' },
+      paper_bgcolor: '#0e1018',
+      plot_bgcolor: '#0e1018',
+      font: { color: '#fff' }
+    });
+    
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+      </head>
+      <body style="margin:0;">
+        <div id="plot" style="width:100%;height:100%;"></div>
+        <script>
+          Plotly.newPlot('plot', ${plotlyData}, ${layout}, {responsive: true});
+        </script>
+      </body>
+      </html>
+    `;
+  };
+
+  // Helper function to generate heatmap plot HTML
+  const generateHeatmapPlotHTML = (heatmapData: any[]) => {
+    if (!heatmapData || heatmapData.length === 0) return null;
+    
+    // Extract unique parameter values and create a matrix
+    const param1Key = Object.keys(heatmapData[0]).find(k => k !== 'Equity Final [$]' && k !== 'Return [%]');
+    const param2Key = Object.keys(heatmapData[0]).find(k => k !== 'Equity Final [$]' && k !== 'Return [%]' && k !== param1Key);
+    
+    if (!param1Key || !param2Key) {
+      // If we can't find two parameters, create a simple scatter plot
+      const x = heatmapData.map((d, idx) => idx);
+      const y = heatmapData.map(d => d['Equity Final [$]']);
+      
+      const plotlyData = JSON.stringify([{
+        x: x,
+        y: y,
+        mode: 'markers',
+        type: 'scatter',
+        marker: { 
+          color: y,
+          colorscale: 'Viridis',
+          showscale: true,
+          size: 10
+        },
+        name: 'Equity Final'
+      }]);
+      
+      const layout = JSON.stringify({
+        title: 'Optimization Results',
+        xaxis: { title: 'Index', gridcolor: '#333' },
+        yaxis: { title: 'Equity Final [$]', gridcolor: '#333' },
+        paper_bgcolor: '#0e1018',
+        plot_bgcolor: '#0e1018',
+        font: { color: '#fff' }
+      });
+      
+      return `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+        </head>
+        <body style="margin:0;">
+          <div id="plot" style="width:100%;height:100%;"></div>
+          <script>
+            Plotly.newPlot('plot', ${plotlyData}, ${layout}, {responsive: true});
+          </script>
+        </body>
+        </html>
+      `;
+    }
+    
+    const x = heatmapData.map(d => d[param1Key]);
+    const y = heatmapData.map(d => d[param2Key]);
+    const z = heatmapData.map(d => d['Equity Final [$]']);
+    
+    const plotlyData = JSON.stringify([{
+      x: x,
+      y: y,
+      mode: 'markers',
+      type: 'scatter',
+      marker: { 
+        color: z,
+        colorscale: 'Viridis',
+        showscale: true,
+        size: 12,
+        colorbar: { title: 'Equity Final [$]' }
+      },
+      text: z.map((val: number) => `$${val.toFixed(2)}`),
+      hovertemplate: `${param1Key}: %{x}<br>${param2Key}: %{y}<br>Equity: %{text}<extra></extra>`
+    }]);
+    
+    const layout = JSON.stringify({
+      title: 'Parameter Optimization Heatmap',
+      xaxis: { title: param1Key, gridcolor: '#333' },
+      yaxis: { title: param2Key, gridcolor: '#333' },
+      paper_bgcolor: '#0e1018',
+      plot_bgcolor: '#0e1018',
+      font: { color: '#fff' }
+    });
+    
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+      </head>
+      <body style="margin:0;">
+        <div id="plot" style="width:100%;height:100%;"></div>
+        <script>
+          Plotly.newPlot('plot', ${plotlyData}, ${layout}, {responsive: true});
+        </script>
+      </body>
+      </html>
+    `;
+  };
 
   // Optimization Droplets states
   const [showCostDialog, setShowCostDialog] = useState(false)
@@ -1591,38 +1731,64 @@ export default function StrategyTestingPage() {
     const interval = setInterval(async () => {
       try {
         const jobStatus = await getOptimizationJob(jobId)
+        console.log("📊 Job status update:", jobStatus)
         setCurrentOptimizationJob(jobStatus)
         
-        // Stop polling when job is finished
-        if (['completed', 'failed', 'cancelled'].includes(jobStatus.status)) {
+        // Normalize status to lowercase for comparison
+        const normalizedStatus = (jobStatus.status || '').toLowerCase()
+        
+        // Stop polling when job is finished (check for both capitalized and lowercase)
+        if (['completed', 'failed', 'cancelled', 'success'].includes(normalizedStatus)) {
+          console.log("✅ Job finished with status:", jobStatus.status, "- Stopping polling")
           clearInterval(interval)
           setJobPollingInterval(null)
           
-          if (jobStatus.status === 'completed') {
+          if (['completed', 'success'].includes(normalizedStatus)) {
             showToast("Optimization completed successfully!", 'success')
             
-            // Step 5: Display results
-            if (jobStatus.result) {
-              setOptimisationResult(jobStatus.result)
+            // Step 5: Display results - handle the full results object
+            if (jobStatus.results) {
+              // Transform the results to match the expected format
+              const transformedResult = {
+                convergence_data: jobStatus.results.convergence_data || [],
+                optimization_heatmap_data: jobStatus.results.optimization_heatmap_data || [],
+                trade_results: jobStatus.results.trade_results || [],
+                full_optimization_results: jobStatus.results.convergence_data || [],
+                table: jobStatus.results.convergence_data || [],
+                optimiser_file: jobStatus.results.optimiser_file,
+                output_dir: jobStatus.results.output_dir,
+                time_taken: jobStatus.results.time_taken,
+                num_trades: jobStatus.results.num_trades,
+                final_equity: jobStatus.results.final_equity,
+                sharpe_ratio: jobStatus.results.sharpe_ratio,
+                sortino_ratio: jobStatus.results.sortino_ratio,
+                calmar_ratio: jobStatus.results.calmar_ratio,
+              }
+              
+              console.log("📈 Transformed optimization result:", transformedResult)
+              setOptimisationResult(transformedResult)
               setShowOptimisationResults(true)
               setActiveTab("optimisation")
+              setShowPreviousOptimisationView(false)
               
-              if (jobStatus.result.heatmap_plot_html) {
-                setPlotHeatmapHtml(jobStatus.result.heatmap_plot_html)
-              }
-              if (jobStatus.result.trades_plot_html) {
-                setPlotHtml(jobStatus.result.trades_plot_html)
-              }
+              // Add to optimization results list
+              setOptimizationResults(prev => Array.isArray(prev) ? [...prev, transformedResult] : [transformedResult])
+              
+              // Note: plots are generated from the data in the frontend
+              // We'll need to generate plots from convergence_data and optimization_heatmap_data
             }
-          } else if (jobStatus.status === 'failed') {
+          } else if (normalizedStatus === 'failed') {
             showToast("Optimization failed: " + (jobStatus.error_message || "Unknown error"), 'error')
-          } else if (jobStatus.status === 'cancelled') {
+          } else if (normalizedStatus === 'cancelled') {
             showToast("Optimization was cancelled", 'warning')
           }
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error("Error polling job status:", error)
-        // Don't stop polling on error, continue trying
+        // Stop polling on error to prevent infinite loops
+        clearInterval(interval)
+        setJobPollingInterval(null)
+        showToast("Error checking job status: " + (error?.message || "Unknown error"), 'error')
       }
     }, 5000) // Poll every 5 seconds
 
@@ -1863,6 +2029,56 @@ export default function StrategyTestingPage() {
 
                 {activeTab === "optimisation" && showOptimisationResults && optimisationResult && (
                   <div className="p-6 bg-[#000000] text-white min-h-[600px]">
+                    {/* Optimization Job Summary */}
+                    {currentOptimizationJob && (
+                      <div className="mb-6 p-4 bg-[#141721] rounded-md border border-gray-700">
+                        <h3 className="text-lg font-semibold text-white mb-3">Optimization Job Summary</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          <div>
+                            <p className="text-gray-400 text-sm">Status</p>
+                            <p className="text-white font-semibold">{currentOptimizationJob.status}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-400 text-sm">Time Taken</p>
+                            <p className="text-white font-semibold">
+                              {optimisationResult.time_taken || 
+                               (currentOptimizationJob.runtime_minutes ? `${currentOptimizationJob.runtime_minutes} min` : '-')}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-gray-400 text-sm">Estimated Cost</p>
+                            <p className="text-white font-semibold">${currentOptimizationJob.estimated_cost || '-'}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-400 text-sm">Actual Cost</p>
+                            <p className="text-white font-semibold">${currentOptimizationJob.actual_cost || '-'}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-400 text-sm">Final Equity</p>
+                            <p className="text-white font-semibold">
+                              ${optimisationResult.final_equity?.toFixed(2) || '-'}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-gray-400 text-sm">Total Trades</p>
+                            <p className="text-white font-semibold">{optimisationResult.num_trades || '-'}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-400 text-sm">Sharpe Ratio</p>
+                            <p className="text-white font-semibold">
+                              {optimisationResult.sharpe_ratio?.toFixed(2) || '-'}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-gray-400 text-sm">Calmar Ratio</p>
+                            <p className="text-white font-semibold">
+                              {optimisationResult.calmar_ratio?.toFixed(2) || '-'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    
                     {/* Optimisation response info (message/stdout/stderr) */}
                     {(optimisationMessage || optimisationStdout || optimisationStderr) && (
                       <div className="mb-4 p-4 bg-[#141721] rounded-md border border-gray-700">
@@ -1917,46 +2133,62 @@ export default function StrategyTestingPage() {
                             <thead>
                               <tr className="bg-[#1A1D2D] text-white">
                                 <th className="px-2 py-2">#</th>
-                                <th className="px-2 py-2">Profit</th>
-                                <th className="px-2 py-2">Total trades</th>
-                                <th className="px-2 py-2">Profit factor</th>
-                                <th className="px-2 py-2">Expected Pay</th>
-                                <th className="px-2 py-2">Drawdown $</th>
-                                <th className="px-2 py-2">Drawdown %</th>
-                                <th className="px-2 py-2">Win Rate</th>
-                                <th className="px-2 py-2">Inputs</th>
+                                <th className="px-2 py-2">Return [%]</th>
+                                <th className="px-2 py-2">Equity Final [$]</th>
+                                <th className="px-2 py-2"># Trades</th>
+                                <th className="px-2 py-2">Win Rate [%]</th>
+                                <th className="px-2 py-2">Profit Factor</th>
+                                <th className="px-2 py-2">Max. Drawdown [%]</th>
+                                <th className="px-2 py-2">Sharpe Ratio</th>
+                                <th className="px-2 py-2">Parameters</th>
                                 <th className="px-2 py-2"> </th>
                               </tr>
                             </thead>
                             <tbody>
-                              {(optimisationResult.full_optimization_results || optimisationResult.table || []).map((row: any, idx: number) => (
-                                <tr
-                                  key={idx}
-                                  className={`bg-[#141721] text-white cursor-pointer ${selectedOptimisationRow === row ? 'bg-[#23263a]' : ''}`}
-                                  onClick={() => {
-                                    setSelectedOptimisationRow(row);
-                                    setOptimisationTab('report');
-                                  }}
-                                >
-                                  <td className="px-2 py-2">{idx + 1}</td>
-                                  <td className="px-2 py-2">{row.profit}</td>
-                                  <td className="px-2 py-2">{row.total_trades}</td>
-                                  <td className="px-2 py-2">{row.profit_factor}</td>
-                                  <td className="px-2 py-2">{row.expected_pay}</td>
-                                  <td className="px-2 py-2">{row.drawdown_dollar}</td>
-                                  <td className="px-2 py-2">{row.drawdown_percent}</td>
-                                  <td className="px-2 py-2">{row.win_rate_percent || row.win_rate || '-'}</td>
-                                  <td className="px-2 py-2 max-w-[200px] truncate" title={row.inputs}>{row.inputs}</td>
-                                  <td className="px-2 py-2 text-right">
-                                    <button
-                                      className="text-[#85e1fe] hover:underline text-xs"
-                                      onClick={e => { e.stopPropagation(); setSelectedOptimisationRow(row); setOptimisationTab('report'); }}
-                                    >
-                                      View Report
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))}
+                              {(optimisationResult.convergence_data || optimisationResult.full_optimization_results || optimisationResult.table || []).map((row: any, idx: number) => {
+                                // Extract parameters (all fields that are not standard metrics)
+                                const standardFields = ['Return [%]', 'Equity Final [$]', '# Trades', 'Win Rate [%]', 
+                                  'Profit Factor', 'Max. Drawdown [%]', 'Sharpe Ratio', 'Sortino Ratio', 'Calmar Ratio',
+                                  'Return (Ann.) [%]', 'Volatility (Ann.) [%]', 'Start', 'End', 'Duration', 'SQN',
+                                  'Exposure Time [%]', 'Equity Peak [$]', 'Avg. Trade [%]', 'Best Trade [%]', 
+                                  'Worst Trade [%]', 'Avg. Drawdown [%]', 'Avg. Drawdown Duration', 'Max. Drawdown Duration',
+                                  'Avg. Trade Duration', 'Max. Trade Duration', 'Buy & Hold Return [%]', 'Expectancy [%]',
+                                  'Unnamed: 0', 'generation'];
+                                
+                                const parameters = Object.keys(row)
+                                  .filter(key => !standardFields.includes(key))
+                                  .map(key => `${key}=${row[key]}`)
+                                  .join(', ');
+                                
+                                return (
+                                  <tr
+                                    key={idx}
+                                    className={`bg-[#141721] text-white cursor-pointer hover:bg-[#1e2132] ${selectedOptimisationRow === row ? 'bg-[#23263a]' : ''}`}
+                                    onClick={() => {
+                                      setSelectedOptimisationRow(row);
+                                      setOptimisationTab('report');
+                                    }}
+                                  >
+                                    <td className="px-2 py-2">{idx + 1}</td>
+                                    <td className="px-2 py-2">{row['Return [%]']?.toFixed(2) || row.profit || '-'}</td>
+                                    <td className="px-2 py-2">{row['Equity Final [$]']?.toFixed(2) || '-'}</td>
+                                    <td className="px-2 py-2">{row['# Trades'] || row.total_trades || '-'}</td>
+                                    <td className="px-2 py-2">{row['Win Rate [%]']?.toFixed(2) || row.win_rate_percent || row.win_rate || '-'}</td>
+                                    <td className="px-2 py-2">{row['Profit Factor']?.toFixed(2) || row.profit_factor || '-'}</td>
+                                    <td className="px-2 py-2">{row['Max. Drawdown [%]']?.toFixed(2) || row.drawdown_percent || '-'}</td>
+                                    <td className="px-2 py-2">{row['Sharpe Ratio']?.toFixed(2) || '-'}</td>
+                                    <td className="px-2 py-2 max-w-[200px] truncate" title={parameters || row.inputs}>{parameters || row.inputs || '-'}</td>
+                                    <td className="px-2 py-2 text-right">
+                                      <button
+                                        className="text-[#85e1fe] hover:underline text-xs"
+                                        onClick={e => { e.stopPropagation(); setSelectedOptimisationRow(row); setOptimisationTab('report'); }}
+                                      >
+                                        View Report
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                             </tbody>
                           </table>
                         </div>
@@ -1966,9 +2198,40 @@ export default function StrategyTestingPage() {
                     {/* Graph Tab */}
                     {optimisationTab === 'graph' && (
                       <div>
+                        {/* Convergence Plot */}
+                        {optimisationResult.convergence_data && optimisationResult.convergence_data.length > 0 && (() => {
+                          const plotHTML = generateConvergencePlotHTML(optimisationResult.convergence_data);
+                          return plotHTML ? (
+                            <div className="mb-8">
+                              <h3 className="mb-2 text-lg font-semibold text-white">Convergence Plot</h3>
+                              <iframe
+                                title="Convergence Plot"
+                                style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#0e1018" }}
+                                srcDoc={plotHTML}
+                              />
+                            </div>
+                          ) : null;
+                        })()}
+                        
+                        {/* Heatmap Plot */}
+                        {optimisationResult.optimization_heatmap_data && optimisationResult.optimization_heatmap_data.length > 0 && (() => {
+                          const plotHTML = generateHeatmapPlotHTML(optimisationResult.optimization_heatmap_data);
+                          return plotHTML ? (
+                            <div className="mb-8">
+                              <h3 className="mb-2 text-lg font-semibold text-white">Parameter Optimization Heatmap</h3>
+                              <iframe
+                                title="Optimization Heatmap"
+                                style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#0e1018" }}
+                                srcDoc={plotHTML}
+                              />
+                            </div>
+                          ) : null;
+                        })()}
+                        
+                        {/* Legacy plots - still show if available */}
                         {optimisationResult.heatmap_plot_html && (
                           <div className="mb-8">
-                            <h3 className="mb-2 text-lg font-semibold text-white">Scatter Plot</h3>
+                            <h3 className="mb-2 text-lg font-semibold text-white">Scatter Plot (Legacy)</h3>
                             <iframe
                               title="Scatter Plot"
                               style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#f8f8f8" }}
@@ -1984,6 +2247,16 @@ export default function StrategyTestingPage() {
                               style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#f8f8f8" }}
                               srcDoc={optimisationResult.trades_plot_html}
                             />
+                          </div>
+                        )}
+                        
+                        {/* No data message */}
+                        {!optimisationResult.convergence_data && 
+                         !optimisationResult.optimization_heatmap_data && 
+                         !optimisationResult.heatmap_plot_html && 
+                         !optimisationResult.trades_plot_html && (
+                          <div className="text-center text-gray-400 py-8">
+                            No plot data available
                           </div>
                         )}
                       </div>
