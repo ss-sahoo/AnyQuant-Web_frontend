@@ -37,6 +37,7 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
                 <th className="px-2 py-2">ID</th>
                 <th className="px-2 py-2">Date</th>
                 <th className="px-2 py-2">Algorithm</th>
+                <th className="px-2 py-2">Type</th>
                 <th className="px-2 py-2">Status</th>
                 <th className="px-2 py-2">Final Equity</th>
               </tr>
@@ -51,6 +52,17 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
                   <td className="px-2 py-2">{item.id}</td>
                   <td className="px-2 py-2">{item.optimization_date ? new Date(item.optimization_date).toLocaleString() : '-'}</td>
                   <td className="px-2 py-2">{item.algorithm}</td>
+                  <td className="px-2 py-2">
+                    {item.through_droplet ? (
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-[#85e1fe] text-black">
+                        Droplet
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-gray-600 text-white">
+                        Legacy
+                      </span>
+                    )}
+                  </td>
                   <td className="px-2 py-2">{item.status}</td>
                   <td className="px-2 py-2">{item.final_equity}</td>
                 </tr>
