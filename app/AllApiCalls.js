@@ -969,9 +969,9 @@ export const getOptimizationCosts = async () => {
  * @param {Object} params
  * @param {Object} params.statement - The strategy statement
  * @param {Object} [params.files] - The files to upload (required if not using MetaAPI)
- * @param {string} [params.optimization_type] - Type of optimization: "regular" or "walk_forward"
+ * @param {string} [params.type] - Type of optimization: "regular" or "walk_forward" (backend expects 'type')
  * @param {string|null} [params.strategy_statement_id] - Optional strategy statement ID
- * @param {Object|null} [params.walk_forward_setting] - Walk forward optimization settings
+ * @param {Object|null} [params.walk_forward_settings] - Walk forward optimization settings (plural)
  * @param {File|null} [params.csvFile] - CSV file for the backend (optional)
  * @param {string|null} [params.metaapi_token] - MetaAPI token (for MetaAPI mode)
  * @param {string|null} [params.metaapi_account_id] - MetaAPI account ID (for MetaAPI mode)
@@ -980,9 +980,9 @@ export const getOptimizationCosts = async () => {
 export const createOptimizationJob = async ({ 
   statement, 
   files = null, 
-  optimization_type = "regular", 
+  type = "regular", // Backend expects 'type' not 'optimization_type'
   strategy_statement_id = null, 
-  walk_forward_setting = null, 
+  walk_forward_settings = null, // Backend expects 'walk_forward_settings' (plural)
   csvFile = null,
   metaapi_token = null,
   metaapi_account_id = null,
@@ -999,10 +999,10 @@ export const createOptimizationJob = async ({
   // Debug logging
   console.log("🚀 OPTIMIZATION JOB PAYLOAD:");
   console.log("📋 Statement:", statement);
-  console.log("🔧 Optimization Type:", optimization_type);
+  console.log("🔧 Optimization Type:", type);
   console.log("📁 Files:", isFileMode ? Object.keys(files) : 'N/A (using MetaAPI)');
   console.log("🆔 Strategy Statement ID:", strategy_statement_id);
-  console.log("⚙️ Walk Forward Settings:", walk_forward_setting);
+  console.log("⚙️ Walk Forward Settings:", walk_forward_settings);
 
   // Debug logging for MetaAPI mode
   if (isMetaAPIMode) {
@@ -1021,17 +1021,17 @@ export const createOptimizationJob = async ({
   // Attach the statement JSON as a string
   formData.append("statement", JSON.stringify(statement));
 
-  // Attach optimization type
-  formData.append("optimization_type", optimization_type);
+  // Attach optimization type (backend expects 'type')
+  formData.append("type", type);
 
   // Attach strategy statement ID if provided
   if (strategy_statement_id) {
     formData.append("strategy_statement_id", strategy_statement_id);
   }
 
-  // Attach walk forward settings if provided
-  if (walk_forward_setting) {
-    formData.append("walk_forward_setting", JSON.stringify(walk_forward_setting));
+  // Attach walk forward settings if provided (backend expects 'walk_forward_settings')
+  if (walk_forward_settings) {
+    formData.append("walk_forward_settings", JSON.stringify(walk_forward_settings));
   }
 
   // MetaAPI mode: attach MetaAPI credentials

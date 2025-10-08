@@ -685,30 +685,34 @@ export default function StrategyTestingPage() {
       return
     }
 
-    if (requiredTimeframes.length > uploadedFiles.length) {
+    // Only check for files if NOT using MetaAPI
+    if (!useMetaAPI && requiredTimeframes.length > uploadedFiles.length) {
       showToast("Not enough files uploaded for the required timeframes", 'error')
       return
     }
 
     try {
       setIsLoading2(true)
-      const timeframeFiles: Record<string, File> = {}
+      let timeframeFiles: Record<string, File> = {}
 
-      // Directly map each required timeframe to the uploaded file in order
-      requiredTimeframes.forEach((timeframe, index) => {
-        const filename = uploadedFiles[index]
-        if (filename && fileObjects[filename]) {
-          timeframeFiles[timeframe] = fileObjects[filename]
-        }
-      })
+      // Only process files if NOT using MetaAPI
+      if (!useMetaAPI) {
+        // Directly map each required timeframe to the uploaded file in order
+        requiredTimeframes.forEach((timeframe, index) => {
+          const filename = uploadedFiles[index]
+          if (filename && fileObjects[filename]) {
+            timeframeFiles[timeframe] = fileObjects[filename]
+          }
+        })
 
-      // Add unmatched remaining files to the form with filename as key (optional fallback)
-      uploadedFiles.forEach((filename) => {
-        if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
-          const key = filename.split(".")[0]
-          timeframeFiles[key] = fileObjects[filename]
-        }
-      })
+        // Add unmatched remaining files to the form with filename as key (optional fallback)
+        uploadedFiles.forEach((filename) => {
+          if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
+            const key = filename.split(".")[0]
+            timeframeFiles[key] = fileObjects[filename]
+          }
+        })
+      }
 
       // Get optimisation form from localStorage to extract Parameters and Constraints
       const optimisationFormString = localStorage.getItem("optimisation_form")
@@ -754,12 +758,40 @@ export default function StrategyTestingPage() {
         optimiser_parameters: optimiserParameters,
       }
 
-      const result = await runOptimisation({
-        statement: optimisationStatement,
-        files: timeframeFiles,
-        strategy_statement_id: strategy_id ? strategy_id : null,
-        wait,
-      })
+      let result: any
+
+      // Use MetaAPI or file upload based on the mode
+      if (useMetaAPI) {
+        // Use MetaAPI for optimization
+        const symbol = metaAPIConfig?.symbol || "XAUUSD"
+        const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
+        const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
+
+        console.log("🔍 Using trading symbol for MetaAPI optimization:", symbol)
+        console.log("🔍 MetaAPI Token available:", !!token)
+        console.log("🔍 MetaAPI Account ID available:", !!accountId)
+
+        if (!token || !accountId) {
+          throw new Error("MetaAPI credentials not configured. Please check environment variables.")
+        }
+
+        result = await runOptimisation({
+          statement: optimisationStatement,
+          strategy_statement_id: strategy_id ? strategy_id : null,
+          wait,
+          metaapi_token: token,
+          metaapi_account_id: accountId,
+          symbol: symbol,
+        })
+      } else {
+        // Use file upload for optimization
+        result = await runOptimisation({
+          statement: optimisationStatement,
+          files: timeframeFiles,
+          strategy_statement_id: strategy_id ? strategy_id : null,
+          wait,
+        })
+      }
 
       console.log("Full optimization response:", result)
 
@@ -830,30 +862,34 @@ export default function StrategyTestingPage() {
       return
     }
 
-    if (requiredTimeframes.length > uploadedFiles.length) {
+    // Only check for files if NOT using MetaAPI
+    if (!useMetaAPI && requiredTimeframes.length > uploadedFiles.length) {
       showToast("Not enough files uploaded for the required timeframes", 'error')
       return
     }
 
     try {
       setIsLoading3(true)
-      const timeframeFiles: Record<string, File> = {}
+      let timeframeFiles: Record<string, File> = {}
 
-      // Directly map each required timeframe to the uploaded file in order
-      requiredTimeframes.forEach((timeframe, index) => {
-        const filename = uploadedFiles[index]
-        if (filename && fileObjects[filename]) {
-          timeframeFiles[timeframe] = fileObjects[filename]
-        }
-      })
+      // Only process files if NOT using MetaAPI
+      if (!useMetaAPI) {
+        // Directly map each required timeframe to the uploaded file in order
+        requiredTimeframes.forEach((timeframe, index) => {
+          const filename = uploadedFiles[index]
+          if (filename && fileObjects[filename]) {
+            timeframeFiles[timeframe] = fileObjects[filename]
+          }
+        })
 
-      // Add unmatched remaining files to the form with filename as key (optional fallback)
-      uploadedFiles.forEach((filename) => {
-        if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
-          const key = filename.split(".")[0]
-          timeframeFiles[key] = fileObjects[filename]
-        }
-      })
+        // Add unmatched remaining files to the form with filename as key (optional fallback)
+        uploadedFiles.forEach((filename) => {
+          if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
+            const key = filename.split(".")[0]
+            timeframeFiles[key] = fileObjects[filename]
+          }
+        })
+      }
 
       // Get walk forward settings from localStorage
       const walkForwardSettingsString = localStorage.getItem("walk_forward_settings")
@@ -918,13 +954,35 @@ export default function StrategyTestingPage() {
 
       const apiParams: any = {
         statement: walkForwardStatement,
-        files: timeframeFiles,
         walk_forward_setting: walkForwardSettings, // Pass as separate parameter
         wait,
       }
       
       if (strategy_id && !isNaN(Number(strategy_id))) {
         apiParams.strategy_statement_id = Number(strategy_id)
+      }
+
+      // Use MetaAPI or file upload based on the mode
+      if (useMetaAPI) {
+        // Use MetaAPI for walk forward optimization
+        const symbol = metaAPIConfig?.symbol || "XAUUSD"
+        const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
+        const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
+
+        console.log("🔍 Using trading symbol for MetaAPI walk forward optimization:", symbol)
+        console.log("🔍 MetaAPI Token available:", !!token)
+        console.log("🔍 MetaAPI Account ID available:", !!accountId)
+
+        if (!token || !accountId) {
+          throw new Error("MetaAPI credentials not configured. Please check environment variables.")
+        }
+
+        apiParams.metaapi_token = token
+        apiParams.metaapi_account_id = accountId
+        apiParams.symbol = symbol
+      } else {
+        // Use file upload for walk forward optimization
+        apiParams.files = timeframeFiles
       }
 
       const result = await runWalkForwardOptimisation(apiParams)
@@ -1557,6 +1615,7 @@ export default function StrategyTestingPage() {
   // Optimization Droplets states
   const [showCostDialog, setShowCostDialog] = useState(false)
   const [optimizationType, setOptimizationType] = useState<'regular' | 'walk_forward'>('regular')
+  const [isCreatingOptimizationJob, setIsCreatingOptimizationJob] = useState(false)
 
   // New Optimization Droplets Flow Functions
   
@@ -1579,28 +1638,33 @@ export default function StrategyTestingPage() {
       return
     }
 
-    if (requiredTimeframes.length > uploadedFiles.length) {
+    // Only check for files if NOT using MetaAPI
+    if (!useMetaAPI && requiredTimeframes.length > uploadedFiles.length) {
       showToast("Not enough files uploaded for the required timeframes", 'error')
       return
     }
 
     try {
-      // Prepare files
-      const timeframeFiles: Record<string, File> = {}
-      requiredTimeframes.forEach((timeframe, index) => {
-        const filename = uploadedFiles[index]
-        if (filename && fileObjects[filename]) {
-          timeframeFiles[timeframe] = fileObjects[filename]
-        }
-      })
+      setIsCreatingOptimizationJob(true)
+      // Prepare files only if NOT using MetaAPI
+      let timeframeFiles: Record<string, File> = {}
+      
+      if (!useMetaAPI) {
+        requiredTimeframes.forEach((timeframe, index) => {
+          const filename = uploadedFiles[index]
+          if (filename && fileObjects[filename]) {
+            timeframeFiles[timeframe] = fileObjects[filename]
+          }
+        })
 
-      // Add unmatched remaining files
-      uploadedFiles.forEach((filename) => {
-        if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
-          const key = filename.split(".")[0]
-          timeframeFiles[key] = fileObjects[filename]
-        }
-      })
+        // Add unmatched remaining files
+        uploadedFiles.forEach((filename) => {
+          if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
+            const key = filename.split(".")[0]
+            timeframeFiles[key] = fileObjects[filename]
+          }
+        })
+      }
 
       // Get optimisation form settings
       const optimisationFormString = localStorage.getItem("optimisation_form")
@@ -1612,9 +1676,22 @@ export default function StrategyTestingPage() {
           const optimisationForm = JSON.parse(optimisationFormString)
           parametersObject = optimisationForm.Parameters || {}
           constraintsArray = optimisationForm.Constraints || []
+          
+          // Debug logging for parameters
+          console.log("🔍 Optimisation form loaded from localStorage:", optimisationForm)
+          console.log("🔍 Parameters object:", parametersObject)
+          console.log("🔍 Parameters keys:", Object.keys(parametersObject))
+          
+          if (Object.keys(parametersObject).length === 0) {
+            console.warn("⚠️ WARNING: Parameters object is empty! User needs to configure optimization parameters in Advanced Settings.")
+            showToast("No optimization parameters configured. Please set parameters in Advanced Settings.", 'warning')
+          }
         } catch (error) {
           console.error("Error parsing optimisation_form from localStorage:", error)
         }
+      } else {
+        console.warn("⚠️ WARNING: No optimisation_form found in localStorage!")
+        showToast("Optimization settings not found. Please configure parameters in Advanced Settings.", 'warning')
       }
 
       // Construct optimisation statement
@@ -1646,21 +1723,14 @@ export default function StrategyTestingPage() {
       // Prepare API call parameters
       const apiParams: any = {
         statement: optimisationStatement,
-        files: timeframeFiles,
-        optimization_type: optimizationType,
-      }
-
-      // Add CSV file explicitly (use the first uploaded file)
-      const firstFile = Object.values(timeframeFiles)[0]
-      if (firstFile) {
-        apiParams.csvFile = firstFile
+        type: optimizationType, // Backend expects 'type' not 'optimization_type'
       }
 
       if (strategy_id && !isNaN(Number(strategy_id))) {
         apiParams.strategy_statement_id = Number(strategy_id)
       }
 
-      // Add walk forward settings if needed
+      // Add walk forward settings if needed (BEFORE MetaAPI/file handling)
       if (optimizationType === 'walk_forward') {
         const walkForwardSettingsString = localStorage.getItem("walk_forward_settings")
         let walkForwardSettings = {
@@ -1678,7 +1748,38 @@ export default function StrategyTestingPage() {
           }
         }
 
-        apiParams.walk_forward_setting = walkForwardSettings
+        // Backend expects 'walk_forward_settings' (plural)
+        apiParams.walk_forward_settings = walkForwardSettings
+        console.log("🔍 Walk forward settings for droplet:", walkForwardSettings)
+      }
+
+      // Use MetaAPI or file upload based on the mode
+      if (useMetaAPI) {
+        // Use MetaAPI for optimization job
+        const symbol = metaAPIConfig?.symbol || "XAUUSD"
+        const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
+        const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
+
+        console.log("🔍 Using trading symbol for MetaAPI optimization job:", symbol)
+        console.log("🔍 MetaAPI Token available:", !!token)
+        console.log("🔍 MetaAPI Account ID available:", !!accountId)
+
+        if (!token || !accountId) {
+          throw new Error("MetaAPI credentials not configured. Please check environment variables.")
+        }
+
+        apiParams.metaapi_token = token
+        apiParams.metaapi_account_id = accountId
+        apiParams.symbol = symbol
+      } else {
+        // Use file upload for optimization job
+        apiParams.files = timeframeFiles
+        
+        // Add CSV file explicitly (use the first uploaded file)
+        const firstFile = Object.values(timeframeFiles)[0]
+        if (firstFile) {
+          apiParams.csvFile = firstFile
+        }
       }
 
       // Step 3: Create optimization job
@@ -1707,6 +1808,8 @@ export default function StrategyTestingPage() {
         showToast("Connection failed: " + (error.message || "Unknown error"), 'error')
       }
       console.error("Error creating optimization job:", error)
+    } finally {
+      setIsCreatingOptimizationJob(false)
     }
   }
 
@@ -2200,10 +2303,14 @@ export default function StrategyTestingPage() {
                   </button>
                   <button
                     onClick={() => handleOptimizationWithDroplets('regular')}
-                    className="flex-1 py-3 bg-[#85e1fe] text-black rounded-full hover:bg-[#6bcae2] font-semibold"
-                    disabled={isLoading2}
+                    className={`flex-1 py-3 rounded-full font-semibold ${
+                      isLoading2 || isCreatingOptimizationJob
+                        ? 'bg-gray-600 cursor-not-allowed text-gray-400'
+                        : 'bg-[#85e1fe] text-black hover:bg-[#6bcae2]'
+                    }`}
+                    disabled={isLoading2 || isCreatingOptimizationJob}
                   >
-                    Run Optimization (Droplets)
+                    {isCreatingOptimizationJob ? 'Creating Job...' : 'Run Optimization (Droplets)'}
                   </button>
                 </div>
               </div>
@@ -2558,6 +2665,35 @@ export default function StrategyTestingPage() {
           onConfirm={handleCostConfirmation}
           optimizationType={optimizationType}
         />
+
+        {/* Optimization Job Creation Loading Modal */}
+        {isCreatingOptimizationJob && (
+          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+            <div className="bg-[#1A1D2D] rounded-lg shadow-lg p-8 max-w-md w-full">
+              <div className="flex flex-col items-center">
+                {/* Spinner */}
+                <div className="relative w-20 h-20 mb-6">
+                  <div className="absolute top-0 left-0 w-full h-full">
+                    <div className="w-20 h-20 border-4 border-gray-600 border-t-[#85e1fe] rounded-full animate-spin"></div>
+                  </div>
+                </div>
+                
+                {/* Loading Text */}
+                <h3 className="text-xl font-semibold text-white mb-2">
+                  Creating Optimization Job
+                </h3>
+                <p className="text-gray-400 text-center">
+                  {optimizationType === 'walk_forward' 
+                    ? 'Setting up walk forward optimization with droplets...' 
+                    : 'Setting up regular optimization with droplets...'}
+                </p>
+                <p className="text-sm text-gray-500 text-center mt-2">
+                  Please wait, this may take a few moments
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </AuthGuard>
   )
