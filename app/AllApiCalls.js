@@ -269,11 +269,42 @@ export const runBacktestWithMetaAPI = async (strategy, token, accountId, symbol)
  * Run optimisation (async or sync)
  * @param {Object} params
  * @param {Object} params.statement - The strategy statement
- * @param {Object} params.files - The files to upload
+ * @param {Object} [params.files] - The files to upload (required if not using MetaAPI)
  * @param {string|null} [params.strategy_statement_id] - Optional strategy statement ID
  * @param {boolean} [params.wait] - If true, wait for completion and return result in response
+ * @param {string|null} [params.metaapi_token] - MetaAPI token (for MetaAPI mode)
+ * @param {string|null} [params.metaapi_account_id] - MetaAPI account ID (for MetaAPI mode)
+ * @param {string|null} [params.symbol] - Trading symbol (for MetaAPI mode)
  */
-export const runOptimisation = async ({ statement, files, strategy_statement_id = null, wait = false }) => {
+export const runOptimisation = async ({ 
+  statement, 
+  files = null, 
+  strategy_statement_id = null, 
+  wait = false,
+  metaapi_token = null,
+  metaapi_account_id = null,
+  symbol = null 
+}) => {
+  // Validate input: either files OR MetaAPI credentials must be provided
+  const isMetaAPIMode = metaapi_token && metaapi_account_id && symbol;
+  const isFileMode = files && Object.keys(files).length > 0;
+
+  if (!isMetaAPIMode && !isFileMode) {
+    throw new Error("Either files or MetaAPI credentials (token, account_id, symbol) must be provided");
+  }
+
+  // Debug logging for MetaAPI mode
+  if (isMetaAPIMode) {
+    console.log('🔍 MetaAPI Optimisation Debug Info:', {
+      tokenLength: metaapi_token?.length || 0,
+      accountId: metaapi_account_id,
+      symbol: symbol,
+      tokenPrefix: metaapi_token?.substring(0, 20) + '...',
+      hasToken: !!metaapi_token,
+      hasAccountId: !!metaapi_account_id
+    });
+  }
+
   const formData = new FormData()
 
   // Attach the statement JSON as a string
@@ -289,10 +320,22 @@ export const runOptimisation = async ({ statement, files, strategy_statement_id 
     formData.append("wait", "true")
   }
 
-  // Attach each file using its timeframe key
-  for (const [timeframe, file] of Object.entries(files)) {
-    formData.append(timeframe, file)
+  // MetaAPI mode: attach MetaAPI credentials
+  if (isMetaAPIMode) {
+    formData.append("metaapi_token", metaapi_token)
+    formData.append("metaapi_account_id", metaapi_account_id)
+    formData.append("symbol", symbol)
+    console.log('📡 Running optimisation with MetaAPI');
   }
+
+  // File upload mode: attach each file using its timeframe key
+  if (isFileMode) {
+    for (const [timeframe, file] of Object.entries(files)) {
+      formData.append(timeframe, file)
+    }
+    console.log('📁 Running optimisation with file upload');
+  }
+
   try {
     const response = await Fetch("/api/run-optimisation/", {
       method: "POST",
@@ -301,13 +344,14 @@ export const runOptimisation = async ({ statement, files, strategy_statement_id 
 
     if (!response.ok) {
       const error = await response.json()
+      console.error('🔍 Optimisation Backend Error:', error);
       throw new Error(error?.error || "Failed to start optimisation")
     }
     const data = await response.json();
-    console.log("Optimisation response:", data);
+    console.log("✅ Optimisation response:", data);
     return data;
   } catch (err) {
-    console.error("Optimisation request failed:", err);
+    console.error("❌ Optimisation request failed:", err);
     throw err;
   }
 }
@@ -676,16 +720,57 @@ export const getStrategyOptimizationResults = async (strategyStatementId, params
 
 // Walk Forward Optimization API functions
 
-export const runWalkForwardOptimisation = async ({ statement, files, strategy_statement_id = null, wait = false, walk_forward_setting = null }) => {
-  const formData = new FormData()
+/**
+ * Run walk forward optimisation (async or sync)
+ * @param {Object} params
+ * @param {Object} params.statement - The strategy statement
+ * @param {Object} [params.files] - The files to upload (required if not using MetaAPI)
+ * @param {string|null} [params.strategy_statement_id] - Optional strategy statement ID
+ * @param {boolean} [params.wait] - If true, wait for completion and return result in response
+ * @param {Object|null} [params.walk_forward_setting] - Walk forward optimization settings
+ * @param {string|null} [params.metaapi_token] - MetaAPI token (for MetaAPI mode)
+ * @param {string|null} [params.metaapi_account_id] - MetaAPI account ID (for MetaAPI mode)
+ * @param {string|null} [params.symbol] - Trading symbol (for MetaAPI mode)
+ */
+export const runWalkForwardOptimisation = async ({ 
+  statement, 
+  files = null, 
+  strategy_statement_id = null, 
+  wait = false, 
+  walk_forward_setting = null,
+  metaapi_token = null,
+  metaapi_account_id = null,
+  symbol = null 
+}) => {
+  // Validate input: either files OR MetaAPI credentials must be provided
+  const isMetaAPIMode = metaapi_token && metaapi_account_id && symbol;
+  const isFileMode = files && Object.keys(files).length > 0;
+
+  if (!isMetaAPIMode && !isFileMode) {
+    throw new Error("Either files or MetaAPI credentials (token, account_id, symbol) must be provided");
+  }
 
   // Log the payload being sent
   console.log("🚀 WALK FORWARD OPTIMIZATION PAYLOAD:");
   console.log("📋 Statement:", statement);
-  console.log("📁 Files:", Object.keys(files));
+  console.log("📁 Files:", isFileMode ? Object.keys(files) : 'N/A (using MetaAPI)');
   console.log("🆔 Strategy Statement ID:", strategy_statement_id);
   console.log("⏳ Wait:", wait);
   console.log("⚙️ Walk Forward Settings:", walk_forward_setting);
+  
+  // Debug logging for MetaAPI mode
+  if (isMetaAPIMode) {
+    console.log('🔍 MetaAPI Walk Forward Optimisation Debug Info:', {
+      tokenLength: metaapi_token?.length || 0,
+      accountId: metaapi_account_id,
+      symbol: symbol,
+      tokenPrefix: metaapi_token?.substring(0, 20) + '...',
+      hasToken: !!metaapi_token,
+      hasAccountId: !!metaapi_account_id
+    });
+  }
+
+  const formData = new FormData()
 
   // Attach the statement JSON as a string
   formData.append("statement", JSON.stringify(statement))
@@ -705,10 +790,21 @@ export const runWalkForwardOptimisation = async ({ statement, files, strategy_st
     formData.append("wait", "true")
   }
 
-  // Attach each file using its timeframe key
-  for (const [timeframe, file] of Object.entries(files)) {
-    formData.append(timeframe, file)
-    console.log(`📎 Attached file: ${timeframe} -> ${file.name} (${file.size} bytes)`);
+  // MetaAPI mode: attach MetaAPI credentials
+  if (isMetaAPIMode) {
+    formData.append("metaapi_token", metaapi_token)
+    formData.append("metaapi_account_id", metaapi_account_id)
+    formData.append("symbol", symbol)
+    console.log('📡 Running walk forward optimisation with MetaAPI');
+  }
+
+  // File upload mode: attach each file using its timeframe key
+  if (isFileMode) {
+    for (const [timeframe, file] of Object.entries(files)) {
+      formData.append(timeframe, file)
+      console.log(`📎 Attached file: ${timeframe} -> ${file.name} (${file.size} bytes)`);
+    }
+    console.log('📁 Running walk forward optimisation with file upload');
   }
 
   // Log the FormData contents
@@ -729,6 +825,7 @@ export const runWalkForwardOptimisation = async ({ statement, files, strategy_st
 
     if (!response.ok) {
       const error = await response.json()
+      console.error('🔍 Walk Forward Optimisation Backend Error:', error);
       throw new Error(error?.error || "Failed to start walk forward optimisation")
     }
     const data = await response.json();
@@ -869,8 +966,56 @@ export const getOptimizationCosts = async () => {
  * Purpose: Start the optimization process
  * Headers: Authorization: Bearer {token}, Content-Type: application/json
  * Response: Job ID, droplet ID, estimated cost
+ * @param {Object} params
+ * @param {Object} params.statement - The strategy statement
+ * @param {Object} [params.files] - The files to upload (required if not using MetaAPI)
+ * @param {string} [params.optimization_type] - Type of optimization: "regular" or "walk_forward"
+ * @param {string|null} [params.strategy_statement_id] - Optional strategy statement ID
+ * @param {Object|null} [params.walk_forward_setting] - Walk forward optimization settings
+ * @param {File|null} [params.csvFile] - CSV file for the backend (optional)
+ * @param {string|null} [params.metaapi_token] - MetaAPI token (for MetaAPI mode)
+ * @param {string|null} [params.metaapi_account_id] - MetaAPI account ID (for MetaAPI mode)
+ * @param {string|null} [params.symbol] - Trading symbol (for MetaAPI mode)
  */
-export const createOptimizationJob = async ({ statement, files, optimization_type = "regular", strategy_statement_id = null, walk_forward_setting = null, csvFile = null }) => {
+export const createOptimizationJob = async ({ 
+  statement, 
+  files = null, 
+  optimization_type = "regular", 
+  strategy_statement_id = null, 
+  walk_forward_setting = null, 
+  csvFile = null,
+  metaapi_token = null,
+  metaapi_account_id = null,
+  symbol = null 
+}) => {
+  // Validate input: either files OR MetaAPI credentials must be provided
+  const isMetaAPIMode = metaapi_token && metaapi_account_id && symbol;
+  const isFileMode = files && Object.keys(files).length > 0;
+
+  if (!isMetaAPIMode && !isFileMode) {
+    throw new Error("Either files or MetaAPI credentials (token, account_id, symbol) must be provided");
+  }
+
+  // Debug logging
+  console.log("🚀 OPTIMIZATION JOB PAYLOAD:");
+  console.log("📋 Statement:", statement);
+  console.log("🔧 Optimization Type:", optimization_type);
+  console.log("📁 Files:", isFileMode ? Object.keys(files) : 'N/A (using MetaAPI)');
+  console.log("🆔 Strategy Statement ID:", strategy_statement_id);
+  console.log("⚙️ Walk Forward Settings:", walk_forward_setting);
+
+  // Debug logging for MetaAPI mode
+  if (isMetaAPIMode) {
+    console.log('🔍 MetaAPI Optimization Job Debug Info:', {
+      tokenLength: metaapi_token?.length || 0,
+      accountId: metaapi_account_id,
+      symbol: symbol,
+      tokenPrefix: metaapi_token?.substring(0, 20) + '...',
+      hasToken: !!metaapi_token,
+      hasAccountId: !!metaapi_account_id
+    });
+  }
+
   const formData = new FormData();
 
   // Attach the statement JSON as a string
@@ -889,34 +1034,54 @@ export const createOptimizationJob = async ({ statement, files, optimization_typ
     formData.append("walk_forward_setting", JSON.stringify(walk_forward_setting));
   }
 
-  // Attach each file using its timeframe key
-  for (const [timeframe, file] of Object.entries(files)) {
-    formData.append(timeframe, file);
+  // MetaAPI mode: attach MetaAPI credentials
+  if (isMetaAPIMode) {
+    formData.append("metaapi_token", metaapi_token);
+    formData.append("metaapi_account_id", metaapi_account_id);
+    formData.append("symbol", symbol);
+    console.log('📡 Creating optimization job with MetaAPI');
   }
 
-  // Attach the CSV file for the backend
-  if (csvFile) {
-    formData.append("csvFile", csvFile);
-  } else {
-    // Fallback: use the first file from the files object if csvFile not provided
-    const fileEntries = Object.entries(files);
-    if (fileEntries.length > 0) {
-      const [, firstFile] = fileEntries[0];
-      formData.append("csvFile", firstFile);
+  // File upload mode: attach files
+  if (isFileMode) {
+    // Attach each file using its timeframe key
+    for (const [timeframe, file] of Object.entries(files)) {
+      formData.append(timeframe, file);
     }
+
+    // Attach the CSV file for the backend
+    if (csvFile) {
+      formData.append("csvFile", csvFile);
+    } else {
+      // Fallback: use the first file from the files object if csvFile not provided
+      const fileEntries = Object.entries(files);
+      if (fileEntries.length > 0) {
+        const [, firstFile] = fileEntries[0];
+        formData.append("csvFile", firstFile);
+      }
+    }
+    console.log('📁 Creating optimization job with file upload');
   }
 
-  const response = await Fetch("/api/optimization-jobs/create/", {
-    method: "POST",
-    body: formData,
-  });
+  try {
+    const response = await Fetch("/api/optimization-jobs/create/", {
+      method: "POST",
+      body: formData,
+    });
 
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.error || "Failed to create optimization job");
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('🔍 Optimization Job Backend Error:', errorData);
+      throw new Error(errorData.error || "Failed to create optimization job");
+    }
+
+    const data = await response.json();
+    console.log("✅ Optimization job created:", data);
+    return data;
+  } catch (err) {
+    console.error("❌ Optimization job creation failed:", err);
+    throw err;
   }
-
-  return response.json();
 };
 
 /**
