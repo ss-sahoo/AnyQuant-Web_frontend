@@ -39,7 +39,7 @@ export function ResponsiveExpandedDashboard() {
           {/* Navigation */}
           <div className="mb-4 flex justify-end">
             <Link href="/home">
-              <Button variant="outline" className="border-[#6BCAE2] text-[#6BCAE2] hover:bg-[#6BCAE2]/10">
+              <Button variant="outline" className="border-[#6BCAE2] text-[#6BCAE2] hover:text-[#6BCAE2] hover:bg-[#6BCAE2]/10">
                 Back to Home
               </Button>
             </Link>

@@ -116,7 +116,7 @@ const refreshAlgorithms = async (pageToFetch = page) => {
               <Link href="/dashboard">
                 <Button
                   variant="outline"
-                  className="border-[#6BCAE2] text-[#6BCAE2] hover:bg-[#6BCAE2]/10 w-full sm:w-auto"
+                  className="border-[#6BCAE2] text-[#6BCAE2] hover:bg-[#6BCAE2]/10 hover:text-white w-full sm:w-auto"
                 >
                   View Dashboard
                 </Button>

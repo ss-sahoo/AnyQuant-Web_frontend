@@ -67,26 +67,33 @@ function OptimizationResultsContent() {
       // If job is completed, process results
       if (['completed', 'success'].includes(normalizedStatus)) {
         if (data.results) {
+          // For regular optimization, use optimisation_preview as the main table data
+          const tableData = data.results.optimisation_preview || data.results.convergence_data || []
+          
           const transformedResult = {
-            convergence_data: data.results.convergence_data || [],
+            convergence_data: tableData,
             optimization_heatmap_data: data.results.optimization_heatmap_data || [],
             trade_results: data.results.trade_results || [],
-            full_optimization_results: data.results.convergence_data || [],
-            table: data.results.convergence_data || [],
+            full_optimization_results: tableData,
+            table: tableData,
             optimiser_file: data.results.optimiser_file,
             output_dir: data.results.output_dir,
-            time_taken: data.results.time_taken,
+            time_taken: data.results.optimised_parameters?.['Time taken'] || data.results.time_taken,
             num_trades: data.results.num_trades,
             final_equity: data.results.final_equity,
             sharpe_ratio: data.results.sharpe_ratio,
             sortino_ratio: data.results.sortino_ratio,
             calmar_ratio: data.results.calmar_ratio,
+            optimised_parameters: data.results.optimised_parameters,
+            optimised_parameter_txt: data.results.optimised_parameter_txt,
+            results_output_listing: data.results.results_output_listing,
+            plots_html: data.results.plots_html,
           }
           setOptimisationResult(transformedResult)
           
           // Select first row by default
-          if (transformedResult.convergence_data && transformedResult.convergence_data.length > 0) {
-            setSelectedRow(transformedResult.convergence_data[0])
+          if (tableData && tableData.length > 0) {
+            setSelectedRow(tableData[0])
           }
         }
         setIsLoading(false)
@@ -406,37 +413,212 @@ function OptimizationResultsContent() {
             </div>
           )}
 
-          {/* Results Display */}
-          {optimisationResult && (
+          {/* Walk Forward Optimization Results */}
+          {jobData && jobData.type === 'Walk Forward Optimization' && jobData.results && (
             <div className="bg-[#000000] rounded-lg p-6">
-              {/* Results Summary */}
-              <div className="mb-6 p-4 bg-[#141721] rounded-md border border-gray-700">
-                <h3 className="text-lg font-semibold text-white mb-3">Optimization Summary</h3>
+              {/* Hypothesis Testing Results */}
+              <div className="mb-6">
+                <h3 className="text-lg font-semibold text-white mb-4">Hypothesis Testing</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div>
-                    <p className="text-gray-400 text-sm">Final Equity</p>
+                  <div className="bg-[#141721] rounded-lg p-4">
+                    <p className="text-gray-400 text-sm">Z-Statistic</p>
                     <p className="text-white font-semibold text-lg">
-                      ${optimisationResult.final_equity?.toFixed(2) || '-'}
+                      {jobData.results.z_statistic?.toFixed(4) || 'N/A'}
                     </p>
                   </div>
-                  <div>
-                    <p className="text-gray-400 text-sm">Total Trades</p>
-                    <p className="text-white font-semibold text-lg">{optimisationResult.num_trades || '-'}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-400 text-sm">Sharpe Ratio</p>
+                  <div className="bg-[#141721] rounded-lg p-4">
+                    <p className="text-gray-400 text-sm">P-Value</p>
                     <p className="text-white font-semibold text-lg">
-                      {optimisationResult.sharpe_ratio?.toFixed(2) || '-'}
+                      {jobData.results.p_value?.toFixed(4) || 'N/A'}
                     </p>
                   </div>
-                  <div>
-                    <p className="text-gray-400 text-sm">Time Taken</p>
-                    <p className="text-white font-semibold text-lg">{optimisationResult.time_taken || '-'}</p>
+                  <div className="bg-[#141721] rounded-lg p-4">
+                    <p className="text-gray-400 text-sm">Avg Validation Return</p>
+                    <p className={`font-semibold text-lg ${
+                      (jobData.results.avg_validation_return || 0) > 0 ? 'text-green-500' : 'text-red-500'
+                    }`}>
+                      {jobData.results.avg_validation_return?.toFixed(2) || 'N/A'}%
+                    </p>
                   </div>
+                  <div className="bg-[#141721] rounded-lg p-4">
+                    <p className="text-gray-400 text-sm">Decision</p>
+                    <p className={`font-semibold text-sm ${
+                      (jobData.results.p_value || 1) < 0.05 ? 'text-green-500' : 'text-yellow-500'
+                    }`}>
+                      {(jobData.results.p_value || 1) < 0.05 ? '✅ Profitable' : '⚠️ Not Profitable'}
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="mt-4 bg-[#141721] rounded-lg p-4">
+                  <p className="text-gray-400 text-sm mb-2">Hypothesis Decision:</p>
+                  <p className="text-white text-sm">
+                    {jobData.results.hypothesis_decision || 'No decision available'}
+                  </p>
                 </div>
               </div>
 
-              {/* Tabs */}
+              {/* Plot Files Information */}
+              {jobData.results.plot_files && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold text-white mb-4">
+                    Plot Files ({Object.keys(jobData.results.plot_files).length} available)
+                  </h3>
+                  <div className="grid grid-cols-1 gap-3">
+                    {Object.entries(jobData.results.plot_files).map(([type, info]: [string, any]) => (
+                      <div
+                        key={type}
+                        className="bg-[#141721] rounded-lg p-4 flex justify-between items-center"
+                      >
+                        <div>
+                          <p className="text-white font-semibold">
+                            {type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                          </p>
+                          <p className="text-gray-400 text-sm">{info.filename}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[#85e1fe] font-semibold">
+                            {(info.size / 1024 / 1024).toFixed(2)} MB
+                          </p>
+                          <p className="text-gray-400 text-xs">
+                            {info.available ? '✅ Available' : '❌ Not available'}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-gray-400 text-sm mt-3">
+                    ℹ️ Plots were generated on the droplet. Output directory: {jobData.results.output_dir}
+                  </p>
+                </div>
+              )}
+
+              {/* Walk Forward Settings */}
+              {jobData.job_parameters?.walk_forward_settings && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold text-white mb-4">Walk Forward Settings</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-[#141721] rounded-lg p-4">
+                      <p className="text-gray-400 text-sm">Warmup Bars</p>
+                      <p className="text-white font-semibold">
+                        {jobData.job_parameters.walk_forward_settings.warmup_bars}
+                      </p>
+                    </div>
+                    <div className="bg-[#141721] rounded-lg p-4">
+                      <p className="text-gray-400 text-sm">Lookback Bars</p>
+                      <p className="text-white font-semibold">
+                        {jobData.job_parameters.walk_forward_settings.lookback_bars}
+                      </p>
+                    </div>
+                    <div className="bg-[#141721] rounded-lg p-4">
+                      <p className="text-gray-400 text-sm">Validation Bars</p>
+                      <p className="text-white font-semibold">
+                        {jobData.job_parameters.walk_forward_settings.validation_bars}
+                      </p>
+                    </div>
+                    <div className="bg-[#141721] rounded-lg p-4">
+                      <p className="text-gray-400 text-sm">Anchor</p>
+                      <p className="text-white font-semibold">
+                        {jobData.job_parameters.walk_forward_settings.anchor ? 'Yes' : 'No'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Output Files Listing */}
+              {jobData.results.results_output_listing && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold text-white mb-4">Generated Files</h3>
+                  <div className="bg-[#141721] rounded-lg p-4">
+                    <ul className="space-y-2">
+                      {jobData.results.results_output_listing.map((file: string, idx: number) => (
+                        <li key={idx} className="text-gray-300 text-sm flex items-center gap-2">
+                          <span className="text-[#85e1fe]">📄</span>
+                          {file}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Regular Optimization Results */}
+          {optimisationResult && jobData?.type !== 'Walk Forward Optimization' && (
+            <div className="bg-[#000000] rounded-lg p-6">
+              {/* Optimized Parameters */}
+              {optimisationResult.optimised_parameters && (
+                <div className="mb-6 p-4 bg-[#141721] rounded-md border border-gray-700">
+                  <h3 className="text-lg font-semibold text-white mb-3">Optimized Parameters</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-[#0e1018] rounded-lg p-3">
+                      <p className="text-gray-400 text-sm">Final Equity</p>
+                      <p className="text-white font-semibold text-lg">
+                        ${optimisationResult.optimised_parameters['Final optimised Equity'] || optimisationResult.final_equity?.toFixed(2) || '-'}
+                      </p>
+                    </div>
+                    <div className="bg-[#0e1018] rounded-lg p-3">
+                      <p className="text-gray-400 text-sm">Time Taken</p>
+                      <p className="text-white font-semibold text-lg">
+                        {optimisationResult.optimised_parameters['Time taken'] || optimisationResult.time_taken || '-'}
+                      </p>
+                    </div>
+                    <div className="bg-[#0e1018] rounded-lg p-3">
+                      <p className="text-gray-400 text-sm">Total Trades</p>
+                      <p className="text-white font-semibold text-lg">{optimisationResult.num_trades || '-'}</p>
+                    </div>
+                    <div className="bg-[#0e1018] rounded-lg p-3">
+                      <p className="text-gray-400 text-sm">Sharpe Ratio</p>
+                      <p className="text-white font-semibold text-lg">
+                        {optimisationResult.sharpe_ratio?.toFixed(2) || '-'}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {/* Parameter Details */}
+                  {optimisationResult.optimised_parameter_txt && (
+                    <div className="mt-4 bg-[#0e1018] rounded-lg p-4">
+                      <p className="text-gray-400 text-sm mb-2">Parameter Details:</p>
+                      <pre className="text-white text-sm whitespace-pre-wrap">
+                        {optimisationResult.optimised_parameter_txt}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Results Summary (if no optimised_parameters) */}
+              {!optimisationResult.optimised_parameters && (
+                <div className="mb-6 p-4 bg-[#141721] rounded-md border border-gray-700">
+                  <h3 className="text-lg font-semibold text-white mb-3">Optimization Summary</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                      <p className="text-gray-400 text-sm">Final Equity</p>
+                      <p className="text-white font-semibold text-lg">
+                        ${optimisationResult.final_equity?.toFixed(2) || '-'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400 text-sm">Total Trades</p>
+                      <p className="text-white font-semibold text-lg">{optimisationResult.num_trades || '-'}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400 text-sm">Sharpe Ratio</p>
+                      <p className="text-white font-semibold text-lg">
+                        {optimisationResult.sharpe_ratio?.toFixed(2) || '-'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400 text-sm">Time Taken</p>
+                      <p className="text-white font-semibold text-lg">{optimisationResult.time_taken || '-'}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Tabs for Regular Optimization */}
               <div className="flex border-b border-gray-700 mb-6">
                 <button
                   className={`px-6 py-3 font-semibold ${selectedTab === 'results' ? 'text-[#85e1fe] border-b-2 border-[#85e1fe]' : 'text-gray-400'}`}
@@ -519,6 +701,19 @@ function OptimizationResultsContent() {
               {/* Graph Tab */}
               {selectedTab === 'graph' && (
                 <div>
+                  {/* Optimization Plot from backend */}
+                  {optimisationResult.plots_html && optimisationResult.plots_html['optimise_plot.html'] && (
+                    <div className="mb-8">
+                      <h3 className="mb-2 text-lg font-semibold text-white">Optimization Plot</h3>
+                      <iframe
+                        title="Optimization Plot"
+                        style={{ width: "100%", height: "500px", border: "none", backgroundColor: "#0e1018" }}
+                        srcDoc={optimisationResult.plots_html['optimise_plot.html']}
+                      />
+                    </div>
+                  )}
+
+                  {/* Convergence Plot (fallback) */}
                   {optimisationResult.convergence_data && optimisationResult.convergence_data.length > 0 && (() => {
                     const plotHTML = generateConvergencePlotHTML(optimisationResult.convergence_data);
                     return plotHTML ? (
@@ -546,6 +741,15 @@ function OptimizationResultsContent() {
                       </div>
                     ) : null;
                   })()}
+
+                  {/* No plots message */}
+                  {!optimisationResult.plots_html && 
+                   !optimisationResult.convergence_data?.length && 
+                   !optimisationResult.optimization_heatmap_data?.length && (
+                    <div className="text-center text-gray-400 py-8">
+                      No plot data available
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -561,6 +765,26 @@ function OptimizationResultsContent() {
                         </div>
                       ) : null
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Generated Files Section */}
+              {optimisationResult.results_output_listing && optimisationResult.results_output_listing.length > 0 && (
+                <div className="mt-6">
+                  <h3 className="text-lg font-semibold text-white mb-4">Generated Files</h3>
+                  <div className="bg-[#141721] rounded-lg p-4">
+                    <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {optimisationResult.results_output_listing.map((file: string, idx: number) => (
+                        <li key={idx} className="text-gray-300 text-sm flex items-center gap-2">
+                          <span className="text-[#85e1fe]">📄</span>
+                          {file}
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="text-gray-400 text-xs mt-3">
+                      Output directory: {optimisationResult.output_dir || 'N/A'}
+                    </p>
                   </div>
                 </div>
               )}
@@ -587,4 +811,3 @@ export default function OptimizationResultsPage() {
     </AuthGuard>
   )
 }
-

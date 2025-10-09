@@ -966,28 +966,34 @@ export const getOptimizationCosts = async () => {
  * Purpose: Start the optimization process
  * Headers: Authorization: Bearer {token}, Content-Type: application/json
  * Response: Job ID, droplet ID, estimated cost
+ * 
+ * NOTE: Backend fetches strategy from database using strategy_statement_id, so NO statement parameter needed!
+ * 
  * @param {Object} params
- * @param {Object} params.statement - The strategy statement
+ * @param {string} params.strategy_statement_id - REQUIRED: Strategy statement ID (backend fetches from DB)
+ * @param {string} [params.type] - Type of optimization: "regular" or "walk_forward" (default: "regular")
  * @param {Object} [params.files] - The files to upload (required if not using MetaAPI)
- * @param {string} [params.type] - Type of optimization: "regular" or "walk_forward" (backend expects 'type')
- * @param {string|null} [params.strategy_statement_id] - Optional strategy statement ID
- * @param {Object|null} [params.walk_forward_settings] - Walk forward optimization settings (plural)
+ * @param {Object|null} [params.walk_forward_settings] - Walk forward optimization settings (for walk_forward type)
  * @param {File|null} [params.csvFile] - CSV file for the backend (optional)
  * @param {string|null} [params.metaapi_token] - MetaAPI token (for MetaAPI mode)
  * @param {string|null} [params.metaapi_account_id] - MetaAPI account ID (for MetaAPI mode)
  * @param {string|null} [params.symbol] - Trading symbol (for MetaAPI mode)
  */
 export const createOptimizationJob = async ({ 
-  statement, 
+  strategy_statement_id, // REQUIRED - backend fetches strategy from DB
+  type = "regular", 
   files = null, 
-  type = "regular", // Backend expects 'type' not 'optimization_type'
-  strategy_statement_id = null, 
-  walk_forward_settings = null, // Backend expects 'walk_forward_settings' (plural)
+  walk_forward_settings = null,
   csvFile = null,
   metaapi_token = null,
   metaapi_account_id = null,
   symbol = null 
 }) => {
+  // Validate required parameters
+  if (!strategy_statement_id) {
+    throw new Error("strategy_statement_id is required");
+  }
+
   // Validate input: either files OR MetaAPI credentials must be provided
   const isMetaAPIMode = metaapi_token && metaapi_account_id && symbol;
   const isFileMode = files && Object.keys(files).length > 0;
@@ -998,10 +1004,9 @@ export const createOptimizationJob = async ({
 
   // Debug logging
   console.log("🚀 OPTIMIZATION JOB PAYLOAD:");
-  console.log("📋 Statement:", statement);
+  console.log("🆔 Strategy Statement ID:", strategy_statement_id);
   console.log("🔧 Optimization Type:", type);
   console.log("📁 Files:", isFileMode ? Object.keys(files) : 'N/A (using MetaAPI)');
-  console.log("🆔 Strategy Statement ID:", strategy_statement_id);
   console.log("⚙️ Walk Forward Settings:", walk_forward_settings);
 
   // Debug logging for MetaAPI mode
@@ -1018,20 +1023,17 @@ export const createOptimizationJob = async ({
 
   const formData = new FormData();
 
-  // Attach the statement JSON as a string
-  formData.append("statement", JSON.stringify(statement));
+  // ❌ DO NOT send statement - backend fetches from database!
+  // ✅ Send strategy_statement_id instead
+  formData.append("strategy_statement_id", strategy_statement_id);
 
   // Attach optimization type (backend expects 'type')
   formData.append("type", type);
 
-  // Attach strategy statement ID if provided
-  if (strategy_statement_id) {
-    formData.append("strategy_statement_id", strategy_statement_id);
-  }
-
   // Attach walk forward settings if provided (backend expects 'walk_forward_settings')
   if (walk_forward_settings) {
     formData.append("walk_forward_settings", JSON.stringify(walk_forward_settings));
+    console.log("📋 Walk forward settings attached:", JSON.stringify(walk_forward_settings));
   }
 
   // MetaAPI mode: attach MetaAPI credentials
@@ -1160,6 +1162,49 @@ export const listOptimizationJobs = async (params = {}) => {
   if (!response.ok) {
     const errorData = await response.json();
     throw new Error(errorData.error || "Failed to list optimization jobs");
+  }
+
+  return response.json();
+};
+
+/**
+ * Get Walk Forward Optimization results from droplet job
+ * Endpoint: GET /api/optimization-jobs/{job_id}/
+ * Purpose: Get walk forward optimization results with hypothesis testing
+ * Response includes: z_statistic, p_value, hypothesis_decision, avg_validation_return, etc.
+ */
+export const getWalkForwardDropletResults = async (jobId) => {
+  const response = await Fetch(`/api/optimization-jobs/${jobId}/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get walk forward optimization results");
+  }
+
+  return response.json();
+};
+
+/**
+ * List all walk forward optimization jobs for a strategy (from droplets)
+ * Endpoint: GET /api/strategies/{id}/walkforward-optimizations/
+ * Returns: List of walk forward optimization jobs with through_droplet flag
+ */
+export const listStrategyWalkForwardJobs = async (strategyId) => {
+  const response = await Fetch(`/api/strategies/${strategyId}/walkforward-optimizations/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to list walk forward optimization jobs");
   }
 
   return response.json();

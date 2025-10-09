@@ -27,6 +27,10 @@ import {
   // New optimization droplets API functions
   getOptimizationCosts,
   createOptimizationJob,
+  getOptimizationJob,
+  cancelOptimizationJob,
+  getWalkForwardDropletResults,
+  listStrategyWalkForwardJobs,
 } from "../AllApiCalls" // Import new functions
 import { X } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
@@ -1214,7 +1218,7 @@ export default function StrategyTestingPage() {
     }
   }
 
-  // Cleanup polling interval on unmount
+  // Cleanup polling intervals on unmount
   useEffect(() => {
     return () => {
       if (statusPollingInterval) {
@@ -1616,15 +1620,154 @@ export default function StrategyTestingPage() {
   const [showCostDialog, setShowCostDialog] = useState(false)
   const [optimizationType, setOptimizationType] = useState<'regular' | 'walk_forward'>('regular')
   const [isCreatingOptimizationJob, setIsCreatingOptimizationJob] = useState(false)
+  const [dropletJobId, setDropletJobId] = useState<number | null>(null)
+  const [dropletJobStatus, setDropletJobStatus] = useState<string>("")
+  const [dropletJobResults, setDropletJobResults] = useState<any>(null)
+  const [dropletPollingInterval, setDropletPollingInterval] = useState<NodeJS.Timeout | null>(null)
 
   // New Optimization Droplets Flow Functions
   
+  /**
+   * Poll droplet job status (for droplet-based optimizations)
+   */
+  const startDropletJobPolling = (jobId: number) => {
+    // Clear any existing polling
+    if (dropletPollingInterval) {
+      clearInterval(dropletPollingInterval)
+      setDropletPollingInterval(null)
+    }
+
+    let stopped = false
+    const isFinalStatus = (status: string) => 
+      ["Completed", "Failed", "Cancelled", "completed", "failed", "cancelled"].includes(status)
+
+    const interval = setInterval(async () => {
+      if (stopped) return
+
+      try {
+        const jobData = await getOptimizationJob(jobId)
+        console.log(`📊 Droplet Job ${jobId}: ${jobData.status} (Runtime: ${jobData.runtime_minutes} min)`)
+        
+        setDropletJobStatus(jobData.status)
+        
+        if (isFinalStatus(jobData.status)) {
+          stopped = true
+          clearInterval(interval)
+          setDropletPollingInterval(null)
+
+          if (jobData.status === 'Completed' || jobData.status === 'completed') {
+            console.log('✅ Droplet job completed successfully:', jobData)
+            setDropletJobResults(jobData)  // Store entire job data, not just results
+            
+            // Show results for walk forward optimization
+            if (optimizationType === 'walk_forward') {
+              console.log('📊 Walk Forward Results:')
+              console.log(`   Strategy: ${jobData.strategy_name}`)
+              console.log(`   Runtime: ${jobData.runtime_minutes} minutes`)
+              console.log(`   Z-Statistic: ${jobData.results?.z_statistic?.toFixed(4)}`)
+              console.log(`   P-Value: ${jobData.results?.p_value?.toFixed(4)}`)
+              console.log(`   Decision: ${jobData.results?.hypothesis_decision}`)
+              console.log(`   Avg Validation Return: ${jobData.results?.avg_validation_return?.toFixed(2)}%`)
+              
+              // Log plot files if available
+              if (jobData.results?.plot_files) {
+                console.log('📈 Plot Files:')
+                Object.entries(jobData.results.plot_files).forEach(([type, info]: [string, any]) => {
+                  console.log(`   ${type}: ${info.filename} (${(info.size / 1024 / 1024).toFixed(2)} MB)`)
+                })
+              }
+              
+              // Log cost information
+              console.log('💰 Cost Information:')
+              console.log(`   Estimated: $${jobData.estimated_cost}`)
+              console.log(`   Actual: $${jobData.actual_cost}`)
+              console.log(`   Droplet Size: ${jobData.droplet_size}`)
+              
+              const decision = jobData.results?.hypothesis_decision || 'Completed'
+              const pValue = jobData.results?.p_value
+              const isProfitable = pValue && pValue < 0.05
+              
+              showToast(
+                `Walk Forward Optimization completed! ${isProfitable ? '✅ Profitable' : '⚠️ ' + decision.substring(0, 50)}`,
+                isProfitable ? 'success' : 'warning'
+              )
+            } else {
+              showToast('Optimization completed successfully!', 'success')
+            }
+          } else if (jobData.status === 'Failed' || jobData.status === 'failed') {
+            showToast(`Optimization job failed: ${jobData.error_message || 'Unknown error'}`, 'error')
+          }
+        }
+      } catch (error) {
+        console.error('Error polling droplet job status:', error)
+        stopped = true
+        clearInterval(interval)
+        setDropletPollingInterval(null)
+      }
+    }, 30000) // Poll every 30 seconds
+
+    setDropletPollingInterval(interval)
+  }
+
   /**
    * Step 1: Handle optimization with droplets - show cost dialog
    */
   const handleOptimizationWithDroplets = async (type: 'regular' | 'walk_forward') => {
     setOptimizationType(type)
     setShowCostDialog(true)
+  }
+
+  // Cleanup droplet polling interval on unmount
+  useEffect(() => {
+    return () => {
+      if (dropletPollingInterval) {
+        clearInterval(dropletPollingInterval)
+      }
+    }
+  }, [dropletPollingInterval])
+
+  /**
+   * Open walk forward plot in new tab or display in iframe
+   */
+  const openWalkForwardPlot = (plotUrl: string, plotType: string) => {
+    console.log(`Opening ${plotType} plot: ${plotUrl}`)
+    window.open(plotUrl, '_blank')
+  }
+
+  /**
+   * View walk forward droplet results
+   */
+  const viewWalkForwardDropletResults = async (jobId: number) => {
+    try {
+      const jobData = await getWalkForwardDropletResults(jobId)
+      console.log('📊 Walk Forward Droplet Results:', jobData)
+      
+      setDropletJobResults(jobData.results)
+      
+      // Display results summary
+      if (jobData.results) {
+        console.log('📈 Results Summary:')
+        console.log(`   Status: ${jobData.status}`)
+        console.log(`   Runtime: ${jobData.runtime_minutes} minutes`)
+        console.log(`   Z-Statistic: ${jobData.results.z_statistic?.toFixed(4)}`)
+        console.log(`   P-Value: ${jobData.results.p_value?.toFixed(4)}`)
+        console.log(`   Decision: ${jobData.results.hypothesis_decision}`)
+        console.log(`   Avg Validation Return: ${jobData.results.avg_validation_return?.toFixed(2)}%`)
+        
+        // Display plot URLs
+        if (jobData.results.plot_urls) {
+          console.log('📈 Available Plots:')
+          Object.entries(jobData.results.plot_urls).forEach(([type, url]: [string, any]) => {
+            console.log(`   ${type}: ${url}`)
+          })
+        }
+        
+        showToast('Walk forward results loaded successfully!', 'success')
+      }
+    } catch (error: any) {
+      console.error('Error fetching walk forward droplet results:', error)
+      showToast(`Failed to load results: ${error.message}`, 'error')
+    }
   }
 
   /**
@@ -1720,17 +1863,19 @@ export default function StrategyTestingPage() {
         optimiser_parameters: optimiserParameters,
       }
 
+      // Validate strategy_id is available
+      if (!strategy_id || isNaN(Number(strategy_id))) {
+        throw new Error("Strategy ID is required to create an optimization job")
+      }
+
       // Prepare API call parameters
+      // ❌ DO NOT send statement - backend fetches from database!
       const apiParams: any = {
-        statement: optimisationStatement,
-        type: optimizationType, // Backend expects 'type' not 'optimization_type'
+        strategy_statement_id: Number(strategy_id), // ✅ REQUIRED - backend fetches strategy from DB
+        type: optimizationType, // ✅ REQUIRED - 'regular' or 'walk_forward'
       }
 
-      if (strategy_id && !isNaN(Number(strategy_id))) {
-        apiParams.strategy_statement_id = Number(strategy_id)
-      }
-
-      // Add walk forward settings if needed (BEFORE MetaAPI/file handling)
+      // Add walk forward settings if needed
       if (optimizationType === 'walk_forward') {
         const walkForwardSettingsString = localStorage.getItem("walk_forward_settings")
         let walkForwardSettings = {
@@ -1783,13 +1928,26 @@ export default function StrategyTestingPage() {
       }
 
       // Step 3: Create optimization job
+      console.log("📤 Final API params being sent:", {
+        ...apiParams,
+        files: apiParams.files ? Object.keys(apiParams.files) : undefined,
+        metaapi_token: apiParams.metaapi_token ? '***' : undefined
+      })
+      
       const jobResult = await createOptimizationJob(apiParams)
       
       console.log("Optimization job created:", jobResult)
       
-      showToast("Optimization job created! Redirecting to results page...", 'success')
+      // Store job ID and start polling
+      setDropletJobId(jobResult.job_id)
+      setDropletJobStatus(jobResult.status || 'running')
       
-      // Navigate to results page with type parameter
+      showToast(`Optimization job created! Job ID: ${jobResult.job_id}`, 'success')
+      
+      // Start polling for job status
+      startDropletJobPolling(jobResult.job_id)
+      
+      // Navigate to results page with job_id parameter
       setTimeout(() => {
         router.push(`/optimization-results?job_id=${jobResult.job_id}&type=droplet`)
       }, 500)
@@ -2690,6 +2848,183 @@ export default function StrategyTestingPage() {
                 <p className="text-sm text-gray-500 text-center mt-2">
                   Please wait, this may take a few moments
                 </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Walk Forward Droplet Results Modal */}
+        {dropletJobResults && dropletJobResults.results && (
+          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+            <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-5xl max-h-[90vh] overflow-hidden">
+              <div className="flex justify-between items-center p-6 border-b border-gray-700">
+                <div>
+                  <h2 className="text-2xl font-bold text-white">{dropletJobResults.strategy_name}</h2>
+                  <p className="text-gray-400 text-sm mt-1">{dropletJobResults.type}</p>
+                </div>
+                <button 
+                  onClick={() => setDropletJobResults(null)}
+                  className="text-gray-400 hover:text-white"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              
+              <div className="p-6 overflow-y-auto max-h-[75vh]">
+                {/* Hypothesis Testing Results */}
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold text-white mb-4">Hypothesis Testing</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-[#141721] rounded-lg p-4">
+                      <p className="text-gray-400 text-sm">Z-Statistic</p>
+                      <p className="text-white font-semibold text-lg">
+                        {dropletJobResults.results.z_statistic?.toFixed(4) || 'N/A'}
+                      </p>
+                    </div>
+                    <div className="bg-[#141721] rounded-lg p-4">
+                      <p className="text-gray-400 text-sm">P-Value</p>
+                      <p className="text-white font-semibold text-lg">
+                        {dropletJobResults.results.p_value?.toFixed(4) || 'N/A'}
+                      </p>
+                    </div>
+                    <div className="bg-[#141721] rounded-lg p-4">
+                      <p className="text-gray-400 text-sm">Avg Validation Return</p>
+                      <p className={`font-semibold text-lg ${
+                        (dropletJobResults.results.avg_validation_return || 0) > 0 ? 'text-green-500' : 'text-red-500'
+                      }`}>
+                        {dropletJobResults.results.avg_validation_return?.toFixed(2) || 'N/A'}%
+                      </p>
+                    </div>
+                    <div className="bg-[#141721] rounded-lg p-4">
+                      <p className="text-gray-400 text-sm">Decision</p>
+                      <p className={`font-semibold text-sm ${
+                        (dropletJobResults.results.p_value || 1) < 0.05 ? 'text-green-500' : 'text-yellow-500'
+                      }`}>
+                        {(dropletJobResults.results.p_value || 1) < 0.05 ? '✅ Profitable' : '⚠️ Not Profitable'}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="mt-4 bg-[#141721] rounded-lg p-4">
+                    <p className="text-gray-400 text-sm mb-2">Hypothesis Decision:</p>
+                    <p className="text-white text-sm">
+                      {dropletJobResults.results.hypothesis_decision || 'No decision available'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Plot Files Information */}
+                {dropletJobResults.results.plot_files && (
+                  <div className="mb-6">
+                    <h3 className="text-lg font-semibold text-white mb-4">
+                      Plot Files ({Object.keys(dropletJobResults.results.plot_files).length} available)
+                    </h3>
+                    <div className="grid grid-cols-1 gap-3">
+                      {Object.entries(dropletJobResults.results.plot_files).map(([type, info]: [string, any]) => (
+                        <div
+                          key={type}
+                          className="bg-[#141721] rounded-lg p-4 flex justify-between items-center"
+                        >
+                          <div>
+                            <p className="text-white font-semibold">
+                              {type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                            </p>
+                            <p className="text-gray-400 text-sm">{info.filename}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[#85e1fe] font-semibold">
+                              {(info.size / 1024 / 1024).toFixed(2)} MB
+                            </p>
+                            <p className="text-gray-400 text-xs">
+                              {info.available ? '✅ Available' : '❌ Not available'}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-gray-400 text-sm mt-3">
+                      ℹ️ Plots were generated on the droplet. Download from output directory: {dropletJobResults.results.output_dir}
+                    </p>
+                  </div>
+                )}
+
+                {/* Walk Forward Settings */}
+                {dropletJobResults.job_parameters?.walk_forward_settings && (
+                  <div className="mb-6">
+                    <h3 className="text-lg font-semibold text-white mb-4">Walk Forward Settings</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="bg-[#141721] rounded-lg p-4">
+                        <p className="text-gray-400 text-sm">Warmup Bars</p>
+                        <p className="text-white font-semibold">
+                          {dropletJobResults.job_parameters.walk_forward_settings.warmup_bars}
+                        </p>
+                      </div>
+                      <div className="bg-[#141721] rounded-lg p-4">
+                        <p className="text-gray-400 text-sm">Lookback Bars</p>
+                        <p className="text-white font-semibold">
+                          {dropletJobResults.job_parameters.walk_forward_settings.lookback_bars}
+                        </p>
+                      </div>
+                      <div className="bg-[#141721] rounded-lg p-4">
+                        <p className="text-gray-400 text-sm">Validation Bars</p>
+                        <p className="text-white font-semibold">
+                          {dropletJobResults.job_parameters.walk_forward_settings.validation_bars}
+                        </p>
+                      </div>
+                      <div className="bg-[#141721] rounded-lg p-4">
+                        <p className="text-gray-400 text-sm">Anchor</p>
+                        <p className="text-white font-semibold">
+                          {dropletJobResults.job_parameters.walk_forward_settings.anchor ? 'Yes' : 'No'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Job Information */}
+                <div className="bg-[#141721] rounded-lg p-4">
+                  <h3 className="text-lg font-semibold text-white mb-3">Job Information</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Job ID:</span>
+                        <span className="text-white font-semibold">{dropletJobResults.id}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Status:</span>
+                        <span className="text-green-500 font-semibold">{dropletJobResults.status}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Runtime:</span>
+                        <span className="text-white font-semibold">{dropletJobResults.runtime_minutes} min</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Droplet Size:</span>
+                        <span className="text-white font-semibold">{dropletJobResults.droplet_size}</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Estimated Cost:</span>
+                        <span className="text-white font-semibold">${dropletJobResults.estimated_cost}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Actual Cost:</span>
+                        <span className="text-green-500 font-semibold">${dropletJobResults.actual_cost}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Droplet ID:</span>
+                        <span className="text-white font-semibold">{dropletJobResults.droplet_id}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Completed At:</span>
+                        <span className="text-white font-semibold">
+                          {new Date(dropletJobResults.completed_at).toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
