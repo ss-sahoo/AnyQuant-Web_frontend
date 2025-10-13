@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Home, User, LogOut, Menu, X, BarChart2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -11,6 +12,13 @@ interface MobileSidebarProps {
 
 export function MobileSidebar({ currentPage = "home" }: MobileSidebarProps) {
   const [isOpen, setIsOpen] = useState(false)
+  const router = useRouter()
+
+  const handleLogout = () => {
+    localStorage.removeItem("auth_token")
+    router.push("/")
+    setIsOpen(false)
+  }
 
   return (
     <>
@@ -93,14 +101,13 @@ export function MobileSidebar({ currentPage = "home" }: MobileSidebarProps) {
             </Link>
           </nav>
 
-          <Link
-            href="/logout"
+          <button
+            onClick={handleLogout}
             className="flex items-center gap-3 text-red-500 hover:text-red-400 transition-colors"
-            onClick={() => setIsOpen(false)}
           >
             <LogOut className="w-6 h-6" />
             <span>Logout</span>
-          </Link>
+          </button>
         </div>
       </aside>
     </>

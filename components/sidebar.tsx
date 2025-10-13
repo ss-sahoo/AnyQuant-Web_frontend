@@ -14,7 +14,7 @@ export function Sidebar({ currentPage = "home" }: SidebarProps) {
 
   const handleLogout = () => {
     localStorage.removeItem("auth_token")
-    router.push("/auth")
+    router.push("/")
   }
 
   return (
