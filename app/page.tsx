@@ -1,7 +1,10 @@
-import { redirect } from "next/navigation"
-
 export default function Home() {
-  // In a real app, we would check if the user is authenticated
-  // For now, we'll just redirect to the auth page
-  redirect("/auth")
+  // Redirect to external waitlist page
+  return (
+    <script
+      dangerouslySetInnerHTML={{
+        __html: `window.location.href = "https://www.anyquant.co.uk/waitlist";`,
+      }}
+    />
+  )
 }
