@@ -47,6 +47,8 @@ import { TradesSummary } from "@/components/trades-summary";
 import { MetaAPIConfig, type MetaAPIConfig as MetaAPIConfigType } from "@/components/metaapi-config";
 // New optimization droplets components
 import { OptimizationCostDialog } from "@/components/optimization-cost-dialog"
+// Backtest history components
+import { BacktestHistoryList } from "@/components/BacktestHistoryList"
 
 export default function StrategyTestingPage() {
   const router = useRouter()
@@ -105,6 +107,7 @@ export default function StrategyTestingPage() {
   // Add state variables for TradingType configuration
   const [commission, setCommission] = useState(0.00007)
   const [assetType, setAssetType] = useState("gold")
+  const [positionSize, setPositionSize] = useState("1")
 
   // New states for OptimisationTab
   const [selectedMaximiseOption, setSelectedMaximiseOption] = useState<string>("")
@@ -154,6 +157,9 @@ export default function StrategyTestingPage() {
     stdout: '',
     stderr: ''
   });
+
+  // Add backtest history states
+  const [showBacktestHistory, setShowBacktestHistory] = useState(false);
 
   // Add progress bar states
   const [progress, setProgress] = useState(0); // For backtest
@@ -648,7 +654,13 @@ export default function StrategyTestingPage() {
         // Check if trades CSV has actual data
         const csvLines = result.trades_csv.trim().split('\n')
         if (csvLines.length >= 2) {
-          showToast("Trades data available! View summary for details.", 'success')
+          showToast("Backtest completed! Redirecting to results...", 'success')
+          // Navigate to backtest results page if we have a backtest ID
+          if (result.backtest_id) {
+            setTimeout(() => {
+              router.push(`/backtest-results?id=${result.backtest_id}`)
+            }, 1000)
+          }
         } else {
           showToast("Backtest completed but no trades were executed.", 'warning')
         }
@@ -2093,6 +2105,16 @@ export default function StrategyTestingPage() {
                       </p>
                     </div>
 
+                    {/* Previous Backtests Button - Always Visible */}
+                    <div className="mb-4 flex justify-end">
+                      <button 
+                        onClick={() => setShowBacktestHistory(true)}
+                        className="bg-gray-600 hover:bg-gray-700 text-white rounded-full px-6 py-3 text-sm font-medium"
+                      >
+                        Previous Backtests
+                      </button>
+                    </div>
+
                     {/* MetaAPI Configuration or File Upload */}
                     {useMetaAPI ? (
                       <MetaAPIConfig
@@ -2146,6 +2168,8 @@ export default function StrategyTestingPage() {
                     setLot={setLot}
                     commission={commission}
                     setCommission={setCommission}
+                    positionSize={positionSize}
+                    setPositionSize={setPositionSize}
                     assetType={assetType}
                     setAssetType={setAssetType}
                     showTradesSummary={showTradesSummary}
@@ -2442,10 +2466,12 @@ export default function StrategyTestingPage() {
                 {/* Action Buttons */}
                 <div className="p-4 flex gap-4">
                   <button
-                    className={`flex-1 py-3 rounded-full text-white transition-colors ${
+                    className={`flex-1 py-3 rounded-full transition-colors ${
                       isLoading || (!useMetaAPI && (requiredTimeframes.length > uploadedFiles.length))
-                        ? 'bg-gray-600 cursor-not-allowed'
-                        : 'bg-[#141721] hover:bg-[#2B2E38]'
+                        ? 'bg-gray-600 cursor-not-allowed text-gray-300'
+                        : (activeTab === 'strategy' || activeTab === 'backtest')
+                        ? 'bg-[#85e1fe] text-black hover:bg-[#6bcae2] font-semibold'
+                        : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
                     }`}
                     onClick={handleRunBacktest}
                     disabled={isLoading || (!useMetaAPI && (requiredTimeframes.length > uploadedFiles.length))}
@@ -2464,7 +2490,9 @@ export default function StrategyTestingPage() {
                     className={`flex-1 py-3 rounded-full font-semibold ${
                       isLoading2 || isCreatingOptimizationJob
                         ? 'bg-gray-600 cursor-not-allowed text-gray-400'
-                        : 'bg-[#85e1fe] text-black hover:bg-[#6bcae2]'
+                        : activeTab === 'optimisation'
+                        ? 'bg-[#85e1fe] text-black hover:bg-[#6bcae2]'
+                        : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
                     }`}
                     disabled={isLoading2 || isCreatingOptimizationJob}
                   >
@@ -2851,6 +2879,14 @@ export default function StrategyTestingPage() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* Backtest History Modal */}
+        {showBacktestHistory && (
+          <BacktestHistoryList
+            strategyId={strategy_id || ''}
+            onClose={() => setShowBacktestHistory(false)}
+          />
         )}
 
         {/* Walk Forward Droplet Results Modal */}

@@ -1210,3 +1210,124 @@ export const listStrategyWalkForwardJobs = async (strategyId) => {
   return response.json();
 };
 
+// Backtest Results API Functions
+
+/**
+ * Get all backtest results with optional filtering
+ * @param {Object} params - Query parameters
+ * @param {string} [params.strategy_statement_id] - Filter by strategy ID
+ * @param {string} [params.account_id] - Filter by account ID
+ * @param {string} [params.status] - Filter by status (completed/failed)
+ * @param {string} [params.data_source] - Filter by data source (metaapi/file_upload)
+ * @param {number} [params.page] - Page number for pagination
+ * @param {number} [params.page_size] - Results per page
+ */
+export const getBacktestResults = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+  
+  if (params.strategy_statement_id) {
+    queryParams.append('strategy_statement_id', params.strategy_statement_id);
+  }
+  if (params.account_id) {
+    queryParams.append('account_id', params.account_id);
+  }
+  if (params.status) {
+    queryParams.append('status', params.status);
+  }
+  if (params.data_source) {
+    queryParams.append('data_source', params.data_source);
+  }
+  if (params.page) {
+    queryParams.append('page', params.page);
+  }
+  if (params.page_size) {
+    queryParams.append('page_size', params.page_size);
+  }
+
+  const response = await Fetch(`/api/backtest-results/?${queryParams}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get backtest results");
+  }
+
+  return response.json();
+};
+
+/**
+ * Get backtest results for a specific strategy
+ * @param {string} strategyStatementId - The strategy ID
+ * @param {Object} params - Query parameters
+ * @param {number} [params.page] - Page number for pagination
+ * @param {number} [params.page_size] - Results per page
+ */
+export const getStrategyBacktestResults = async (strategyStatementId, params = {}) => {
+  const queryParams = new URLSearchParams();
+  
+  if (params.page) {
+    queryParams.append('page', params.page);
+  }
+  if (params.page_size) {
+    queryParams.append('page_size', params.page_size);
+  }
+
+  const response = await Fetch(`/api/strategies/${strategyStatementId}/backtest-results/?${queryParams}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get strategy backtest results");
+  }
+
+  return response.json();
+};
+
+/**
+ * Get detailed backtest result by ID
+ * @param {string} backtestId - The backtest result ID
+ */
+export const getBacktestResultDetail = async (backtestId) => {
+  const response = await Fetch(`/api/backtest-results/${backtestId}/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get backtest result detail");
+  }
+
+  return response.json();
+};
+
+/**
+ * Delete a backtest result
+ * @param {string} backtestId - The backtest result ID to delete
+ */
+export const deleteBacktestResult = async (backtestId) => {
+  const response = await Fetch(`/api/backtest-results/${backtestId}/delete/`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to delete backtest result");
+  }
+
+  return response.json();
+};
+

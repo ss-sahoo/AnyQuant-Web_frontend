@@ -62,13 +62,12 @@ const refreshAlgorithms = async (pageToFetch = page) => {
     }
   }
   
-  const handleEditAlgorithm = async (id: string, name: string, instrument: string) => {
+  const handleEditAlgorithm = async (id: string, name: string) => {
     try {
       const numericId = id.split("-")[0]
   
       const payload = {
         name: String(name),
-        instrument: String(instrument),
       }
   
   
@@ -134,7 +133,7 @@ const refreshAlgorithms = async (pageToFetch = page) => {
               algorithms={algorithms}
               loading={loading}
               onDelete={handleDeleteAlgorithm}
-              onEdit={(id, name, instrument) => handleEditAlgorithm(id, name, instrument)}
+              onEdit={(id, name) => handleEditAlgorithm(id, name)}
               onDuplicate={(algorithm) => handleDuplicateAlgorithm(algorithm, false)}
               />
               {totalCount > pageSize && (
@@ -174,9 +173,9 @@ const refreshAlgorithms = async (pageToFetch = page) => {
 
           <AlgorithmShortTable
             algorithm={shortlistedAlgorithms}
-            onDelete={(id) => handleDeleteAlgorithm(id, true)}
+            onDelete={(id) => handleDeleteAlgorithm(id)}
             onDuplicate={(algorithm) => handleDuplicateAlgorithm(algorithm, true)}
-            onEdit={(algorithm) => handleEditAlgorithm(algorithm, true)}
+            onEdit={(algorithm) => handleEditAlgorithm(algorithm.id, algorithm.name)}
           />
         </div>
       </main>

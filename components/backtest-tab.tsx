@@ -28,6 +28,8 @@ interface BacktestTabProps {
   setLot: React.Dispatch<React.SetStateAction<string>>
   commission: number
   setCommission: React.Dispatch<React.SetStateAction<number>>
+  positionSize: string
+  setPositionSize: React.Dispatch<React.SetStateAction<string>>
 
   assetType: string
   setAssetType: React.Dispatch<React.SetStateAction<string>>
@@ -62,6 +64,8 @@ export function BacktestTab({
   setLot,
   commission,
   setCommission,
+  positionSize,
+  setPositionSize,
 
   assetType,
   setAssetType,
@@ -338,9 +342,9 @@ export function BacktestTab({
             />
           </div>
 
-          {/* Lot Size */}
+          {/* Lot Definition */}
           <div>
-            <label className="block text-sm text-gray-400 mb-2">Lot Size</label>
+            <label className="block text-sm text-gray-400 mb-2">Lot Definition</label>
             <div className="relative">
               <select
                 value={lot}
@@ -363,6 +367,19 @@ export function BacktestTab({
                 </svg>
               </div>
             </div>
+          </div>
+
+          {/* Position Size */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Position Size</label>
+            <input
+              type="number"
+              step="0.01"
+              value={positionSize}
+              onChange={(e) => setPositionSize(e.target.value)}
+              placeholder="e.g., 0.05, 0.13"
+              className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
+            />
           </div>
 
           {/* Max Trades (if not MTOOTAAT) */}

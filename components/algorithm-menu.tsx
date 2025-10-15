@@ -14,7 +14,7 @@ interface AlgorithmMenuProps {
   onClose: () => void
   onDelete: (id: string) => void
   onDuplicate: (name: string, instrument: string) => void
-  onEdit: (name: string, instrument: string) => void
+  onEdit: (name: string) => void
 }
 
 export function AlgorithmMenu({ anchorRef, algorithm, onClose, onDelete, onDuplicate, onEdit }: AlgorithmMenuProps) {
@@ -107,11 +107,10 @@ export function AlgorithmMenu({ anchorRef, algorithm, onClose, onDelete, onDupli
           strategy={algorithm}
           isEdit={true}
           onClose={handleModalClose}
-          onSave={(name, instrument) => {
-            onEdit(name, instrument)
+          onSave={(name) => {
+            onEdit(name)
             handleModalClose()
           }}
-          
         />
       )}
     </>

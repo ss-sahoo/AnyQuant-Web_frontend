@@ -10,7 +10,7 @@ interface AlgorithmTableProps {
   loading: boolean
   onDelete: (id: string) => void
   onDuplicate?: (algorithm: Algorithm) => void
-  onEdit: (id: string, name: string, instrument: string) => void
+  onEdit: (id: string, name: string) => void
 }
 
 export function AlgorithmTable({
@@ -68,8 +68,8 @@ export function AlgorithmTable({
                 algorithm={algorithm}
                 onClose={() => setOpenMenuId(null)}
                 onDelete={() => onDelete(algorithm.id)}
-                onEdit={(name, instrument) =>
-                  onEdit(algorithm.id, name, instrument)
+                onEdit={(name) =>
+                  onEdit(algorithm.id, name)
                 }
                 onDuplicate={(name, instrument) =>
                   onDuplicate?.({ ...algorithm, name, instrument })

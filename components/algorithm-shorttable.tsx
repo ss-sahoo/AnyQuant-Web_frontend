@@ -35,14 +35,13 @@ export function AlgorithmShortTable({ algorithm, onDelete, onDuplicate, onEdit }
     }
   }
 
-  const handleEdit = (id: string, name: string, instrument: string) => {
+  const handleEdit = (id: string, name: string) => {
     if (onEdit) {
       const algorithms = algorithm.find((algo) => algo.id === id)
       if (algorithms) {
         const updatedAlgorithm: Algorithm = {
           ...algorithms,
           name,
-          instrument,
         }
         onEdit(updatedAlgorithm)
       }
@@ -88,8 +87,8 @@ export function AlgorithmShortTable({ algorithm, onDelete, onDuplicate, onEdit }
                   handleDuplicate(algo.id, name, instrument)
                   setOpenMenuId(null)
                 }}
-                onEdit={(name, instrument) => {
-                  handleEdit(algo.id, name, instrument)
+                onEdit={(name) => {
+                  handleEdit(algo.id, name)
                   setOpenMenuId(null)
                 }}
               />
