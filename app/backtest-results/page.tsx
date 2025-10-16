@@ -518,20 +518,20 @@ export default function BacktestResultsPage() {
                 {/* Charts Section */}
                 <div className="grid grid-cols-1 gap-6">
                   {/* Volume Chart */}
-                  <div className="bg-[#141721] rounded-lg p-4">
+                  {/* <div className="bg-[#141721] rounded-lg p-4">
                     <h3 className="text-lg font-semibold text-white mb-4">Volume</h3>
                     <div className="h-64 bg-gray-800 rounded flex items-center justify-center">
                       <p className="text-gray-400">Volume Chart Placeholder</p>
                     </div>
-                  </div>
+                  </div> */}
 
                   {/* RSI_MA Chart */}
-                  <div className="bg-[#141721] rounded-lg p-4">
+                  {/* <div className="bg-[#141721] rounded-lg p-4">
                     <h3 className="text-lg font-semibold text-white mb-4">RSI_MA</h3>
                     <div className="h-64 bg-gray-800 rounded flex items-center justify-center">
                       <p className="text-gray-400">RSI_MA Chart Placeholder</p>
                     </div>
-                  </div>
+                  </div> */}
 
                   {/* Equity Chart */}
                   {backtestDetail.plot_html && (
@@ -539,7 +539,7 @@ export default function BacktestResultsPage() {
                       <h3 className="text-lg font-semibold text-white mb-4">Equity</h3>
                       <iframe
                         title="Equity Chart"
-                        style={{ width: "100%", height: "300px", border: "none", backgroundColor: "#f8f8f8" }}
+                        style={{ width: "100%", height: "600px", border: "none", backgroundColor: "#f8f8f8" }}
                         srcDoc={backtestDetail.plot_html}
                       />
                     </div>

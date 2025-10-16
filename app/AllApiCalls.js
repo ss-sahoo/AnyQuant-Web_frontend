@@ -265,6 +265,74 @@ export const runBacktestWithMetaAPI = async (strategy, token, accountId, symbol)
   }
 };
 
+// New: Check available timeframes for a symbol via MetaAPI
+export const getSymbolTimeframes = async ({ metaapi_token, metaapi_account_id, symbol }) => {
+  const response = await Fetch('/api/get-symbol-timeframes/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ metaapi_token, metaapi_account_id, symbol }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error?.error || error?.message || 'Failed to check symbol timeframes')
+  }
+  return response.json()
+}
+
+// New: Validate a strategy against MetaAPI timeframes
+export const validateStrategyMetaapi = async ({ statement, metaapi_token, metaapi_account_id, symbol }) => {
+  const response = await Fetch('/api/validate-strategy-metaapi/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      statement: JSON.stringify(statement),
+      metaapi_token,
+      metaapi_account_id,
+      symbol,
+    }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error?.error || error?.message || 'Failed to validate strategy')
+  }
+  return response.json()
+}
+
+// New: Get all broker symbols (optionally filtered)
+export const getAllBrokerSymbols = async ({ metaapi_token, metaapi_account_id, filter = undefined }) => {
+  const payload = { metaapi_token, metaapi_account_id }
+  if (filter) payload.filter = filter
+
+  const response = await Fetch('/api/get-all-broker-symbols/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error?.error || error?.message || 'Failed to fetch broker symbols')
+  }
+  return response.json()
+}
+
+// New: Find symbols with available timeframe(s)
+export const findSymbolsWithTimeframe = async ({ metaapi_token, metaapi_account_id, symbol, timeframes }) => {
+  const response = await Fetch('/api/find-symbols-with-timeframe/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ metaapi_token, metaapi_account_id, symbol, timeframes }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error?.error || error?.message || 'Failed to find symbols with timeframe')
+  }
+  return response.json()
+}
+
 /**
  * Run optimisation (async or sync)
  * @param {Object} params

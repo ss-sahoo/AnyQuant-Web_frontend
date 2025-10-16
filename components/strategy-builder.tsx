@@ -285,6 +285,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     componentType: "inp1" | "inp2" | "operator" | "then" | "accumulate"
   } | null>(null)
 
+  // Add state to track which equity rule is being edited
+  const [editingEquityRule, setEditingEquityRule] = useState<{
+    statementIndex: number
+    equityIndex: number
+  } | null>(null)
+
   // Add a new state variable to track the currently selected search result index
   const [selectedSearchIndex, setSelectedSearchIndex] = useState<number>(-1)
 
@@ -830,9 +836,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       currentStatement.Equity = []
     }
 
+    // Create the new equity rule
+    let equityRule: EquityRule
+
     // Handle partial take profit
     if (settings.type === "partial_tp" && settings.partialTpList && settings.partialTpList.length > 0) {
-      currentStatement.Equity.push({
+      equityRule = {
         statement: "and",
         inp1: {
           name: "partial_tp",
@@ -856,98 +865,101 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             }
           }),
         },
-      })
-      setStatements(newStatements)
-      return
-    }
-
-    // Rest of the function remains the same...
-    const formatType = settings.formatType || "simple"
-
-    if (formatType === "trailing" || settings.trailingStop) {
-      // Create the equity rule with trailing stop parameters
-      const equityRule: EquityRule = {
-        statement: "and",
-        operator: `inp1 = inp2 ${settings.direction} ${settings.value}pips`,
-        inp1: {
-          name: settings.type,
-          input_params: {
-            TrailingStop: "yes",
-            // Only add TrailingStep if it has a value and is not "0"
-            ...(settings.trailingStep && settings.trailingStep !== "0"
-              ? { TrailingStep: `${settings.trailingStep}pips` }
-              : {}),
-          },
-        },
-        inp2: { name: settings.inp2 || "Entry_Price" },
       }
-
-      currentStatement.Equity.push(equityRule)
-    } else if (settings.useAdvanced) {
-      // Advanced format with inp1 and inp2
-      const equityRule: EquityRule = {
-        statement: "and",
-        operator: `inp1 = inp2 ${settings.direction} ${settings.value}pips`,
-        inp1: { name: settings.type },
-        inp2: { name: settings.inp2 || "Entry_Price" },
-      }
-
-      // Add indicator parameters if provided
-      if (settings.valueType === "indicator" && settings.indicatorParams) {
-        equityRule.inp2 = {
-          name: settings.indicatorParams.name || "nperiod_hl",
-          side: settings.indicatorParams.side || "low",
-          timeframe: settings.indicatorParams.timeframe || "1h",
-          input_params: {
-            nperiod: settings.indicatorParams.nperiod || 30,
-          },
-        }
-      }
-
-      currentStatement.Equity.push(equityRule)
     } else {
-      // Simple format
-      if (settings.valueType === "pips") {
-        currentStatement.Equity.push({
-          statement: "and",
-          operator: `${settings.type} = Entry_Price ${settings.direction} ${settings.value}pips`,
-        })
-      } else if (settings.valueType === "percentage") {
-        // For percentage, we use multiplication
-        const actualMultiplier =
-          settings.type === "SL" ? 1 - Number(settings.value) / 100 : 1 + Number(settings.value) / 100
+      // Rest of the function remains the same...
+      const formatType = settings.formatType || "simple"
 
-        currentStatement.Equity.push({
+      if (formatType === "trailing" || settings.trailingStop) {
+        // Create the equity rule with trailing stop parameters
+        equityRule = {
           statement: "and",
-          operator: `${settings.type} = Entry_Price * ${actualMultiplier}`,
-        })
-      } else if (settings.valueType === "fixed") {
-        // For fixed price values
-        currentStatement.Equity.push({
-          statement: "and",
-          operator: `${settings.type} = ${settings.value}`,
-        })
-      } else if (settings.valueType === "indicator") {
-        // For indicator-based values
-        currentStatement.Equity.push({
-          statement: "and",
-          operator: `${settings.type} = inp2 ${settings.direction} ${settings.value}pips`,
-          inp2: {
-            name: settings.indicatorParams?.name || "nperiod_hl",
-            side: settings.indicatorParams?.side || "low",
-            timeframe: settings.indicatorParams?.timeframe || "1h",
+          operator: `inp1 = inp2 ${settings.direction} ${settings.value}pips`,
+          inp1: {
+            name: settings.type,
             input_params: {
-              nperiod: settings.indicatorParams?.nperiod || 30,
+              TrailingStop: "yes",
+              // Only add TrailingStep if it has a value and is not "0"
+              ...(settings.trailingStep && settings.trailingStep !== "0"
+                ? { TrailingStep: `${settings.trailingStep}pips` }
+                : {}),
             },
           },
-        })
-      } else if (settings.valueType === "close") {
-        // For close price with multiplier
-        currentStatement.Equity.push({
+          inp2: { name: settings.inp2 || "Entry_Price" },
+        }
+      } else if (settings.useAdvanced) {
+        // Advanced format with inp1 and inp2
+        equityRule = {
           statement: "and",
-          operator: `${settings.type} = Close * ${settings.value}`,
-        })
+          operator: `inp1 = inp2 ${settings.direction} ${settings.value}pips`,
+          inp1: { name: settings.type },
+          inp2: { name: settings.inp2 || "Entry_Price" },
+        }
+
+        // Add indicator parameters if provided
+        if (settings.valueType === "indicator" && settings.indicatorParams) {
+          equityRule.inp2 = {
+            name: settings.indicatorParams.name || "nperiod_hl",
+            side: settings.indicatorParams.side || "low",
+            timeframe: settings.indicatorParams.timeframe || "1h",
+            input_params: {
+              nperiod: settings.indicatorParams.nperiod || 30,
+            },
+          }
+        }
+      } else {
+        // Simple format
+        if (settings.valueType === "pips") {
+          equityRule = {
+            statement: "and",
+            operator: `${settings.type} = Entry_Price ${settings.direction} ${settings.value}pips`,
+          }
+        } else if (settings.valueType === "percentage") {
+          // For percentage, we use multiplication
+          const actualMultiplier =
+            settings.type === "SL" ? 1 - Number(settings.value) / 100 : 1 + Number(settings.value) / 100
+
+          equityRule = {
+            statement: "and",
+            operator: `${settings.type} = Entry_Price * ${actualMultiplier}`,
+          }
+        } else if (settings.valueType === "fixed") {
+          // For fixed price values
+          equityRule = {
+            statement: "and",
+            operator: `${settings.type} = ${settings.value}`,
+          }
+        } else if (settings.valueType === "indicator") {
+          // For indicator-based values
+          equityRule = {
+            statement: "and",
+            operator: `${settings.type} = inp2 ${settings.direction} ${settings.value}pips`,
+            inp2: {
+              name: settings.indicatorParams?.name || "nperiod_hl",
+              side: settings.indicatorParams?.side || "low",
+              timeframe: settings.indicatorParams?.timeframe || "1h",
+              input_params: {
+                nperiod: settings.indicatorParams?.nperiod || 30,
+              },
+            },
+          }
+        } else if (settings.valueType === "close") {
+          // For close price with multiplier
+          equityRule = {
+            statement: "and",
+            operator: `${settings.type} = Close * ${settings.value}`,
+          }
+        }
       }
+    }
+
+    // Check if we're editing an existing rule or adding a new one
+    if (editingEquityRule && equityRule) {
+      // Update the existing rule
+      currentStatement.Equity[editingEquityRule.equityIndex] = equityRule
+    } else if (equityRule) {
+      // Add new rule
+      currentStatement.Equity.push(equityRule)
     }
 
     setStatements(newStatements)
@@ -2697,10 +2709,15 @@ if (
         <h4 className="text-sm font-medium mb-2">Equity Rules</h4>
         <div className="flex flex-wrap gap-2">
           {statement.Equity.map((rule, index) => (
-            <div key={index} className="bg-[#2A2D42] text-white px-3 py-1 rounded-md relative group">
+            <div 
+              key={index} 
+              className="bg-[#2A2D42] text-white px-3 py-1 rounded-md relative group cursor-pointer hover:bg-[#3A3D52] transition-colors"
+              onClick={() => handleEquityRuleClick(activeStatementIndex, index, rule)}
+            >
               {rule.operator}
               <button
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation()
                   const newStatements = [...statements]
                   newStatements[activeStatementIndex].Equity.splice(index, 1)
                   setStatements(newStatements)
@@ -2714,6 +2731,22 @@ if (
         </div>
       </div>
     )
+  }
+
+  // Function to handle equity rule click for editing
+  const handleEquityRuleClick = (statementIndex: number, equityIndex: number, rule: EquityRule) => {
+    // Determine if this is SL or TP
+    const operator = rule.operator || ""
+    const isSL = operator.includes("SL") || (rule.inp1 && "name" in rule.inp1 && rule.inp1.name === "SL")
+    const isTP = operator.includes("TP") || (rule.inp1 && "name" in rule.inp1 && rule.inp1.name === "TP")
+    
+    if (!isSL && !isTP) return
+    
+    // Set editing state
+    setEditingEquityRule({ statementIndex, equityIndex })
+    
+    // Open the appropriate modal
+    setShowSLTPSettings({ show: true, type: isSL ? "SL" : "TP" })
   }
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
@@ -4331,10 +4364,72 @@ if (
       {showSLTPSettings.show && (
         <SLTPSettingsModal
           type={showSLTPSettings.type}
-          onClose={() => setShowSLTPSettings({ show: false, type: "SL" })}
+          onClose={() => {
+            setShowSLTPSettings({ show: false, type: "SL" })
+            setEditingEquityRule(null)
+          }}
+          initialSettings={editingEquityRule ? (() => {
+            const rule = statements[editingEquityRule.statementIndex]?.Equity[editingEquityRule.equityIndex]
+            if (!rule) return undefined
+            
+            // Parse the operator string to extract settings
+            const operator = rule.operator || ""
+            const type = showSLTPSettings.type
+            
+            // Parse different formats:
+            // Simple: "SL = Entry_Price - 100pips"
+            // Trailing: "inp1 = inp2 - 100pips" with TrailingStop
+            // Percentage: "SL = Entry_Price * 0.95"
+            // Fixed: "SL = 1800"
+            
+            if (rule.inp1 && "name" in rule.inp1 && rule.inp1.input_params?.TrailingStop) {
+              // Trailing format
+              const pipsMatch = operator.match(/([+-])\s*(\d+)pips/)
+              return {
+                formatType: "trailing",
+                value: pipsMatch ? pipsMatch[2] : "100",
+                direction: pipsMatch ? pipsMatch[1] : "-",
+                trailingStop: true,
+                trailingStep: rule.inp1.input_params.TrailingStep?.replace("pips", "") || "0",
+                inp2: rule.inp2 && "name" in rule.inp2 ? rule.inp2.name : "Entry_Price",
+              }
+            } else if (operator.includes("pips")) {
+              // Simple pips format
+              const pipsMatch = operator.match(/([+-])\s*(\d+)pips/)
+              return {
+                formatType: "simple",
+                valueType: "pips",
+                value: pipsMatch ? pipsMatch[2] : "100",
+                direction: pipsMatch ? pipsMatch[1] : "-",
+              }
+            } else if (operator.includes("*")) {
+              // Percentage format
+              const multiplierMatch = operator.match(/\*\s*([\d.]+)/)
+              if (multiplierMatch) {
+                const multiplier = parseFloat(multiplierMatch[1])
+                const percentage = type === "SL" ? (1 - multiplier) * 100 : (multiplier - 1) * 100
+                return {
+                  formatType: "simple",
+                  valueType: "percentage",
+                  value: percentage.toFixed(2),
+                }
+              }
+            } else if (operator.match(/=\s*\d+/)) {
+              // Fixed price format
+              const valueMatch = operator.match(/=\s*(\d+)/)
+              return {
+                formatType: "simple",
+                valueType: "fixed",
+                value: valueMatch ? valueMatch[1] : "1800",
+              }
+            }
+            
+            return undefined
+          })() : undefined}
           onSave={(settings) => {
             handleSLTPSettings(settings)
             setShowSLTPSettings({ show: false, type: "SL" })
+            setEditingEquityRule(null)
             setTimeout(() => {
               searchInputRefs.current[activeStatementIndex]?.focus()
             }, 100)

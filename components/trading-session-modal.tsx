@@ -19,13 +19,13 @@ interface TradingSessionModalProps {
 }
 
 const DAY_ORDER: Array<{ code: "M" | "t" | "W" | "T" | "F" | "S" | "U"; label: string }> = [
-  { code: "M", label: "M" }, // Monday
-  { code: "t", label: "t" }, // Tuesday (lowercase t)
-  { code: "W", label: "W" }, // Wednesday
-  { code: "T", label: "T" }, // Thursday
-  { code: "F", label: "F" }, // Friday
-  { code: "S", label: "S" }, // Saturday
-  { code: "U", label: "U" }, // Sunday
+  { code: "M", label: "Mon" }, // Monday
+  { code: "t", label: "Tue" }, // Tuesday (lowercase t)
+  { code: "W", label: "Wed" }, // Wednesday
+  { code: "T", label: "Thu" }, // Thursday
+  { code: "F", label: "Fri" }, // Friday
+  { code: "S", label: "Sat" }, // Saturday
+  { code: "U", label: "Sun" }, // Sunday
 ]
 
 // Minimal timezone options; values are canonical TZ IDs, labels are user friendly
@@ -73,8 +73,8 @@ export function TradingSessionModal({ onClose, onSave, initial }: TradingSession
             <button
               key={code}
               onClick={() => toggleDay(code)}
-              className={`w-8 h-8 rounded-full text-sm border ${selectedDays.includes(code) ? "bg-[#85e1fe] text-black border-[#85e1fe]" : "bg-white text-black border-gray-300"}`}
-              title={code}
+              className={`px-2 py-1 rounded-md text-xs border ${selectedDays.includes(code) ? "bg-[#85e1fe] text-black border-[#85e1fe]" : "bg-white text-black border-gray-300"}`}
+              title={`${label} (${code})`}
             >
               {label}
             </button>

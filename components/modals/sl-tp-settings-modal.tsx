@@ -7,6 +7,7 @@ interface SLTPSettingsModalProps {
   type: "SL" | "TP"
   onClose: () => void
   onSave: (settings: SLTPSettings) => void
+  initialSettings?: Partial<SLTPSettings>
 }
 
 // Add a new "close" option to the valueType in the interface
@@ -37,18 +38,21 @@ export interface SLTPSettings {
   formatType?: "simple" | "advanced" | "trailing" | "indicator" | "partial" | "fixed"
 }
 
-export function SLTPSettingsModal({ type, onClose, onSave }: SLTPSettingsModalProps) {
+export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SLTPSettingsModalProps) {
   const [settings, setSettings] = useState<SLTPSettings>({
     type,
-    valueType: "pips",
-    direction: type === "SL" ? "-" : "+",
-    value: type === "SL" ? "900" : "1500",
-    useAdvanced: false,
-    partialTpList: type === "TP" ? [{ Price: "Entry_Price + 200pips", Close: "50%" }] : undefined,
+    valueType: initialSettings?.valueType || "pips",
+    direction: initialSettings?.direction || (type === "SL" ? "-" : "+"),
+    value: initialSettings?.value || (type === "SL" ? "900" : "1500"),
+    useAdvanced: initialSettings?.useAdvanced || false,
+    trailingStop: initialSettings?.trailingStop || false,
+    trailingStep: initialSettings?.trailingStep || "0",
+    inp2: initialSettings?.inp2 || "Entry_Price",
+    partialTpList: initialSettings?.partialTpList || (type === "TP" ? [{ Price: "Entry_Price + 200pips", Close: "50%" }] : undefined),
   })
 
   const [formatType, setFormatType] = useState<"simple" | "advanced" | "trailing" | "indicator" | "partial" | "fixed">(
-    "simple",
+    initialSettings?.formatType || "simple",
   )
 
   const handleSave = () => {

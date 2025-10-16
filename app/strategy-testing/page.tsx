@@ -31,6 +31,10 @@ import {
   cancelOptimizationJob,
   getWalkForwardDropletResults,
   listStrategyWalkForwardJobs,
+  getSymbolTimeframes,
+  validateStrategyMetaapi,
+  getAllBrokerSymbols,
+  findSymbolsWithTimeframe,
 } from "../AllApiCalls" // Import new functions
 import { X } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
@@ -49,6 +53,8 @@ import { MetaAPIConfig, type MetaAPIConfig as MetaAPIConfigType } from "@/compon
 import { OptimizationCostDialog } from "@/components/optimization-cost-dialog"
 // Backtest history components
 import { BacktestHistoryList } from "@/components/BacktestHistoryList"
+// MetaAPI debugging
+import { MetaAPIDebugModal } from "@/components/metaapi-debug-modal"
 
 export default function StrategyTestingPage() {
   const router = useRouter()
@@ -101,7 +107,7 @@ export default function StrategyTestingPage() {
   const [tournamentSize, setTournamentSize] = useState("5")
 
   // Add new state variables for trading modes
-  const [selectedTradingMode, setSelectedTradingMode] = useState("MTOOTAAT")
+  const [selectedTradingMode, setSelectedTradingMode] = useState("CLOSE & OPEN")
   const [maxTrades, setMaxTrades] = useState("1")
   
   // Add state variables for TradingType configuration
@@ -161,10 +167,30 @@ export default function StrategyTestingPage() {
   // Add backtest history states
   const [showBacktestHistory, setShowBacktestHistory] = useState(false);
 
+  // MetaAPI Debug Modal states
+  const [showMetaAPIDebugModal, setShowMetaAPIDebugModal] = useState(false);
+  const [metaAPIError, setMetaAPIError] = useState<any>(null);
+
   // Add progress bar states
   const [progress, setProgress] = useState(0); // For backtest
   const [progress2, setProgress2] = useState(0); // For optimisation
   const [progress3, setProgress3] = useState(0); // For walk forward optimisation
+
+  // Helper function to map MetaAPI symbols to Backtest instruments
+  const mapSymbolToInstrument = (symbol: string): string | null => {
+    const symbolUpper = symbol.toUpperCase().replace(/\./g, '') // Remove dots like in XAUUSD.a
+    
+    // Map to the exact instrument names in the instruments list
+    if (symbolUpper.includes('XAUUSD') || symbolUpper.includes('GOLD')) return 'XAUUSD'
+    if (symbolUpper.includes('GBPUSD')) return 'GBP/USD'
+    if (symbolUpper.includes('USDJPY')) return 'USD/JPY'
+    if (symbolUpper.includes('USDCHF')) return 'USD/CHF'
+    if (symbolUpper.includes('FTSE') || symbolUpper.includes('UK100')) return 'FTSE100'
+    if (symbolUpper.includes('US30') || symbolUpper.includes('DJ30') || symbolUpper.includes('DJIA')) return 'US30'
+    if (symbolUpper.includes('NAS100') || symbolUpper.includes('NASDAQ')) return 'NASDAQ'
+    
+    return null
+  }
 
   // Animate progress bar for backtest
   useEffect(() => {
@@ -242,6 +268,11 @@ export default function StrategyTestingPage() {
           console.log("🔍 DEBUG: TradingSession in loaded strategy:", parsed.TradingSession)
           setParsedStatement(parsed)
           
+          // Load date range if available
+          if (parsed.date_range) {
+            setDateRange(parsed.date_range)
+          }
+          
           // Load TradingType settings from the strategy
           if (parsed && parsed.TradingType) {
             console.log("🔍 Loading TradingType settings from strategy:", parsed.TradingType)
@@ -282,15 +313,10 @@ export default function StrategyTestingPage() {
                              margin === 0.033 ? "1:30" : 
                              margin === 0.02 ? "1:50" : 
                              margin === 0.013 ? "1:75" : 
-                             margin === 0.01 ? "1:100" : "1:1"
+                             margin === 0.01 ? "1:100" : 
+                             margin === 0.005 ? "1:200" :
+                             margin === 0.002 ? "1:500" : "1:1"
               setLeverage(leverage)
-              
-              // Set slider value based on leverage
-              const leverageMap: { [key: string]: number } = {
-                "1:1": 1, "1:2": 2, "1:5": 3, "1:10": 4, "1:20": 5,
-                "1:25": 6, "1:30": 7, "1:50": 8, "1:75": 9, "1:100": 10
-              }
-              setLeverageSliderValue(leverageMap[leverage] || 1)
             }
           }
         } catch (err) {
@@ -386,6 +412,11 @@ export default function StrategyTestingPage() {
             setStrategy(JSON.stringify(strategyData))
             setParsedStatement(strategyData)
 
+            // Load date range if available
+            if (strategyData.date_range) {
+              setDateRange(strategyData.date_range)
+            }
+
             // Extract trading symbol from strategy name
             if (strategyData.name) {
               // Extract symbol from strategy name (e.g., "Strategyname" -> "XAUUSD")
@@ -416,6 +447,12 @@ export default function StrategyTestingPage() {
                 symbol: symbol
               }
               setMetaAPIConfig(updatedConfig)
+              
+              // Auto-select the corresponding instrument in Backtest tab
+              const mappedInstrument = mapSymbolToInstrument(symbol)
+              if (mappedInstrument) {
+                setSelectedInstruments([mappedInstrument])
+              }
             }
 
             if (strategyData.optimisation_form) {
@@ -492,7 +529,27 @@ export default function StrategyTestingPage() {
         [file.name]: file,
       }))
 
-      setShowSuccessModal(true)
+      // Check if the file matches any required timeframe
+      console.log("🔍 File upload validation:", {
+        filename: file.name,
+        requiredTimeframes,
+        fileExtension
+      })
+      
+      const matchesAnyTimeframe = requiredTimeframes.some(timeframe => 
+        matchesTimeframe(file.name, timeframe)
+      )
+      
+      console.log("🔍 Match result:", matchesAnyTimeframe)
+
+      if (matchesAnyTimeframe) {
+        // Show success modal only if file matches a required timeframe
+        setShowSuccessModal(true)
+        showToast(`File uploaded successfully! Matches required timeframe.`, 'success')
+      } else {
+        // Show warning instead of success modal for mismatched timeframes
+        showToast(`File uploaded but doesn't match required timeframes (${requiredTimeframes.join(', ')}). You may get incorrect results.`, 'warning')
+      }
     } else {
       showToast("Only .py and .csv files are supported", 'error')
     }
@@ -523,9 +580,11 @@ export default function StrategyTestingPage() {
     const lowerFilename = filename.toLowerCase()
     const lowerTimeframe = timeframe.toLowerCase()
 
+    console.log("🔍 Checking timeframe match:", { filename, timeframe, lowerFilename, lowerTimeframe })
+
     // Direct matching (e.g., "3h" in filename)
     if (lowerFilename.includes(lowerTimeframe)) {
-      console.log("✅ Direct match found")
+      console.log("✅ Direct match found for", timeframe)
       return true
     }
 
@@ -537,6 +596,7 @@ export default function StrategyTestingPage() {
       "15min": 15,
       "20min": 20,
       "30min": 30,
+      "36min": 36,
       "1h": 60,
       "2h": 120,
       "3h": 180,
@@ -556,16 +616,49 @@ export default function StrategyTestingPage() {
     if (minutes) {
       // Check if the filename contains the minute value
       const minutesStr = minutes.toString()
-      const containsMinutes = lowerFilename.includes(minutesStr)
-
-      // Additional check: Make sure it's not part of another number
+      
+      // Use word boundary regex to avoid partial matches
       // For example, "20" in "120" should not match "20m"
       const regex = new RegExp(`\\b${minutesStr}\\b`)
       const isStandaloneNumber = regex.test(lowerFilename)
 
-      return containsMinutes
+      console.log("🔍 Minute check:", { 
+        timeframe, 
+        minutes, 
+        minutesStr, 
+        lowerFilename, 
+        isStandaloneNumber,
+        regex: regex.toString()
+      })
+
+      if (isStandaloneNumber) {
+        console.log("✅ Minute match found for", timeframe, "(" + minutes + " minutes)")
+        return true
+      }
     }
 
+    // Additional check: Look for common timeframe patterns in filename
+    const timeframePatterns = {
+      "3h": ["3h", "180", "3 hour", "three hour"],
+      "1h": ["1h", "60", "1 hour", "one hour"],
+      "36min": ["36min", "36", "36 minute", "thirty six"],
+      "30min": ["30min", "30", "30 minute", "thirty"],
+      "15min": ["15min", "15", "15 minute", "fifteen"],
+      "5min": ["5min", "5", "5 minute", "five"],
+      "1min": ["1min", "1", "1 minute", "one minute"]
+    }
+
+    const patterns = timeframePatterns[lowerTimeframe as keyof typeof timeframePatterns]
+    if (patterns) {
+      for (const pattern of patterns) {
+        if (lowerFilename.includes(pattern.toLowerCase())) {
+          console.log("✅ Pattern match found for", timeframe, "using pattern:", pattern)
+          return true
+        }
+      }
+    }
+
+    console.log("❌ No match found for", timeframe, "in", filename)
     return false
   }
 
@@ -588,6 +681,29 @@ export default function StrategyTestingPage() {
       let result
 
       if (useMetaAPI) {
+        // Pre-check: Validate strategy timeframes and availability via MetaAPI
+        try {
+          const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
+          const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
+          const symbol = metaAPIConfig?.symbol || "XAUUSD"
+
+          if (token && accountId) {
+            const validation = await validateStrategyMetaapi({
+              statement: parsedStatement,
+              metaapi_token: token,
+              metaapi_account_id: accountId,
+              symbol,
+            })
+
+            if (validation?.status === 'failed') {
+              const rec = validation?.validation_results?.recommendation?.join('\n') || 'Missing required timeframes.'
+              showToast(`Validation: ${rec}`, 'warning')
+            }
+          }
+        } catch (e) {
+          console.warn('Strategy validation skipped:', e)
+        }
+
         // Use MetaAPI for backtesting with environment variables
         const symbol = metaAPIConfig?.symbol || "XAUUSD"
         const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
@@ -689,7 +805,36 @@ export default function StrategyTestingPage() {
         showToast("Backtest completed but no data returned", 'error')
       }
     } catch (error: any) {
-      showToast("Backtest Error: " + (error.message || "Unknown error"), 'error')
+      console.error("Backtest Error:", error)
+      
+      // Check if this is a MetaAPI-related error
+      const errorMessage = error.message || "Unknown error"
+      const isMetaAPIError = useMetaAPI && metaAPIConfig && (
+        errorMessage.toLowerCase().includes("symbol") ||
+        errorMessage.toLowerCase().includes("timeframe") ||
+        errorMessage.toLowerCase().includes("metaapi") ||
+        errorMessage.toLowerCase().includes("candles") ||
+        errorMessage.toLowerCase().includes("broker")
+      )
+      
+      if (isMetaAPIError) {
+        // Extract required timeframes from the strategy
+        const requiredTimeframes = parsedStatement?.strategy
+          ?.filter((step: any) => step.function && step.vars && step.vars.timeframe)
+          .map((step: any) => step.vars.timeframe) || []
+        
+        // Show detailed MetaAPI debug modal
+        setMetaAPIError({
+          message: errorMessage,
+          details: error,
+          symbol: metaAPIConfig?.symbol || parsedStatement?.instrument,
+          timeframes: requiredTimeframes,
+        })
+        setShowMetaAPIDebugModal(true)
+      } else {
+        // Show normal error toast for non-MetaAPI errors
+        showToast("Backtest Error: " + errorMessage, 'error')
+      }
     } finally {
       setIsLoading(false)
     }
@@ -866,7 +1011,36 @@ export default function StrategyTestingPage() {
         showToast("No optimization ID received for polling", 'error')
       }
     } catch (error: any) {
-      showToast("Optimisation Error: " + (error.message || "Unknown error"), 'error')
+      console.error("Optimisation Error:", error)
+      
+      // Check if this is a MetaAPI-related error
+      const errorMessage = error.message || "Unknown error"
+      const isMetaAPIError = useMetaAPI && metaAPIConfig && (
+        errorMessage.toLowerCase().includes("symbol") ||
+        errorMessage.toLowerCase().includes("timeframe") ||
+        errorMessage.toLowerCase().includes("metaapi") ||
+        errorMessage.toLowerCase().includes("candles") ||
+        errorMessage.toLowerCase().includes("broker")
+      )
+      
+      if (isMetaAPIError) {
+        // Extract required timeframes from the strategy
+        const requiredTimeframes = parsedStatement?.strategy
+          ?.filter((step: any) => step.function && step.vars && step.vars.timeframe)
+          .map((step: any) => step.vars.timeframe) || []
+        
+        // Show detailed MetaAPI debug modal
+        setMetaAPIError({
+          message: errorMessage,
+          details: error,
+          symbol: metaAPIConfig?.symbol || parsedStatement?.instrument,
+          timeframes: requiredTimeframes,
+        })
+        setShowMetaAPIDebugModal(true)
+      } else {
+        // Show normal error toast for non-MetaAPI errors
+        showToast("Optimisation Error: " + errorMessage, 'error')
+      }
     } finally {
       setIsLoading2(false)
     }
@@ -1076,7 +1250,36 @@ export default function StrategyTestingPage() {
 
       console.log("No result data found");
     } catch (error: any) {
-      showToast("Walk Forward Optimisation Error: " + (error.message || "Unknown error"), 'error')
+      console.error("Walk Forward Optimisation Error:", error)
+      
+      // Check if this is a MetaAPI-related error
+      const errorMessage = error.message || "Unknown error"
+      const isMetaAPIError = useMetaAPI && metaAPIConfig && (
+        errorMessage.toLowerCase().includes("symbol") ||
+        errorMessage.toLowerCase().includes("timeframe") ||
+        errorMessage.toLowerCase().includes("metaapi") ||
+        errorMessage.toLowerCase().includes("candles") ||
+        errorMessage.toLowerCase().includes("broker")
+      )
+      
+      if (isMetaAPIError) {
+        // Extract required timeframes from the strategy
+        const requiredTimeframes = parsedStatement?.strategy
+          ?.filter((step: any) => step.function && step.vars && step.vars.timeframe)
+          .map((step: any) => step.vars.timeframe) || []
+        
+        // Show detailed MetaAPI debug modal
+        setMetaAPIError({
+          message: errorMessage,
+          details: error,
+          symbol: metaAPIConfig?.symbol || parsedStatement?.instrument,
+          timeframes: requiredTimeframes,
+        })
+        setShowMetaAPIDebugModal(true)
+      } else {
+        // Show normal error toast for non-MetaAPI errors
+        showToast("Walk Forward Optimisation Error: " + errorMessage, 'error')
+      }
     } finally {
       setIsLoading3(false)
     }
@@ -1260,14 +1463,22 @@ export default function StrategyTestingPage() {
   // MetaAPI Configuration Handlers
   const handleMetaAPIConfigChange = (config: MetaAPIConfigType) => {
     setMetaAPIConfig(config)
+    
+    // Auto-select the corresponding instrument in Backtest tab
+    if (config.symbol) {
+      const mappedInstrument = mapSymbolToInstrument(config.symbol)
+      if (mappedInstrument && !selectedInstruments.includes(mappedInstrument)) {
+        setSelectedInstruments([mappedInstrument])
+      }
+    }
   }
 
-  const [dateRange, setDateRange] = useState("2024.01.02 - 2025.01.02")
-  const [selectedInstruments, setSelectedInstruments] = useState(["USD/JPY"])
+  const [dateRange, setDateRange] = useState("2024.02.01 - 2024.08.01")
+  const [selectedInstruments, setSelectedInstruments] = useState<string[]>(["XAUUSD"])
   const [accountDeposit, setAccountDeposit] = useState("1,000")
   const [currency, setCurrency] = useState("USD")
   const [leverage, setLeverage] = useState("1:1")
-  const [leverageSliderValue, setLeverageSliderValue] = useState(1) // Add state for slider position
+  const [customLeverage, setCustomLeverage] = useState("")
 
   // Handle account deposit change
   const handleAccountDepositChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1284,45 +1495,41 @@ export default function StrategyTestingPage() {
     return ratio ? 1.0 / ratio : 0.09 // Default to 0.09 if parsing fails
   }
 
-  // Handle leverage change
-  const handleLeverageChange = (newLeverage: string) => {
-    setLeverage(newLeverage)
-  }
-
-  // Handle slider change
-  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = Number.parseInt(e.target.value)
-    setLeverageSliderValue(value)
-
-    const leverageMap: { [key: string]: string } = {
-      "1": "1:1",
-      "2": "1:2",
-      "3": "1:5",
-      "4": "1:10",
-      "5": "1:20",
-      "6": "1:25",
-      "7": "1:30",
-      "8": "1:50",
-      "9": "1:75",
-      "10": "1:100",
+  // Handle leverage change from dropdown
+  const handleLeverageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setLeverage(e.target.value)
+    // Clear custom leverage when selecting a predefined option
+    if (e.target.value !== "custom") {
+      setCustomLeverage("")
     }
-    handleLeverageChange(leverageMap[value.toString()])
   }
 
-  // Calculate thumb position as percentage
-  const getThumbPosition = () => {
-    return ((leverageSliderValue - 1) / (10 - 1)) * 100
+  // Handle custom leverage input
+  const handleCustomLeverageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setCustomLeverage(e.target.value)
+    // Update the main leverage state with custom value
+    if (e.target.value.trim()) {
+      setLeverage(e.target.value.trim())
+    }
   }
 
-  const instruments = ["USD/JPY", "GBP/USD", "USD/CHF", "FTSE100", "US30", "NASDAQ"]
+  const instruments = ["XAUUSD", "USD/JPY", "GBP/USD", "USD/CHF", "FTSE100", "US30", "NASDAQ"]
 
   const toggleInstrument = (instrument: string) => {
-    if (selectedInstruments.includes(instrument)) {
-      setSelectedInstruments(selectedInstruments.filter((i) => i !== instrument))
-    } else {
-      setSelectedInstruments([...selectedInstruments, instrument])
-    }
+    // Only allow one instrument selection at a time
+    setSelectedInstruments([instrument])
   }
+
+  // Auto-select instrument when MetaAPI config changes
+  useEffect(() => {
+    if (metaAPIConfig?.symbol) {
+      const mappedInstrument = mapSymbolToInstrument(metaAPIConfig.symbol)
+      if (mappedInstrument) {
+        // Always update to match current MetaAPI symbol
+        setSelectedInstruments([mappedInstrument])
+      }
+    }
+  }, [metaAPIConfig])  // Watch entire config object, not just symbol
 
   // Function to save backtest settings via API
   const saveBacktestSettings = async () => {
@@ -1377,6 +1584,8 @@ export default function StrategyTestingPage() {
           commission: commission,
           asset_type: assetType,
         },
+        // Add date range
+        date_range: dateRange,
         // Preserve TradingSession if it exists
         ...(parsedStatement.TradingSession && { TradingSession: parsedStatement.TradingSession })
       }
@@ -1965,19 +2174,72 @@ export default function StrategyTestingPage() {
       }, 500)
       
     } catch (error: any) {
+      console.error("Error creating optimization job:", error)
+      
       // Error Handling: 403, 400, 500, Network errors
       if (error.message.includes('401') || error.message.includes('403')) {
         showToast("Authentication failed. Please login again.", 'error')
         // Redirect to login
         router.push('/auth')
       } else if (error.message.includes('400')) {
-        showToast("Invalid parameters: " + (error.message || "Unknown error"), 'error')
+        // Check if this is a MetaAPI-related error
+        const errorMessage = error.message || "Unknown error"
+        const isMetaAPIError = useMetaAPI && metaAPIConfig && (
+          errorMessage.toLowerCase().includes("symbol") ||
+          errorMessage.toLowerCase().includes("timeframe") ||
+          errorMessage.toLowerCase().includes("metaapi") ||
+          errorMessage.toLowerCase().includes("candles") ||
+          errorMessage.toLowerCase().includes("broker")
+        )
+        
+        if (isMetaAPIError) {
+          // Extract required timeframes from the strategy
+          const requiredTimeframes = parsedStatement?.strategy
+            ?.filter((step: any) => step.function && step.vars && step.vars.timeframe)
+            .map((step: any) => step.vars.timeframe) || []
+          
+          // Show detailed MetaAPI debug modal
+          setMetaAPIError({
+            message: errorMessage,
+            details: error,
+            symbol: metaAPIConfig?.symbol || parsedStatement?.instrument,
+            timeframes: requiredTimeframes,
+          })
+          setShowMetaAPIDebugModal(true)
+        } else {
+          showToast("Invalid parameters: " + errorMessage, 'error')
+        }
       } else if (error.message.includes('500')) {
         showToast("Server error. Please try again later.", 'error')
       } else {
-        showToast("Connection failed: " + (error.message || "Unknown error"), 'error')
+        // Check if this is a MetaAPI-related error for connection failures
+        const errorMessage = error.message || "Unknown error"
+        const isMetaAPIError = useMetaAPI && metaAPIConfig && (
+          errorMessage.toLowerCase().includes("symbol") ||
+          errorMessage.toLowerCase().includes("timeframe") ||
+          errorMessage.toLowerCase().includes("metaapi") ||
+          errorMessage.toLowerCase().includes("candles") ||
+          errorMessage.toLowerCase().includes("broker")
+        )
+        
+        if (isMetaAPIError) {
+          // Extract required timeframes from the strategy
+          const requiredTimeframes = parsedStatement?.strategy
+            ?.filter((step: any) => step.function && step.vars && step.vars.timeframe)
+            .map((step: any) => step.vars.timeframe) || []
+          
+          // Show detailed MetaAPI debug modal
+          setMetaAPIError({
+            message: errorMessage,
+            details: error,
+            symbol: metaAPIConfig?.symbol || parsedStatement?.instrument,
+            timeframes: requiredTimeframes,
+          })
+          setShowMetaAPIDebugModal(true)
+        } else {
+          showToast("Connection failed: " + errorMessage, 'error')
+        }
       }
-      console.error("Error creating optimization job:", error)
     } finally {
       setIsCreatingOptimizationJob(false)
     }
@@ -2117,10 +2379,63 @@ export default function StrategyTestingPage() {
 
                     {/* MetaAPI Configuration or File Upload */}
                     {useMetaAPI ? (
-                      <MetaAPIConfig
-                        onConfigChange={handleMetaAPIConfigChange}
-                        initialConfig={metaAPIConfig || undefined}
-                      />
+                      <div className="space-y-3">
+                        <MetaAPIConfig
+                          onConfigChange={handleMetaAPIConfigChange}
+                          initialConfig={metaAPIConfig || undefined}
+                        />
+                        <div className="flex gap-3">
+                          <button
+                            className="bg-[#141721] hover:bg-[#2B2E38] text-white rounded-full px-4 py-2 text-sm"
+                            onClick={async () => {
+                              try {
+                                const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
+                                const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
+                                if (!token || !accountId) {
+                                  showToast('MetaAPI credentials not configured', 'error')
+                                  return
+                                }
+                                const res = await getAllBrokerSymbols({ metaapi_token: token, metaapi_account_id: accountId })
+                                const gold = res?.results?.gold_silver_symbols?.[0] ||
+                                  (Array.isArray(res?.results?.all_symbols) ? res.results.all_symbols.find((s: any) => typeof s.symbol === 'string' && s.symbol.toUpperCase().includes('XAU')) : undefined)
+                                if (gold?.symbol) {
+                                  const updated = { token, accountId, symbol: gold.symbol }
+                                  setMetaAPIConfig(updated as any)
+                                  showToast(`Detected broker gold symbol: ${gold.symbol}`, 'success')
+                                } else {
+                                  showToast('No gold symbols found. Try without filter.', 'warning')
+                                }
+                              } catch (e: any) {
+                                showToast(`Failed to fetch symbols: ${e.message}`, 'error')
+                              }
+                            }}
+                          >
+                            Find Broker Symbols (Gold)
+                          </button>
+                          <button
+                            className="bg-[#141721] hover:bg-[#2B2E38] text-white rounded-full px-4 py-2 text-sm"
+                            onClick={async () => {
+                              try {
+                                const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
+                                const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
+                                const symbol = metaAPIConfig?.symbol || 'XAUUSD'
+                                if (!token || !accountId) {
+                                  showToast('MetaAPI credentials not configured', 'error')
+                                  return
+                                }
+                                const res = await getSymbolTimeframes({ metaapi_token: token, metaapi_account_id: accountId, symbol })
+                                const available = res?.results?.available_timeframes || []
+                                const unavailable = res?.results?.unavailable_timeframes || []
+                                showToast(`Available: ${available.join(', ')} | Unavailable: ${unavailable.join(', ')}`, 'success')
+                              } catch (e: any) {
+                                showToast(`Timeframe check failed: ${e.message}`, 'error')
+                              }
+                            }}
+                          >
+                            Check Timeframes
+                          </button>
+                        </div>
+                      </div>
                     ) : (
                       <StrategyTab
                         selectedStrategy={selectedStrategy}
@@ -2155,9 +2470,9 @@ export default function StrategyTestingPage() {
                     currency={currency}
                     setCurrency={setCurrency}
                     leverage={leverage}
-                    leverageSliderValue={leverageSliderValue}
-                    handleSliderChange={handleSliderChange}
-                    getThumbPosition={getThumbPosition}
+                    handleLeverageChange={handleLeverageChange}
+                    customLeverage={customLeverage}
+                    handleCustomLeverageChange={handleCustomLeverageChange}
                     selectedTradingMode={selectedTradingMode}
                     setSelectedTradingMode={setSelectedTradingMode}
                     maxTrades={maxTrades}
@@ -3064,6 +3379,16 @@ export default function StrategyTestingPage() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* MetaAPI Debug Modal */}
+        {showMetaAPIDebugModal && metaAPIError && metaAPIConfig && (
+          <MetaAPIDebugModal
+            isOpen={showMetaAPIDebugModal}
+            onClose={() => setShowMetaAPIDebugModal(false)}
+            error={metaAPIError}
+            metaAPIConfig={metaAPIConfig}
+          />
         )}
       </div>
     </AuthGuard>
