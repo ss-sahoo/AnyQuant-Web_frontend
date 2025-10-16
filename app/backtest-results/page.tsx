@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Sidebar } from "@/components/sidebar"
 import { MobileSidebar } from "@/components/mobile-sidebar"
@@ -51,7 +51,7 @@ interface BacktestDetail {
   error_message: string | null
 }
 
-export default function BacktestResultsPage() {
+function BacktestResultsClient() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const backtestId = searchParams.get('id')
@@ -587,5 +587,30 @@ export default function BacktestResultsPage() {
         </main>
       </div>
     </AuthGuard>
+  )
+}
+
+export default function BacktestResultsPage() {
+  return (
+    <Suspense fallback={
+      <AuthGuard>
+        <div className="flex min-h-screen bg-[#121420] text-white">
+          <div className="hidden md:block">
+            <Sidebar currentPage="home" />
+          </div>
+          <MobileSidebar currentPage="home" />
+          <main className="flex-1 flex flex-col relative ml-[63px]">
+            <div className="flex items-center justify-center h-screen">
+              <div className="text-center">
+                <div className="w-8 h-8 border-4 border-gray-600 border-t-[#85e1fe] rounded-full animate-spin mx-auto mb-4"></div>
+                <p className="text-gray-400">Loading backtest results...</p>
+              </div>
+            </div>
+          </main>
+        </div>
+      </AuthGuard>
+    }>
+      <BacktestResultsClient />
+    </Suspense>
   )
 }
