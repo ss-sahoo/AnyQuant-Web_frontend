@@ -32,7 +32,6 @@ import {
   getWalkForwardDropletResults,
   listStrategyWalkForwardJobs,
   getSymbolTimeframes,
-  validateStrategyMetaapi,
   getAllBrokerSymbols,
   findSymbolsWithTimeframe,
 } from "../AllApiCalls" // Import new functions
@@ -681,28 +680,7 @@ export default function StrategyTestingPage() {
       let result
 
       if (useMetaAPI) {
-        // Pre-check: Validate strategy timeframes and availability via MetaAPI
-        try {
-          const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
-          const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
-          const symbol = metaAPIConfig?.symbol || "XAUUSD"
-
-          if (token && accountId) {
-            const validation = await validateStrategyMetaapi({
-              statement: parsedStatement,
-              metaapi_token: token,
-              metaapi_account_id: accountId,
-              symbol,
-            })
-
-            if (validation?.status === 'failed') {
-              const rec = validation?.validation_results?.recommendation?.join('\n') || 'Missing required timeframes.'
-              showToast(`Validation: ${rec}`, 'warning')
-            }
-          }
-        } catch (e) {
-          console.warn('Strategy validation skipped:', e)
-        }
+        // Removed MetaAPI pre-validation per request
 
         // Use MetaAPI for backtesting with environment variables
         const symbol = metaAPIConfig?.symbol || "XAUUSD"
@@ -1488,6 +1466,11 @@ export default function StrategyTestingPage() {
 
   // Get margin value from leverage string
   const getLeverageMargin = (leverageStr: string): number => {
+    // Handle custom leverage
+    if (leverageStr === "custom" && customLeverage.trim()) {
+      leverageStr = customLeverage.trim()
+    }
+    
     const ratio = Number.parseInt(leverageStr.split(":")[1])
     // For 1:1 leverage, margin should be 1.0 (100%)
     // For 1:2 leverage, margin should be 0.5 (50%)
@@ -1497,20 +1480,24 @@ export default function StrategyTestingPage() {
 
   // Handle leverage change from dropdown
   const handleLeverageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setLeverage(e.target.value)
-    // Clear custom leverage when selecting a predefined option
-    if (e.target.value !== "custom") {
-      setCustomLeverage("")
+    const selectedValue = e.target.value
+    if (selectedValue === "custom") {
+      // Keep the dropdown on "custom" and don't change the leverage state
+      setLeverage("custom")
+    } else {
+      // Set the predefined leverage value
+      setLeverage(selectedValue)
+      setCustomLeverage("") // Clear custom input
     }
   }
 
   // Handle custom leverage input
   const handleCustomLeverageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setCustomLeverage(e.target.value)
-    // Update the main leverage state with custom value
-    if (e.target.value.trim()) {
-      setLeverage(e.target.value.trim())
-    }
+    const value = e.target.value
+    console.log("🔍 Custom leverage input:", value)
+    setCustomLeverage(value)
+    // Don't update the main leverage state here - keep it as "custom"
+    // The actual leverage value will be used from customLeverage when needed
   }
 
   const instruments = ["XAUUSD", "USD/JPY", "GBP/USD", "USD/CHF", "FTSE100", "US30", "NASDAQ"]
@@ -1543,7 +1530,16 @@ export default function StrategyTestingPage() {
 
       // Extract numeric value for API call
       const cash = Number.parseFloat(accountDeposit.replace(/,/g, ""))
-      const leverageMargin = getLeverageMargin(leverage)
+      // Use custom leverage if available, otherwise use the selected leverage
+      const actualLeverage = (leverage === "custom" && customLeverage.trim()) ? customLeverage.trim() : leverage
+      const leverageMargin = getLeverageMargin(actualLeverage)
+      
+      console.log("🔍 Saving leverage settings:", {
+        leverage,
+        customLeverage,
+        actualLeverage,
+        leverageMargin
+      })
 
       // Create the data object with trading mode consideration
       // Use dynamic commission from the form
