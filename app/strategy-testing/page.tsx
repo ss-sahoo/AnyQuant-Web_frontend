@@ -1841,36 +1841,107 @@ export default function StrategyTestingPage() {
   const [dropletJobStatus, setDropletJobStatus] = useState<string>("")
   const [dropletJobResults, setDropletJobResults] = useState<any>(null)
   const [dropletPollingInterval, setDropletPollingInterval] = useState<NodeJS.Timeout | null>(null)
+  const [isPollingActive, setIsPollingActive] = useState(false)
+  const isPollingRequestPendingRef = useRef(false)
+  const hasFinalStatusRef = useRef(false)
 
   // New Optimization Droplets Flow Functions
   
   /**
    * Poll droplet job status (for droplet-based optimizations)
    */
-  const startDropletJobPolling = (jobId: number) => {
+  const startDropletJobPolling = async (jobId: number) => {
+    // Prevent multiple polling instances for the same job
+    if (isPollingActive && dropletJobId === jobId) {
+      console.log(`⚠️ Polling already active for job ${jobId} - skipping`)
+      return
+    }
+
+    // Don't start polling if we've already reached a final status
+    if (hasFinalStatusRef.current) {
+      console.log(`⚠️ Job ${jobId} already reached final status - skipping polling`)
+      return
+    }
+
     // Clear any existing polling
     if (dropletPollingInterval) {
       clearInterval(dropletPollingInterval)
       setDropletPollingInterval(null)
     }
 
-    let stopped = false
     const isFinalStatus = (status: string) => 
       ["Completed", "Failed", "Cancelled", "completed", "failed", "cancelled"].includes(status)
 
+    // Reset final status flag for new polling session
+    hasFinalStatusRef.current = false
+
+    // Check initial status before starting polling
+    try {
+      isPollingRequestPendingRef.current = true
+      const initialJobData = await getOptimizationJob(jobId)
+      isPollingRequestPendingRef.current = false
+      console.log(`📊 Droplet Job ${jobId} Initial Check: ${initialJobData.status}`)
+      
+      setDropletJobStatus(initialJobData.status)
+      
+      // If job is already in a final state, don't start polling
+      if (isFinalStatus(initialJobData.status)) {
+        console.log(`✅ Job ${jobId} already ${initialJobData.status} - skipping polling`)
+        hasFinalStatusRef.current = true
+        setDropletJobResults(initialJobData)
+        setIsPollingActive(false)
+        
+        if (initialJobData.status === 'Completed' || initialJobData.status === 'completed') {
+          console.log('✅ Droplet job already completed:', initialJobData)
+          // Don't show toast if we're just loading existing results
+          // showToast('Optimization already completed!', 'success')
+        } else if (initialJobData.status === 'Failed' || initialJobData.status === 'failed') {
+          showToast(`Optimization job failed: ${initialJobData.error_message || 'Unknown error'}`, 'error')
+        }
+        return // Exit early - no need to poll
+      }
+    } catch (error) {
+      isPollingRequestPendingRef.current = false
+      console.error('Error checking initial job status:', error)
+      // Continue with polling even if initial check fails
+    }
+
+    // Start polling only if job is not in final state
+    setIsPollingActive(true)
+    let stopped = false
+
     const interval = setInterval(async () => {
-      if (stopped) return
+      // Early exit if polling has been stopped
+      if (stopped) {
+        console.log(`🛑 Polling stopped for job ${jobId}`)
+        return
+      }
+
+      // Skip this polling cycle if previous request is still pending
+      if (isPollingRequestPendingRef.current) {
+        console.log(`⏳ Skipping poll for job ${jobId} - previous request still pending`)
+        return
+      }
 
       try {
+        isPollingRequestPendingRef.current = true
         const jobData = await getOptimizationJob(jobId)
+        isPollingRequestPendingRef.current = false
         console.log(`📊 Droplet Job ${jobId}: ${jobData.status} (Runtime: ${jobData.runtime_minutes} min)`)
         
         setDropletJobStatus(jobData.status)
         
+        // Check if job has reached a final state
         if (isFinalStatus(jobData.status)) {
+          console.log(`🛑 Job ${jobId} reached final status: ${jobData.status} - stopping polling`)
+          
+          // Set all flags to stop polling completely
           stopped = true
+          hasFinalStatusRef.current = true
           clearInterval(interval)
           setDropletPollingInterval(null)
+          setIsPollingActive(false)
+          isPollingRequestPendingRef.current = false
 
           if (jobData.status === 'Completed' || jobData.status === 'completed') {
             console.log('✅ Droplet job completed successfully:', jobData)
@@ -1912,16 +1983,30 @@ export default function StrategyTestingPage() {
               showToast('Optimization completed successfully!', 'success')
             }
           } else if (jobData.status === 'Failed' || jobData.status === 'failed') {
+            console.log(`❌ Droplet job failed:`, jobData.error_message || 'Unknown error')
             showToast(`Optimization job failed: ${jobData.error_message || 'Unknown error'}`, 'error')
+          } else if (jobData.status === 'Cancelled' || jobData.status === 'cancelled') {
+            console.log(`⚠️ Droplet job cancelled`)
+            showToast('Optimization job was cancelled', 'warning')
           }
+          
+          // Ensure polling has fully stopped
+          console.log(`✅ Polling cleanup complete for job ${jobId}`)
+          return // Exit the interval callback after final status
         }
       } catch (error) {
-        console.error('Error polling droplet job status:', error)
+        isPollingRequestPendingRef.current = false
+        console.error(`❌ Error polling droplet job status for job ${jobId}:`, error)
+        
+        // Stop polling on error to prevent infinite error loops
         stopped = true
         clearInterval(interval)
         setDropletPollingInterval(null)
+        setIsPollingActive(false)
+        
+        console.log(`🛑 Polling stopped due to error for job ${jobId}`)
       }
-    }, 30000) // Poll every 30 seconds
+    }, 60000) // Poll every 1 minute (60 seconds)
 
     setDropletPollingInterval(interval)
   }
@@ -1939,6 +2024,9 @@ export default function StrategyTestingPage() {
     return () => {
       if (dropletPollingInterval) {
         clearInterval(dropletPollingInterval)
+        setIsPollingActive(false)
+        isPollingRequestPendingRef.current = false
+        hasFinalStatusRef.current = false
       }
     }
   }, [dropletPollingInterval])
