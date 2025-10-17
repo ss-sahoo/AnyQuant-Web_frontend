@@ -2381,7 +2381,7 @@ export default function StrategyTestingPage() {
                           initialConfig={metaAPIConfig || undefined}
                         />
                         <div className="flex gap-3">
-                          <button
+                          {/* <button
                             className="bg-[#141721] hover:bg-[#2B2E38] text-white rounded-full px-4 py-2 text-sm"
                             onClick={async () => {
                               try {
@@ -2407,8 +2407,8 @@ export default function StrategyTestingPage() {
                             }}
                           >
                             Find Broker Symbols (Gold)
-                          </button>
-                          <button
+                          </button> */}
+                          {/* <button
                             className="bg-[#141721] hover:bg-[#2B2E38] text-white rounded-full px-4 py-2 text-sm"
                             onClick={async () => {
                               try {
@@ -2429,7 +2429,7 @@ export default function StrategyTestingPage() {
                             }}
                           >
                             Check Timeframes
-                          </button>
+                          </button> */}
                         </div>
                       </div>
                     ) : (
@@ -2791,17 +2791,23 @@ export default function StrategyTestingPage() {
                   </button>
                   <button
                     onClick={() => handleOptimisation(false)}
-                    className="flex-1 py-3 bg-[#141721] rounded-full text-white hover:bg-[#2B2E38]"
+                    className={`flex-1 py-3 rounded-full transition-colors ${
+                      isLoading2
+                        ? 'bg-gray-600 cursor-not-allowed text-gray-300'
+                        : (activeTab === 'optimisation' || activeTab === 'properties')
+                        ? 'bg-[#85e1fe] text-black hover:bg-[#6bcae2] font-semibold'
+                        : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
+                    }`}
                     disabled={isLoading2}
                   >
                     Run Optimisation (Legacy)
                   </button>
                   <button
                     onClick={() => handleOptimizationWithDroplets('regular')}
-                    className={`flex-1 py-3 rounded-full font-semibold ${
+                    className={`flex-1 py-3 rounded-full font-semibold transition-colors ${
                       isLoading2 || isCreatingOptimizationJob
                         ? 'bg-gray-600 cursor-not-allowed text-gray-400'
-                        : activeTab === 'optimisation'
+                        : (activeTab === 'optimisation' || activeTab === 'properties')
                         ? 'bg-[#85e1fe] text-black hover:bg-[#6bcae2]'
                         : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
                     }`}
