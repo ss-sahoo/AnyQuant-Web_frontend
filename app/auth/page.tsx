@@ -6,7 +6,7 @@ import { AuthForm } from "@/components/auth/auth-form"
 import { Logo } from "@/components/auth/logo"
 
 export default function AuthPage() {
-  const [activeTab, setActiveTab] = useState<"login" | "signup">("signup")
+  const [activeTab, setActiveTab] = useState<"login" | "signup">("login")
   const [isLoading, setIsLoading] = useState(true)
   const router = useRouter()
 
