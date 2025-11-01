@@ -51,9 +51,12 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
     partialTpList: initialSettings?.partialTpList || (type === "TP" ? [{ Price: "Entry_Price + 200pips", Close: "50%" }] : undefined),
   })
 
-  const [formatType, setFormatType] = useState<"simple" | "advanced" | "trailing" | "indicator" | "partial" | "fixed">(
-    initialSettings?.formatType || "simple",
+  const [formatType, setFormatType] = useState<"simple" | "advanced" | "trailing" | "indicator" | "fixed">(
+    initialSettings?.formatType === "partial" ? "simple" : initialSettings?.formatType || "simple",
   )
+  const [showCustomTf, setShowCustomTf] = useState(false)
+  const [customTfValue, setCustomTfValue] = useState<string>("")
+  const [customTfUnit, setCustomTfUnit] = useState<"min" | "h">("min")
 
   const handleSave = () => {
     // Set useAdvanced based on format type
@@ -61,9 +64,9 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
       ...settings,
       useAdvanced: formatType !== "simple" && formatType !== "fixed",
       trailingStop: formatType === "trailing",
-      formatType: formatType, // Add the formatType to the settings
-      // Set type to "partial_tp" when formatType is "partial"
-      type: formatType === "partial" ? "partial_tp" : settings.type,
+      formatType: formatType,
+      // Ensure indicator format saves with indicator valueType so builder maps to inp2 indicator structure
+      ...(formatType === "indicator" ? { valueType: "indicator" as const } : {}),
     }
     onSave(updatedSettings)
     onClose()
@@ -149,24 +152,8 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
               >
                 Indicator
               </button>
-              <button
-                className={`px-3 py-1 rounded-md ${
-                  formatType === "fixed" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
-                }`}
-                onClick={() => setFormatType("fixed")}
-              >
-                Fixed Price
-              </button>
-              {type === "TP" && (
-                <button
-                  className={`px-3 py-1 rounded-md ${
-                    formatType === "partial" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
-                  }`}
-                  onClick={() => setFormatType("partial")}
-                >
-                  Partial TP
-                </button>
-              )}
+              {/* Fixed Price removed */}
+              {/* Partial TP moved to a separate component */}
             </div>
           </div>
 
@@ -183,7 +170,7 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                     }`}
                     onClick={() => setSettings({ ...settings, valueType: "pips" })}
                   >
-                    Pips
+                    Points
                   </button>
                   <button
                     className={`px-3 py-1 rounded-md ${
@@ -297,16 +284,6 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
           {formatType === "advanced" && (
             <>
               <div>
-                <label className="block text-sm font-medium mb-1">Input 1 (Target)</label>
-                <input
-                  type="text"
-                  value={settings.inp1 || settings.type}
-                  onChange={(e) => setSettings({ ...settings, inp1: e.target.value })}
-                  className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
                 <label className="block text-sm font-medium mb-1">Reference Type</label>
                 <div className="flex gap-2">
                   <button
@@ -349,14 +326,14 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                   >
                     -
                   </button>
-                  <button
+                  {/* <button
                     className={`px-3 py-1 rounded-md ${
                       settings.direction === "*" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
                     }`}
                     onClick={() => setSettings({ ...settings, direction: "*" })}
                   >
                     ×
-                  </button>
+                  </button> */}
                 </div>
               </div>
 
@@ -369,7 +346,7 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                     onChange={(e) => setSettings({ ...settings, value: e.target.value })}
                     className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  <span className="ml-2">pips</span>
+                  <span className="ml-2">points</span>
                 </div>
               </div>
             </>
@@ -419,7 +396,7 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                     onChange={(e) => setSettings({ ...settings, value: e.target.value })}
                     className="w-24 bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  <span className="ml-2">pips</span>
+                  <span className="ml-2">points</span>
                 </div>
 
                 <div className="flex flex-col space-y-2">
@@ -546,27 +523,216 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                 </>
               )}
 
+              {settings.indicatorParams?.name === "ma" && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">MA Type</label>
+                      <select
+                        className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
+                        value={(settings.indicatorParams as any)?.ma_type || "SMA"}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            indicatorParams: {
+                              ...settings.indicatorParams,
+                              ma_type: e.target.value,
+                            },
+                          })
+                        }
+                      >
+                        <option value="SMA">SMA</option>
+                        <option value="EMA">EMA</option>
+                        <option value="WMA">WMA</option>
+                        <option value="RMA">RMA</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Length</label>
+                      <input
+                        type="number"
+                        value={(settings.indicatorParams as any)?.ma_length || 20}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            indicatorParams: {
+                              ...settings.indicatorParams,
+                              ma_length: Number.parseInt(e.target.value),
+                            },
+                          })
+                        }
+                        className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Offset (optional)</label>
+                    <input
+                      type="number"
+                      value={(settings.indicatorParams as any)?.ma_offset || 0}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          indicatorParams: {
+                            ...settings.indicatorParams,
+                            ma_offset: Number.parseInt(e.target.value),
+                          },
+                        })
+                      }
+                      className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
+                    />
+                  </div>
+                </>
+              )}
+
+              {settings.indicatorParams?.name === "atr" && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Length</label>
+                      <input
+                        type="number"
+                        value={(settings.indicatorParams as any)?.atr_length || 14}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            indicatorParams: {
+                              ...settings.indicatorParams,
+                              atr_length: Number.parseInt(e.target.value),
+                            },
+                          })
+                        }
+                        className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Smoothing</label>
+                      <select
+                        className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
+                        value={(settings.indicatorParams as any)?.atr_smoothing || "SMA"}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            indicatorParams: {
+                              ...settings.indicatorParams,
+                              atr_smoothing: e.target.value,
+                            },
+                          })
+                        }
+                      >
+                        <option value="SMA">SMA</option>
+                        <option value="RMA">RMA</option>
+                        <option value="EMA">EMA</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">ATR Multiple</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={(settings.indicatorParams as any)?.atr_multiple || 1}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          indicatorParams: {
+                            ...settings.indicatorParams,
+                            atr_multiple: Number.parseFloat(e.target.value),
+                          },
+                        })
+                      }
+                      className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
+                    />
+                  </div>
+                </>
+              )}
+
               <div>
                 <label className="block text-sm font-medium mb-1">Timeframe</label>
                 <select
                   className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
                   value={settings.indicatorParams?.timeframe || "1h"}
-                  onChange={(e) =>
-                    setSettings({
-                      ...settings,
-                      indicatorParams: {
-                        ...settings.indicatorParams,
-                        timeframe: e.target.value,
-                      },
-                    })
-                  }
+                  onChange={(e) => {
+                    if (e.target.value === "add-custom") {
+                      setShowCustomTf(true)
+                    } else {
+                      setSettings({
+                        ...settings,
+                        indicatorParams: {
+                          ...settings.indicatorParams,
+                          timeframe: e.target.value,
+                        },
+                      })
+                      setShowCustomTf(false)
+                    }
+                  }}
                 >
+                  {(() => {
+                    const tf = settings.indicatorParams?.timeframe
+                    const presets = ["15min","20min","30min","45min","1h","3h","4h"]
+                    if (tf && !presets.includes(tf)) {
+                      return <option value={tf}>{tf}</option>
+                    }
+                    return null
+                  })()}
                   <option value="15min">15 min</option>
+                  <option value="20min">20 min</option>
                   <option value="30min">30 min</option>
+                  <option value="45min">45 min</option>
                   <option value="1h">1 hour</option>
+                  <option value="3h">3 hours</option>
                   <option value="4h">4 hours</option>
-                  <option value="1 day">1 day</option>
+                  <option value="add-custom">Add Custom…</option>
                 </select>
+                {showCustomTf && (
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      value={customTfValue}
+                      onChange={(e) => setCustomTfValue(e.target.value)}
+                      placeholder="e.g. 12"
+                      className="col-span-2 w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
+                    />
+                    <select
+                      className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
+                      value={customTfUnit}
+                      onChange={(e) => setCustomTfUnit(e.target.value as any)}
+                    >
+                      <option value="min">min</option>
+                      <option value="h">h</option>
+                    </select>
+                    <div className="col-span-3 flex gap-2 mt-2">
+                      <button
+                        className="px-3 py-1 rounded-md bg-blue-600 text-white"
+                        onClick={() => {
+                          if (!customTfValue) return
+                          const tf = `${customTfValue}${customTfUnit}`
+                          setSettings({
+                            ...settings,
+                            indicatorParams: {
+                              ...settings.indicatorParams,
+                              timeframe: tf,
+                            },
+                          })
+                          setShowCustomTf(false)
+                          setCustomTfValue("")
+                        }}
+                      >
+                        Save
+                      </button>
+                      <button
+                        className="px-3 py-1 rounded-md bg-gray-200"
+                        onClick={() => {
+                          setShowCustomTf(false)
+                          setCustomTfValue("")
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -600,138 +766,15 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                     onChange={(e) => setSettings({ ...settings, value: e.target.value })}
                     className="w-24 bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  <span className="ml-2">pips</span>
+                  <span className="ml-2">points</span>
                 </div>
               </div>
             </>
           )}
 
-          {formatType === "fixed" && (
-            <>
-              <div>
-                <label className="block text-sm font-medium mb-1">Fixed Price Value</label>
-                <input
-                  type="text"
-                  value={settings.value}
-                  onChange={(e) => setSettings({ ...settings, value: e.target.value, valueType: "fixed" })}
-                  className="w-full bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </>
-          )}
+          {/* Fixed Price section removed */}
 
-          {formatType === "partial" && type === "TP" && (
-            <>
-              <div>
-                <label className="block text-sm font-medium mb-2">Partial Take Profit Levels</label>
-                {settings.partialTpList?.map((level, index) => (
-                  <div key={index} className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-md">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm font-medium">Level {index + 1}</span>
-                      <button onClick={() => removePartialTpLevel(index)} className="text-red-400 hover:text-red-300">
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-
-                    <div className="mb-2">
-                      <label className="block text-xs mb-1">Type</label>
-                      <div className="flex gap-2">
-                        <button
-                          className={`px-3 py-1 rounded-md text-xs ${
-                            !level.name ? "bg-blue-600 text-white" : "bg-gray-100 text-black"
-                          }`}
-                          onClick={() => {
-                            const newList = [...settings.partialTpList!]
-                            // Remove name and operator if they exist
-                            const { name, operator, ...rest } = newList[index]
-                            // Add Price if it doesn't exist
-                            newList[index] = {
-                              ...rest,
-                              Price: rest.Price || "Entry_Price + 200pips",
-                            }
-                            setSettings({ ...settings, partialTpList: newList })
-                          }}
-                        >
-                          Price-based
-                        </button>
-                        <button
-                          className={`px-3 py-1 rounded-md text-xs ${
-                            level.name === "Equity" ? "bg-blue-600 text-white" : "bg-gray-100 text-black"
-                          }`}
-                          onClick={() => {
-                            const newList = [...settings.partialTpList!]
-                            // Add name and operator
-                            newList[index] = {
-                              ...newList[index],
-                              name: "Equity",
-                              operator: newList[index].operator || "moving_up 300pips",
-                            }
-                            // Remove Price if it exists
-                            delete newList[index].Price
-                            setSettings({ ...settings, partialTpList: newList })
-                          }}
-                        >
-                          Equity-based
-                        </button>
-                      </div>
-                    </div>
-
-                    {!level.name ? (
-                      <div className="mb-2">
-                        <label className="block text-xs mb-1">Price</label>
-                        <input
-                          type="text"
-                          value={level.Price || ""}
-                          onChange={(e) => updatePartialTpLevel(index, "Price", e.target.value)}
-                          className="w-full bg-white border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
-                          placeholder="Entry_Price + 200pips"
-                        />
-                      </div>
-                    ) : (
-                      <div className="mb-2">
-                        <label className="block text-xs mb-1">Condition</label>
-                        <input
-                          type="text"
-                          value={level.operator || ""}
-                          onChange={(e) => updatePartialTpLevel(index, "operator", e.target.value)}
-                          className="w-full bg-white border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
-                          placeholder="moving_up 300pips"
-                        />
-                      </div>
-                    )}
-
-                    <div className="mb-2">
-                      <label className="block text-xs mb-1">Close Percentage</label>
-                      <input
-                        type="text"
-                        value={level.Close}
-                        onChange={(e) => updatePartialTpLevel(index, "Close", e.target.value)}
-                        className="w-full bg-white border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
-                        placeholder="50%"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs mb-1">Action (Optional)</label>
-                      <input
-                        type="text"
-                        value={level.Action || ""}
-                        onChange={(e) => updatePartialTpLevel(index, "Action", e.target.value)}
-                        className="w-full bg-white border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
-                        placeholder="SL = Entry_Price"
-                      />
-                    </div>
-                  </div>
-                ))}
-                <button
-                  onClick={addPartialTpLevel}
-                  className="flex items-center justify-center w-full py-2 bg-gray-100 hover:bg-gray-200 rounded-md"
-                >
-                  <Plus size={16} className="mr-1" /> Add Level
-                </button>
-              </div>
-            </>
-          )}
+          {/* Partial TP moved to its own modal */}
 
           <div className="flex justify-end gap-3 mt-6">
             <button onClick={onClose} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-md">

@@ -29,6 +29,8 @@ import { AccumulatorSettingsModal } from "@/components/modals/accumulator-settin
 import { ThenSettingsModal } from "@/components/modals/then-settings-modal"
 import { AboveSettingsModal } from "./modals/above-settings-modal"
 import { MovingOperatorSettingsModal } from "@/components/modals/moving-operator-settings-modal"
+import { PartialTPSettingsModal, type PartialTPSettings } from "@/components/modals/partial-tp-settings-modal"
+import { ManageExitSettingsModal, type ManageExitSettings } from "@/components/modals/manage-exit-settings-modal"
 
 interface StrategyBuilderProps {
   initialName?: string
@@ -122,6 +124,10 @@ interface EquityRule {
       operator?: string
       Action?: string
     }>
+    manage_exit_list?: Array<{
+      Price: string
+      Action: string
+    }>
     [key: string]: any
   }
   inp2?: {
@@ -170,6 +176,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     show: false,
     type: "SL",
   })
+  const [showPartialTPModal, setShowPartialTPModal] = useState(false)
+  const [showManageExitModal, setShowManageExitModal] = useState(false)
   const [showDerivativeModal, setShowDerivativeModal] = useState(false)
 
   const [showSaveStrategyModal, setShowSaveStrategyModal] = useState(false)
@@ -637,12 +645,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     { id: "greater-than", label: "Greater Than" },
     { id: "less-than", label: "Less Than" },
     { id: "inside-channel", label: "Inside Channel" },
-    { id: "moving-up", label: "Moving up" },
-    { id: "moving-down", label: "Moving down" },
+    { id: "moving-up", label: "Increasing" },
+    { id: "moving-down", label: "Decreasing" },
     { id: "above", label: "Above" },
     { id: "below", label: "Below" },
-    { id: "atmost-above-pips", label: "At most above pips" },
-    { id: "atmost-below-pips", label: "At most below pips" },
+    { id: "atmost-above-pips", label: "At most above points" },
+    { id: "atmost-below-pips", label: "At most below points" },
     { id: "accumulator", label: "Accumulator" },
   ]
 
@@ -652,6 +660,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     { id: "wait", label: "Wait" },
     { id: "sl", label: "SL" },
     { id: "tp", label: "TP" },
+    { id: "partial-tp", label: "Partial TP" },
+    { id: "manage-exit", label: "Manage Exit" },
   ]
 
   const tradeManagement = [
@@ -694,15 +704,15 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const getOperatorName = (behavior: string) => {
     if (behavior.toLowerCase() === "crossing up" || behavior.toLowerCase() === "cross above") return "crossabove"
     if (behavior.toLowerCase() === "crossing down" || behavior.toLowerCase() === "cross below") return "crossbelow"
-    if (behavior.toLowerCase() === "moving up") return "moving_up"
-    if (behavior.toLowerCase() === "moving down") return "moving_down"
+    if (behavior.toLowerCase() === "moving up" || behavior.toLowerCase() === "increasing") return "moving_up"
+    if (behavior.toLowerCase() === "moving down" || behavior.toLowerCase() === "decreasing") return "moving_down"
     if (behavior.toLowerCase() === "greater than") return "above"
     if (behavior.toLowerCase() === "less than") return "below"
     if (behavior.toLowerCase() === "inside channel") return "inside_channel"
     if (behavior.toLowerCase() === "above") return "above"
     if (behavior.toLowerCase() === "below") return "below"
-    if (behavior.toLowerCase() === "at most above pips") return "atmost_above_pips"
-    if (behavior.toLowerCase() === "at most below pips") return "atmost_below_pips"
+    if (behavior.toLowerCase() === "at most above pips" || behavior.toLowerCase() === "at most above points") return "atmost_above_pips"
+    if (behavior.toLowerCase() === "at most below pips" || behavior.toLowerCase() === "at most below points") return "atmost_below_pips"
     return behavior.toLowerCase()
   }
 
@@ -929,20 +939,39 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             statement: "and",
             operator: `${settings.type} = ${settings.value}`,
           }
-        } else if (settings.valueType === "indicator") {
-          // For indicator-based values
-          equityRule = {
-            statement: "and",
-            operator: `${settings.type} = inp2 ${settings.direction} ${settings.value}pips`,
-            inp2: {
-              name: settings.indicatorParams?.name || "nperiod_hl",
-              side: settings.indicatorParams?.side || "low",
-              timeframe: settings.indicatorParams?.timeframe || "1h",
-              input_params: {
-                nperiod: settings.indicatorParams?.nperiod || 30,
-              },
-            },
+      } else if (settings.valueType === "indicator") {
+        // For indicator-based values
+        const indName = settings.indicatorParams?.name || "nperiod_hl"
+        const timeframe = settings.indicatorParams?.timeframe || "1h"
+        let inputParams: any = {}
+
+        if (indName === "nperiod_hl") {
+          inputParams = { nperiod: settings.indicatorParams?.nperiod || 30, side: settings.indicatorParams?.side || "low" }
+        } else if (indName === "ma") {
+          inputParams = {
+            ma_type: (settings.indicatorParams as any)?.ma_type || "SMA",
+            ma_length: (settings.indicatorParams as any)?.ma_length || 20,
+            ...(settings.indicatorParams as any)?.ma_offset !== undefined
+              ? { ma_offset: (settings.indicatorParams as any)?.ma_offset }
+              : {},
           }
+        } else if (indName === "atr") {
+          inputParams = {
+            atr_length: (settings.indicatorParams as any)?.atr_length || 14,
+            atr_smoothing: (settings.indicatorParams as any)?.atr_smoothing || "SMA",
+            atr_multiple: (settings.indicatorParams as any)?.atr_multiple || 1,
+          }
+        }
+
+        equityRule = {
+          statement: "and",
+          operator: `${settings.type} = inp2 ${settings.direction} ${settings.value}pips`,
+          inp2: {
+            name: indName,
+            timeframe,
+            input_params: inputParams,
+          },
+        }
         } else if (settings.valueType === "close") {
           // For close price with multiplier
           equityRule = {
@@ -1588,6 +1617,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     } else if (component.toLowerCase() === "tp") {
       // Show TP settings modal
       setShowSLTPSettings({ show: true, type: "TP" })
+    } else if (component.toLowerCase() === "partial tp" || component.toLowerCase() === "partial-tp") {
+      setShowPartialTPModal(true)
+    } else if (component.toLowerCase() === "manage exit" || component.toLowerCase() === "manage-exit") {
+      setShowManageExitModal(true)
     }
 
     setStatements(newStatements)
@@ -1755,9 +1788,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       condition.pips
     ) {
       return {
-        title: "Pips Condition",
+        title: "Points Condition",
         details: {
-          pips: condition.pips,
+          points: condition.pips,
         },
       }
     }
@@ -1957,22 +1990,23 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
       let result
 
-      // Check if we're editing an existing strategy
-      if (strategyId && strategyData) {
-        // Call editStrategy for existing strategies
-        result = await editStrategy(strategyId, apiStatement)
-      } else {
-        // Call createStatement for new strategies
-        const account = localStorage.getItem("user_id")
+      // Rule: if localStorage has strategy_id, EDIT; else if URL has one, EDIT; otherwise CREATE
+      let existingId: string | null = null
+      try { existingId = localStorage.getItem("strategy_id") } catch {}
+      if (!existingId) existingId = strategyId || null
 
+      if (existingId) {
+        result = await editStrategy(existingId, apiStatement)
+      } else {
+        const account = localStorage.getItem("user_id")
         if (!account) {
           throw new Error("No account found in localStorage")
         }
-
-        result = await createStatement({
-          account,
-          statement: apiStatement,
-        })
+        result = await createStatement({ account, statement: apiStatement })
+        if (result && result.id) {
+          localStorage.setItem("strategy_id", result.id)
+          // persist id so subsequent saves use edit
+        }
       }
 
       setIsSavingDraft(false)
@@ -2037,29 +2071,23 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
       let result
 
-      // Check if we're editing an existing strategy
-      if (strategyId && strategyData) {
-        // Call editStrategy for existing strategies
-        result = await editStrategy(strategyId, apiStatement)
+      // Rule on proceed: if localStorage has strategy_id, EDIT; else if URL has one, EDIT; otherwise CREATE
+      let existingId: string | null = null
+      try { existingId = localStorage.getItem("strategy_id") } catch {}
+      if (!existingId) existingId = strategyId || null
 
-        // Store the existing strategy ID
-        localStorage.setItem("strategy_id", strategyId)
+      if (existingId) {
+        result = await editStrategy(existingId, apiStatement)
+        localStorage.setItem("strategy_id", existingId)
       } else {
-        // Call createStatement for new strategies
         const account = localStorage.getItem("user_id")
-
         if (!account) {
           throw new Error("No account found in localStorage")
         }
-
-        result = await createStatement({
-          account,
-          statement: apiStatement,
-        })
-
-        // Store the new strategy ID if it exists in the response
+        result = await createStatement({ account, statement: apiStatement })
         if (result && result.id) {
           localStorage.setItem("strategy_id", result.id)
+          // persist id so subsequent saves use edit
         }
       }
 
@@ -2073,6 +2101,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
       setIsProceeding(false)
       setShowSaveStrategyModal(false)
+      try {
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem('builder_return', '1')
+        }
+      } catch {}
       router.push("/strategy-testing")
     } catch (error) {
       console.error("Error processing strategy:", error)
@@ -2440,7 +2473,7 @@ if (
                     onMouseLeave={handleMouseLeave}
                   >
                     <span>{condition.pips || 500}</span>
-                    <span className="ml-1">pips</span>
+                    <span className="ml-1">points</span>
                   </button>
                   <button
                     onClick={() => removeComponent(activeStatementIndex, index, "inp2")}
@@ -2708,26 +2741,82 @@ if (
       <div className="mt-4">
         <h4 className="text-sm font-medium mb-2">Equity Rules</h4>
         <div className="flex flex-wrap gap-2">
-          {statement.Equity.map((rule, index) => (
-            <div 
-              key={index} 
-              className="bg-[#2A2D42] text-white px-3 py-1 rounded-md relative group cursor-pointer hover:bg-[#3A3D52] transition-colors"
-              onClick={() => handleEquityRuleClick(activeStatementIndex, index, rule)}
-            >
-              {rule.operator}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  const newStatements = [...statements]
-                  newStatements[activeStatementIndex].Equity.splice(index, 1)
-                  setStatements(newStatements)
+          {statement.Equity.map((rule, index) => {
+            const isPartialTP = !!(rule.inp1 && rule.inp1.name === "partial_tp" && rule.inp1.partial_tp_list)
+            const isManageExit = !!(rule.inp1 && rule.inp1.name === "manage_exit" && (rule.inp1 as any).manage_exit_list)
+
+            const label = isPartialTP
+              ? `Partial TP (${rule.inp1?.partial_tp_list?.length || 0})`
+              : isManageExit
+                ? `Manage Exit (${(rule.inp1 as any).manage_exit_list?.length || 0})`
+                : (rule.operator || "Equity Rule")
+
+            return (
+              <div 
+                key={index} 
+                className="bg-[#2A2D42] text-white px-3 py-1 rounded-md relative group cursor-pointer hover:bg-[#3A3D52] transition-colors"
+                onClick={() => {
+                  if (isPartialTP) {
+                    setEditingEquityRule({ statementIndex: activeStatementIndex, equityIndex: index })
+                    setShowPartialTPModal(true)
+                    return
+                  }
+                  if (isManageExit) {
+                    setEditingEquityRule({ statementIndex: activeStatementIndex, equityIndex: index })
+                    setShowManageExitModal(true)
+                    return
+                  }
+                  handleEquityRuleClick(activeStatementIndex, index, rule)
                 }}
-                className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                onMouseEnter={(e) => {
+                  // Build tooltip content for partial TP / manage exit
+                  if (isPartialTP || isManageExit) {
+                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                    const details: Record<string, string> = {}
+
+                    if (isPartialTP && rule.inp1?.partial_tp_list) {
+                      rule.inp1.partial_tp_list.forEach((lvl, i) => {
+                        details[`Level ${i + 1}`] = `${lvl.Price} | Close: ${lvl.Close}${lvl.Action ? ` | Action: ${lvl.Action}` : ""}`
+                      })
+                    }
+
+                    if (isManageExit && (rule.inp1 as any).manage_exit_list) {
+                      const list = (rule.inp1 as any).manage_exit_list as Array<{ Price: string; Action: string }>
+                      list.forEach((it, i) => {
+                        details[`Rule ${i + 1}`] = `${it.Price} | ${it.Action}`
+                      })
+                    }
+
+                    setHoveredComponent({
+                      show: true,
+                      content: {
+                        title: isPartialTP ? "Partial TP list" : "Manage Exit",
+                        details,
+                      },
+                      position: {
+                        x: rect.left + rect.width / 2,
+                        y: rect.top - 3,
+                      },
+                    })
+                  }
+                }}
+                onMouseLeave={handleMouseLeave}
               >
-                <X className="w-3 h-3" />
-              </button>
-            </div>
-          ))}
+                {label}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    const newStatements = [...statements]
+                    newStatements[activeStatementIndex].Equity.splice(index, 1)
+                    setStatements(newStatements)
+                  }}
+                  className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            )
+          })}
         </div>
       </div>
     )
@@ -4552,6 +4641,91 @@ if (
             setTimeout(() => {
               searchInputRefs.current[activeStatementIndex]?.focus()
             }, 100)
+          }}
+        />
+      )}
+      {/* Partial TP Modal */}
+      {showPartialTPModal && (
+        <PartialTPSettingsModal
+          onClose={() => setShowPartialTPModal(false)}
+          initialLevels={(() => {
+            if (editingEquityRule) {
+              const rule = statements[editingEquityRule.statementIndex]?.Equity[editingEquityRule.equityIndex]
+              const levels = rule?.inp1?.partial_tp_list
+              if (levels && Array.isArray(levels)) {
+                return levels.map((lvl: any) => ({ Price: lvl.Price, Close: lvl.Close, Action: lvl.Action }))
+              }
+            }
+            return undefined
+          })()}
+          onSave={(settings: PartialTPSettings) => {
+            const newStatements = [...statements]
+            const targetStatementIndex = editingEquityRule ? editingEquityRule.statementIndex : activeStatementIndex
+            const currentStatement = newStatements[targetStatementIndex]
+            if (!currentStatement.Equity) currentStatement.Equity = []
+
+            const newRule: EquityRule = {
+              statement: "and",
+              inp1: {
+                name: "partial_tp",
+                partial_tp_list: settings.partialTpList.map((lvl) => ({
+                  Price: lvl.Price,
+                  Close: lvl.Close,
+                  ...(lvl.Action ? { Action: lvl.Action } : {}),
+                })),
+              },
+            }
+
+            if (editingEquityRule) {
+              currentStatement.Equity[editingEquityRule.equityIndex] = newRule
+            } else {
+              currentStatement.Equity.push(newRule)
+            }
+            setStatements(newStatements)
+            setShowPartialTPModal(false)
+            setEditingEquityRule(null)
+          }}
+        />
+      )}
+      {/* Manage Exit Modal */}
+      {showManageExitModal && (
+        <ManageExitSettingsModal
+          onClose={() => setShowManageExitModal(false)}
+          initialItems={(() => {
+            if (editingEquityRule) {
+              const rule = statements[editingEquityRule.statementIndex]?.Equity[editingEquityRule.equityIndex]
+              const list = (rule?.inp1 as any)?.manage_exit_list
+              if (list && Array.isArray(list)) {
+                return list.map((it: any) => ({ Price: it.Price, Action: it.Action }))
+              }
+            }
+            return undefined
+          })()}
+          onSave={(settings: ManageExitSettings) => {
+            const newStatements = [...statements]
+            const targetStatementIndex = editingEquityRule ? editingEquityRule.statementIndex : activeStatementIndex
+            const currentStatement = newStatements[targetStatementIndex]
+            if (!currentStatement.Equity) currentStatement.Equity = []
+
+            const newRule: EquityRule = {
+              statement: "and",
+              inp1: {
+                name: "manage_exit",
+                manage_exit_list: settings.items.map((it) => ({
+                  Price: it.Price,
+                  Action: it.Action,
+                })),
+              },
+            }
+
+            if (editingEquityRule) {
+              currentStatement.Equity[editingEquityRule.equityIndex] = newRule
+            } else {
+              currentStatement.Equity.push(newRule)
+            }
+            setStatements(newStatements)
+            setShowManageExitModal(false)
+            setEditingEquityRule(null)
           }}
         />
       )}

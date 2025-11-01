@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useParams,useSearchParams } from "next/navigation"
+import { useParams,useSearchParams, useRouter } from "next/navigation"
 import { Sidebar } from "@/components/sidebar"
 import { MobileSidebar } from "@/components/mobile-sidebar"
 import { StrategyBuilder } from "@/components/strategy-builder"
@@ -12,6 +12,7 @@ import { fetchStatementDetail } from "@/app/AllApiCalls"
 export default function StrategyBuilderPage() {
   const params = useParams()
   const searchParams = useSearchParams()
+  const router = useRouter()
 
   const [strategyData, setStrategyData] = useState<any>(null)
   const [strategyId, setStrategyId] = useState<string | null>(null)
@@ -36,14 +37,58 @@ export default function StrategyBuilderPage() {
   useEffect(() => {
     const name = searchParams.get("name")
     const inst = searchParams.get("instrument")
+    const isNew = searchParams.get("new") === '1' || searchParams.get('new') === 'true'
 
     if (name) setStrategyName(name)
     if (inst) setInstrument(inst)
+
     const id = params?.params?.[0];
-   if(id){
+    if (id) {
       setStrategyId(id)
       fetchStrategyData(id)
-   }
+      return
+    }
+
+    // No id in URL: decide based on navigation intent and stored id
+    try {
+      const inBrowser = typeof window !== 'undefined'
+      const shouldReturn = inBrowser && window.sessionStorage.getItem('builder_return') === '1'
+      const storedId = inBrowser ? window.localStorage.getItem('strategy_id') : null
+
+      if (shouldReturn && storedId) {
+        // Returning from testing: show the last created/edited strategy even if ?new=1 is in history
+        window.sessionStorage.removeItem('builder_return')
+        setStrategyId(storedId)
+        fetchStrategyData(storedId)
+        try { router.replace(`/strategy-builder/${storedId}` as any) } catch {}
+        return
+      }
+
+      if (isNew) {
+        // Explicit create-new: clear any residue and start blank
+        if (inBrowser) {
+          window.localStorage.removeItem('strategy_id')
+          window.sessionStorage.removeItem('builder_saved')
+        }
+        setStrategyId(null)
+        setStrategyData(null)
+        return
+      }
+
+      // Default: if a stored id exists, open it; else blank
+      if (storedId) {
+        setStrategyId(storedId)
+        fetchStrategyData(storedId)
+        try { router.replace(`/strategy-builder/${storedId}` as any) } catch {}
+      } else {
+        setStrategyId(null)
+        setStrategyData(null)
+      }
+    } catch {
+      // On any error, fall back to blank
+      setStrategyId(null)
+      setStrategyData(null)
+    }
   }, [params,searchParams])
 
   

@@ -41,8 +41,18 @@ export function ExpandedDashboard() {
             <div className="lg:col-span-2">
               <div className="flex justify-between items-center mb-4">
                 {/* <h1 className="text-2xl font-normal">Draft algorithms</h1> */}
-                <Link href="/strategy-builder">
-                <button className="bg-[#6BCAE2] hover:bg-[#5AB9D1] text-black rounded-full px-6 py-2 text-sm">
+                <Link href="/strategy-builder?new=1">
+                <button
+                  className="bg-[#6BCAE2] hover:bg-[#5AB9D1] text-black rounded-full px-6 py-2 text-sm"
+                  onClick={() => {
+                    try {
+                      if (typeof window !== 'undefined') {
+                        window.localStorage.removeItem('strategy_id')
+                        window.sessionStorage.removeItem('builder_saved')
+                      }
+                    } catch {}
+                  }}
+                >
                   Create Strategy
                 </button>
                 </Link>

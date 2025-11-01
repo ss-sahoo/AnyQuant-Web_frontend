@@ -56,8 +56,18 @@ export function ResponsiveExpandedDashboard() {
             <div className="lg:col-span-2 order-2 lg:order-1">
               <div className="flex justify-between items-center mb-4">
                 {/* <h1 className="text-xl md:text-2xl font-normal">Draft algorithms</h1> */}
-                <Link href="/strategy-builder">
-                <button className="bg-[#6BCAE2] hover:bg-[#5AB9D1] text-black rounded-full px-4 md:px-6 py-1.5 md:py-2 text-xs md:text-sm">
+                <Link href="/strategy-builder?new=1">
+                <button
+                  className="bg-[#6BCAE2] hover:bg-[#5AB9D1] text-black rounded-full px-4 md:px-6 py-1.5 md:py-2 text-xs md:text-sm"
+                  onClick={() => {
+                    try {
+                      if (typeof window !== 'undefined') {
+                        window.localStorage.removeItem('strategy_id')
+                        window.sessionStorage.removeItem('builder_saved')
+                      }
+                    } catch {}
+                  }}
+                >
                   Create Strategy
                 </button>
                 </Link>

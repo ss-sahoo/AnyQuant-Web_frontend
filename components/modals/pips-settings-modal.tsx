@@ -384,7 +384,7 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
     <Dialog open={true} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[425px] max-h-[90vh] bg-white p-0 border border-gray-200 shadow-lg rounded-lg overflow-hidden flex flex-col">
         <div className="flex justify-between items-center p-4 border-b border-gray-200">
-          <DialogTitle className="text-lg font-medium text-black">Pips Settings</DialogTitle>
+      <DialogTitle className="text-lg font-medium text-black">Points Settings</DialogTitle>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
             <X className="h-4 w-4" />
           </button>
@@ -425,7 +425,7 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
           {valueType === "value" && (
             <div className="mb-4">
               <Label htmlFor="customValue" className="block text-sm font-medium text-black mb-2">
-                Pips Value
+                Points Value
               </Label>
               <Input
                 id="customValue"
@@ -433,7 +433,7 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
                 onChange={(e) => setCustomValue(e.target.value)}
                 type="number"
                 className="w-full border border-gray-300 rounded-md text-black"
-                placeholder="Enter pips value"
+                placeholder="Enter points value"
               />
             </div>
           )}

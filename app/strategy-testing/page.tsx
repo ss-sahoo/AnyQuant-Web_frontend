@@ -369,7 +369,12 @@ export default function StrategyTestingPage() {
     const checkQueryParams = async () => {
       if (typeof window !== "undefined") {
         const urlParams = new URLSearchParams(window.location.search)
-        const id = urlParams.get("id")
+        let id = urlParams.get("id")
+        if (!id) {
+          try {
+            id = localStorage.getItem("strategy_id")
+          } catch {}
+        }
 
         if (id) {
           try {
@@ -377,6 +382,8 @@ export default function StrategyTestingPage() {
 
             // Store the fetched data in localStorage
             localStorage.setItem("savedStrategy", JSON.stringify(strategyData))
+            // Ensure the id is persisted for future back/forward flows
+            localStorage.setItem("strategy_id", String(id))
 
             // Check if timeframes_required exists in the response and store it
             if (strategyData.timeframes_required) {

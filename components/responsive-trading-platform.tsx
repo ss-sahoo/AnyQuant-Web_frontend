@@ -95,7 +95,13 @@ const refreshAlgorithms = async (pageToFetch = page) => {
 
  
   const handleCreateAlgorithm = () => {
-    router.push("/strategy-builder")
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem('strategy_id')
+        window.sessionStorage.removeItem('builder_saved')
+      }
+    } catch {}
+    router.push("/strategy-builder?new=1")
   }
 
   return (
