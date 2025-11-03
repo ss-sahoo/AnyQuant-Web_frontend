@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getStrategyOptimizationResults } from '../app/AllApiCalls';
+import { OptimizationErrorDisplay } from './optimization-error-display';
 
 interface PreviousOptimisationViewProps {
   optimisationResults?: any[]; // Each item is the full API result.result object
@@ -83,6 +84,12 @@ export const PreviousOptimisationView: React.FC<PreviousOptimisationViewProps> =
   const previewRows = selectedResult.optimisation_preview || selectedResult.full_optimization_results || [];
   const heatmapHtml = selectedResult.heatmap_plot_html || selectedResult.plots_html?.['optimise_plot.html'];
   const tradesPlotHtml = selectedResult.trades_plot_html || selectedResult.plots_html?.['Plotly.html'];
+  
+  // Check for errors in the result
+  const hasError = selectedResult.stderr || selectedResult.error || selectedResult.error_message;
+  const errorMessage = selectedResult.message;
+  const errorStdout = selectedResult.stdout;
+  const errorStderr = selectedResult.stderr;
 
   // Handler for checkboxes
   const handleCheckbox = (idx: number) => {
@@ -130,7 +137,17 @@ export const PreviousOptimisationView: React.FC<PreviousOptimisationViewProps> =
         {/* Results Tab */}
         {tab === 'results' && (
           <>
-            {(!previewRows || previewRows.length === 0) ? (
+            {/* Show error if optimization failed */}
+            {hasError && (!previewRows || previewRows.length === 0) ? (
+              <div className="max-w-4xl mx-auto">
+                <OptimizationErrorDisplay
+                  message={errorMessage}
+                  stdout={errorStdout}
+                  stderr={errorStderr}
+                  className="mb-6"
+                />
+              </div>
+            ) : (!previewRows || previewRows.length === 0) ? (
               <div className="text-center text-gray-400 py-8">
                 Waiting for optimisation result...
               </div>
@@ -212,36 +229,63 @@ export const PreviousOptimisationView: React.FC<PreviousOptimisationViewProps> =
         )}
         {/* Graph Tab */}
         {tab === 'graph' && (
-          <div className="w-full grid grid-cols-1 gap-8">
-            {heatmapHtml && (
-              <div>
-                <div className="mb-2 font-bold text-white text-base">Scatter Plot</div>
-                <iframe
-                  title="Optimisation Scatter Plot"
-                  className="w-full h-[400px] bg-white"
-                  style={{ border: 'none' }}
-                  srcDoc={heatmapHtml}
+          <>
+            {hasError && !heatmapHtml && !tradesPlotHtml ? (
+              <div className="max-w-4xl mx-auto">
+                <OptimizationErrorDisplay
+                  message={errorMessage}
+                  stdout={errorStdout}
+                  stderr={errorStderr}
+                  className="mb-6"
                 />
               </div>
-            )}
-            {tradesPlotHtml && (
-              <div>
-                <div className="mb-2 font-bold text-white text-base">Trades Plot</div>
-                <iframe
-                  title="Trades Plot"
-                  className="w-full h-[400px] bg-white"
-                  style={{ border: 'none' }}
-                  srcDoc={tradesPlotHtml}
-                />
+            ) : (
+              <div className="w-full grid grid-cols-1 gap-8">
+                {heatmapHtml && (
+                  <div>
+                    <div className="mb-2 font-bold text-white text-base">Scatter Plot</div>
+                    <iframe
+                      title="Optimisation Scatter Plot"
+                      className="w-full h-[400px] bg-white"
+                      style={{ border: 'none' }}
+                      srcDoc={heatmapHtml}
+                    />
+                  </div>
+                )}
+                {tradesPlotHtml && (
+                  <div>
+                    <div className="mb-2 font-bold text-white text-base">Trades Plot</div>
+                    <iframe
+                      title="Trades Plot"
+                      className="w-full h-[400px] bg-white"
+                      style={{ border: 'none' }}
+                      srcDoc={tradesPlotHtml}
+                    />
+                  </div>
+                )}
+                {!heatmapHtml && !tradesPlotHtml && !hasError && (
+                  <div className="text-center text-gray-400 py-8">
+                    No graph data available
+                  </div>
+                )}
               </div>
             )}
-          </div>
+          </>
         )}
         {/* Report Tab */}
         {tab === 'report' && (
           <div>
             <div className="mb-6 text-2xl font-bold text-[#85e1fe] text-center">Report</div>
-            {(() => {
+            {hasError && (!previewRows || previewRows.length === 0) ? (
+              <div className="max-w-4xl mx-auto">
+                <OptimizationErrorDisplay
+                  message={errorMessage}
+                  stdout={errorStdout}
+                  stderr={errorStderr}
+                  className="mb-6"
+                />
+              </div>
+            ) : (() => {
               const preview = selectedResult.optimisation_preview?.[0] || selectedResult.full_optimization_results?.[0] || {};
               return (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -304,7 +348,8 @@ export const PreviousOptimisationView: React.FC<PreviousOptimisationViewProps> =
                   </div>
                 </div>
               );
-            })()}
+            })()
+            }
           </div>
         )}
       </div>

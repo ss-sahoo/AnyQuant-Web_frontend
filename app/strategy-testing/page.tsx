@@ -37,6 +37,7 @@ import {
 } from "../AllApiCalls" // Import new functions
 import { X } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
+import { extractErrorMessage, formatErrorForDisplay } from "@/lib/error-utils"
 import { StrategyTab } from "@/components/strategy-tab"
 import { BacktestTab } from "@/components/backtest-tab"
 import { OptimisationTab } from "@/components/optimisation-tab"
@@ -50,6 +51,7 @@ import { TradesSummary } from "@/components/trades-summary";
 import { MetaAPIConfig, type MetaAPIConfig as MetaAPIConfigType } from "@/components/metaapi-config";
 // New optimization droplets components
 import { OptimizationCostDialog } from "@/components/optimization-cost-dialog"
+import { OptimizationErrorDisplay } from "@/components/optimization-error-display"
 // Backtest history components
 import { BacktestHistoryList } from "@/components/BacktestHistoryList"
 // MetaAPI debugging
@@ -1903,7 +1905,8 @@ export default function StrategyTestingPage() {
           // Don't show toast if we're just loading existing results
           // showToast('Optimization already completed!', 'success')
         } else if (initialJobData.status === 'Failed' || initialJobData.status === 'failed') {
-          showToast(`Optimization job failed: ${initialJobData.error_message || 'Unknown error'}`, 'error')
+          const errorMsg = formatErrorForDisplay(initialJobData.error_message || initialJobData, 'Unknown error')
+          showToast(`Optimization failed: ${errorMsg}`, 'error')
         }
         return // Exit early - no need to poll
       }
@@ -1990,8 +1993,9 @@ export default function StrategyTestingPage() {
               showToast('Optimization completed successfully!', 'success')
             }
           } else if (jobData.status === 'Failed' || jobData.status === 'failed') {
-            console.log(`❌ Droplet job failed:`, jobData.error_message || 'Unknown error')
-            showToast(`Optimization job failed: ${jobData.error_message || 'Unknown error'}`, 'error')
+            const errorMsg = formatErrorForDisplay(jobData.error_message || jobData, 'Unknown error')
+            console.log(`❌ Droplet job failed:`, errorMsg)
+            showToast(`Optimization failed: ${errorMsg}`, 'error')
           } else if (jobData.status === 'Cancelled' || jobData.status === 'cancelled') {
             console.log(`⚠️ Droplet job cancelled`)
             showToast('Optimization job was cancelled', 'warning')
@@ -2601,28 +2605,14 @@ export default function StrategyTestingPage() {
 
                 {activeTab === "optimisation" && showOptimisationResults && optimisationResult && (
                   <div className="p-6 bg-[#000000] text-white min-h-[600px]">
-                    {/* Optimisation response info (message/stdout/stderr) */}
+                    {/* Optimisation response info (message/stdout/stderr) - Enhanced Error Display */}
                     {(optimisationMessage || optimisationStdout || optimisationStderr) && (
-                      <div className="mb-4 p-4 bg-[#141721] rounded-md border border-gray-700">
-                        {optimisationMessage && (
-                          <div className="mb-2">
-                            <span className="font-semibold text-white mr-2">Message:</span>
-                            <span className="text-gray-300 break-words">{optimisationMessage}</span>
-                          </div>
-                        )}
-                        {optimisationStdout && (
-                          <div className="mb-2">
-                            <div className="font-semibold text-white mb-1">Stdout:</div>
-                            <pre className="whitespace-pre-wrap break-words text-gray-300 text-xs bg-[#0e1018] p-3 rounded-md border border-gray-800 max-h-60 overflow-auto">{optimisationStdout}</pre>
-                          </div>
-                        )}
-                        {optimisationStderr && (
-                          <div className="mb-2">
-                            <div className="font-semibold text-white mb-1">Stderr:</div>
-                            <pre className="whitespace-pre-wrap break-words text-gray-300 text-xs bg-[#0e1018] p-3 rounded-md border border-gray-800 max-h-60 overflow-auto">{optimisationStderr}</pre>
-                          </div>
-                        )}
-                      </div>
+                      <OptimizationErrorDisplay
+                        message={optimisationMessage}
+                        stdout={optimisationStdout}
+                        stderr={optimisationStderr}
+                        className="mb-4"
+                      />
                     )}
 
                     {/* Top-level tabs: Results | Graph | Report */}
