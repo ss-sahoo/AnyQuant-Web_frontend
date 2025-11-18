@@ -177,6 +177,9 @@ export default function StrategyTestingPage() {
   const [progress2, setProgress2] = useState(0); // For optimisation
   const [progress3, setProgress3] = useState(0); // For walk forward optimisation
 
+  // Timezone state (moved from TradingSessionModal to Strategy tab)
+  const [timezone, setTimezone] = useState<string>("UTC")
+
   // Helper function to map MetaAPI symbols to Backtest instruments
   const mapSymbolToInstrument = (symbol: string): string | null => {
     const symbolUpper = symbol.toUpperCase().replace(/\./g, '') // Remove dots like in XAUUSD.a
@@ -268,6 +271,11 @@ export default function StrategyTestingPage() {
           console.log("🔍 DEBUG: Loaded strategy from localStorage:", parsed)
           console.log("🔍 DEBUG: TradingSession in loaded strategy:", parsed.TradingSession)
           setParsedStatement(parsed)
+          
+          // Load timezone from TradingSession if available
+          if (parsed.TradingSession?.Timezone) {
+            setTimezone(parsed.TradingSession.Timezone)
+          }
           
           // Load date range if available
           if (parsed.date_range) {
@@ -2479,6 +2487,39 @@ export default function StrategyTestingPage() {
                           onConfigChange={handleMetaAPIConfigChange}
                           initialConfig={metaAPIConfig || undefined}
                         />
+                        
+                        {/* Timezone Selector */}
+                        <div className="bg-black border border-gray-700 rounded-lg p-4">
+                          <label className="block text-white font-medium mb-2">Timezone</label>
+                          <select
+                            value={timezone}
+                            onChange={(e) => {
+                              setTimezone(e.target.value)
+                              // Update TradingSession immediately when timezone changes
+                              if (parsedStatement?.TradingSession) {
+                                const updated = {
+                                  ...parsedStatement,
+                                  TradingSession: {
+                                    ...parsedStatement.TradingSession,
+                                    Timezone: e.target.value
+                                  }
+                                }
+                                setParsedStatement(updated)
+                                localStorage.setItem("savedStrategy", JSON.stringify(updated))
+                              }
+                            }}
+                            className="w-full bg-gray-900 border border-gray-600 text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#85e1fe]"
+                          >
+                            <option value="UTC">UTC</option>
+                            <option value="Europe/London">Europe/London</option>
+                            <option value="America/New_York">EST (Eastern Standard Time)</option>
+                            <option value="Asia/Kolkata">Asia/Kolkata</option>
+                          </select>
+                          <p className="text-xs text-gray-500 mt-1">
+                            Select the timezone for trading session configuration
+                          </p>
+                        </div>
+                        
                         <div className="flex gap-3">
                           {/* <button
                             className="bg-[#141721] hover:bg-[#2B2E38] text-white rounded-full px-4 py-2 text-sm"
@@ -2585,9 +2626,15 @@ export default function StrategyTestingPage() {
                     showTradesSummary={showTradesSummary}
                     onShowTradesSummary={() => setShowTradesSummary(true)}
                     initialTradingSession={parsedStatement?.TradingSession}
+                    timezone={timezone}
                     onTradingSessionSave={(session) => {
                       try {
-                        const updated = { ...(parsedStatement || {}), TradingSession: session }
+                        // Ensure timezone from state is included in the session
+                        const sessionWithTimezone = {
+                          ...session,
+                          Timezone: timezone
+                        }
+                        const updated = { ...(parsedStatement || {}), TradingSession: sessionWithTimezone }
                         setParsedStatement(updated)
                         localStorage.setItem("savedStrategy", JSON.stringify(updated))
                         // optional toast

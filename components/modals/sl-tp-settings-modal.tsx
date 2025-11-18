@@ -49,6 +49,12 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
     trailingStep: initialSettings?.trailingStep || "0",
     inp2: initialSettings?.inp2 || "Entry_Price",
     partialTpList: initialSettings?.partialTpList || (type === "TP" ? [{ Price: "Entry_Price + 200pips", Close: "50%" }] : undefined),
+    indicatorParams: initialSettings?.indicatorParams || {
+      name: "nperiod_hl",
+      side: "low",
+      timeframe: "1h",
+      nperiod: 30,
+    },
   })
 
   const [formatType, setFormatType] = useState<"simple" | "advanced" | "trailing" | "indicator" | "fixed">(

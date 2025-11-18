@@ -39,6 +39,7 @@ interface BacktestTabProps {
   // New optional props for Trading Session integration
   initialTradingSession?: any
   onTradingSessionSave?: (session: any) => void
+  timezone?: string
 }
 
 export function BacktestTab({
@@ -74,6 +75,7 @@ export function BacktestTab({
   onShowTradesSummary,
   initialTradingSession,
   onTradingSessionSave,
+  timezone = "UTC",
 }: BacktestTabProps) {
   const [showTradingSessionModal, setShowTradingSessionModal] = useState(false)
   const [showDateRangeModal, setShowDateRangeModal] = useState(false)
@@ -97,14 +99,14 @@ export function BacktestTab({
   // Map to required day order
   const DAY_ORDER = ["M", "t", "W", "T", "F", "S", "U"]
 
-  const handleTradingSessionSave = (config: { timezone: string; startTime: string; endTime: string; selectedDays: string[] }) => {
+  const handleTradingSessionSave = (config: { startTime: string; endTime: string; selectedDays: string[] }) => {
     // Build ordered day string
     const selectedSet = new Set(config.selectedDays)
     const orderedDays = DAY_ORDER.filter((d) => selectedSet.has(d)).join("")
 
-    // Build JSON per spec
+    // Build JSON per spec - use timezone from props instead of config
     const sessionJson = {
-      Timezone: config.timezone,
+      Timezone: timezone,
       Day: {
         Operator: "is",
         input: orderedDays,
@@ -544,12 +546,10 @@ export function BacktestTab({
           onSave={(cfg) => handleTradingSessionSave(cfg)}
           initial={(() => {
             if (!initialTradingSession) return undefined
-            const tz = initialTradingSession.Timezone
             const dayStr: string = initialTradingSession.Day?.input || ""
             const timeStr: string = Array.isArray(initialTradingSession.Time?.input) ? initialTradingSession.Time.input[0] : ""
             const [start, end] = (timeStr || "-").split("-")
             return {
-              timezone: tz,
               startTime: start || "09:00",
               endTime: end || "17:00",
               selectedDays: dayStr.split("").filter(Boolean),

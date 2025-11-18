@@ -5,13 +5,11 @@ import React, { useEffect, useState } from "react"
 interface TradingSessionModalProps {
   onClose: () => void
   onSave: (config: {
-    timezone: string
     startTime: string
     endTime: string
     selectedDays: string[]
   }) => void
   initial?: {
-    timezone?: string
     startTime?: string
     endTime?: string
     selectedDays?: string[]
@@ -28,16 +26,8 @@ const DAY_ORDER: Array<{ code: "M" | "t" | "W" | "T" | "F" | "S" | "U"; label: s
   { code: "U", label: "Sun" }, // Sunday
 ]
 
-// Minimal timezone options; values are canonical TZ IDs, labels are user friendly
-const TIMEZONES: Array<{ value: string; label: string }> = [
-  { value: "UTC", label: "UTC" },
-  { value: "Europe/London", label: "Europe/London" },
-  { value: "America/New_York", label: "EST (Eastern Standard Time)" },
-  { value: "Asia/Kolkata", label: "Asia/Kolkata" },
-]
 
 export function TradingSessionModal({ onClose, onSave, initial }: TradingSessionModalProps) {
-  const [timezone, setTimezone] = useState<string>(initial?.timezone || "UTC")
   const [startTime, setStartTime] = useState<string>(initial?.startTime || "09:00")
   const [endTime, setEndTime] = useState<string>(initial?.endTime || "17:00")
   const [selectedDays, setSelectedDays] = useState<string[]>(initial?.selectedDays || ["M", "t", "W", "T", "F"]) // default weekdays
@@ -45,7 +35,6 @@ export function TradingSessionModal({ onClose, onSave, initial }: TradingSession
   // Keep local state in sync if initial changes
   useEffect(() => {
     if (initial) {
-      if (initial.timezone) setTimezone(initial.timezone)
       if (initial.startTime) setStartTime(initial.startTime)
       if (initial.endTime) setEndTime(initial.endTime)
       if (initial.selectedDays) setSelectedDays(initial.selectedDays)
@@ -59,7 +48,7 @@ export function TradingSessionModal({ onClose, onSave, initial }: TradingSession
   }
 
   const handleSave = () => {
-    onSave({ timezone, startTime, endTime, selectedDays })
+    onSave({ startTime, endTime, selectedDays })
   }
 
   return (
@@ -101,22 +90,6 @@ export function TradingSessionModal({ onClose, onSave, initial }: TradingSession
               className="w-full border border-gray-300 rounded-md px-2 py-2"
             />
           </div>
-        </div>
-
-        {/* Timezone */}
-        <div className="mb-4">
-          <label className="block text-xs mb-1">Timezone</label>
-          <select
-            value={timezone}
-            onChange={(e) => setTimezone(e.target.value)}
-            className="w-full border border-gray-300 rounded-md px-2 py-2"
-          >
-            {TIMEZONES.map((tz) => (
-              <option key={tz.value} value={tz.value}>
-                {tz.label}
-              </option>
-            ))}
-          </select>
         </div>
 
         <div className="flex justify-end gap-3 mt-4">
