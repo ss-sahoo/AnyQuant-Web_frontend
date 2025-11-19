@@ -439,12 +439,12 @@ function BacktestResultsClient() {
                 {/* Charts Section */}
                 <div className="grid grid-cols-1 gap-6">
                   {/* RSI_MA Chart */}
-                  <div className="bg-[#141721] rounded-lg p-4">
+                  {/* <div className="bg-[#141721] rounded-lg p-4">
                     <h3 className="text-lg font-semibold text-white mb-4">RSI_MA</h3>
                     <div className="h-64 bg-gray-800 rounded flex items-center justify-center">
                       <p className="text-gray-400">RSI_MA Chart Placeholder</p>
                     </div>
-                  </div>
+                  </div> */}
 
                   {/* Equity Chart */}
                   {backtestDetail.plot_html && (

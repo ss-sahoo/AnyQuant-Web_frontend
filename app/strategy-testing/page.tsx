@@ -420,7 +420,13 @@ export default function StrategyTestingPage() {
               setTournamentSize(algorithmDefaults.tournament_size?.toString() || "3")
             }
             if (strategyData.id) {
-              localStorage.setItem("strategy_id", strategyData.id)
+              const resolvedId = String(strategyData.id)
+              localStorage.setItem("strategy_id", resolvedId)
+              setStrategyId(resolvedId)
+            } else if (id) {
+              const resolvedId = String(id)
+              localStorage.setItem("strategy_id", resolvedId)
+              setStrategyId(resolvedId)
             }
 
             // Update component state
