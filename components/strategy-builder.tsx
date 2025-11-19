@@ -237,6 +237,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const [showCustomTimeframeModal, setShowCustomTimeframeModal] = useState(false)
   const [customTimeframes, setCustomTimeframes] = useState<string[]>([])
 
+  const createConstantInput = (inputValue: string, timeframe: string) => ({
+    type: "C" as const,
+    input: inputValue,
+    name: inputValue,
+    timeframe,
+  })
+
 
 
   // Add this after the existing state declarations
@@ -1109,11 +1116,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     if (["Price Open", "Price Close", "Price Low", "Price High"].includes(component)) {
       const priceType = component.split(" ")[1].toLowerCase()
       const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-      lastCondition.inp1 = {
-        type: "C",
-        input: priceType,
-        timeframe: selectedTimeframe || "12min",
-      }
+      lastCondition.inp1 = createConstantInput(priceType, selectedTimeframe || "12min")
       setStatements(newStatements)
       setActiveStatementIndex(statementIndex)
       setSearchTerm("")
@@ -1251,11 +1254,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               },
             }
           } else if (component.toLowerCase() === "volume") {
-            lastCondition.inp2 = {
-              type: "C",
-              input: "volume",
-              timeframe: timeframe,
-            }
+            lastCondition.inp2 = createConstantInput("volume", timeframe)
           } else if (component.toLowerCase() === "rsi_ma" || component.toLowerCase() === "rsi-ma") {
             // Special handling for RSI_MA
             let rsiLength = 14;
@@ -1307,11 +1306,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               // Check if inp1 is BBANDS to use special format
               if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
                 // For BBANDS, use type "C" with input "close" format
-                lastCondition.inp2 = {
-                  type: "C",
-                  input: lastCondition.inp1.input || "close",
-                  timeframe: timeframe,
-                }
+                lastCondition.inp2 = createConstantInput(lastCondition.inp1.input || "close", timeframe)
               } else {
                 lastCondition.inp2 = {
                   type: "I",
@@ -1326,17 +1321,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 }
               }
             } else if (["high", "low", "open", "close"].includes(component.toLowerCase())) {
-              lastCondition.inp2 = {
-                type: "C",
-                input: component.toLowerCase(),
-                timeframe: timeframe,
-              }
+              lastCondition.inp2 = createConstantInput(component.toLowerCase(), timeframe)
             } else {
-              lastCondition.inp2 = {
-                type: "C",
-                input: component.toLowerCase(),
-                timeframe: timeframe,
-              }
+              lastCondition.inp2 = createConstantInput(component.toLowerCase(), timeframe)
             }
           }
         } else {
@@ -1366,11 +1353,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               },
             }
           } else if (component.toLowerCase() === "volume") {
-            lastCondition.inp1 = {
-              type: "C",
-              input: "volume",
-              timeframe: timeframe,
-            }
+            lastCondition.inp1 = createConstantInput("volume", timeframe)
           } else if (component.toLowerCase() === "rsi_ma" || component.toLowerCase() === "rsi-ma") {
             // Special handling for RSI_MA
             let rsiLength = 14;
@@ -1435,21 +1418,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               }
             } else if (["high", "low", "open", "close"].includes(component.toLowerCase())) {
               // Keep the existing OHLC handling
-              lastCondition.inp1 = {
-                type: "C",
-                input: component.toLowerCase(),
-                timeframe: timeframe,
-              }
+              lastCondition.inp1 = createConstantInput(component.toLowerCase(), timeframe)
             } else if (component.toLowerCase() === "price") {
               // Show the Price Settings modal
               setShowPriceSettingsModal(true)
             } else {
               // Keep the existing handling for other indicators
-              lastCondition.inp1 = {
-                type: "C",
-                input: component.toLowerCase(),
-                timeframe: timeframe,
-              }
+              lastCondition.inp1 = createConstantInput(component.toLowerCase(), timeframe)
             }
           }
 
@@ -2184,11 +2159,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
     // Create or update inp1 with the selected price type
-    lastCondition.inp1 = {
-      type: "C",
-      input: priceType.toLowerCase(),
-      timeframe: selectedTimeframe || "12min",
-    }
+    lastCondition.inp1 = createConstantInput(priceType.toLowerCase(), selectedTimeframe || "12min")
 
     setStatements(newStatements)
   }
@@ -3312,20 +3283,12 @@ if (
                   }
                 } else if (["open", "high", "low", "close"].includes(settings.indicator)) {
                   // Handle OHLC price indicators
-                  lastCondition.inp2 = {
-                    type: "C",
-                    input: settings.indicator,
-                    timeframe: settings.timeframe || "3h",
-                  }
+                  lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
                 } else if (settings.indicator === "bollinger") {
                   // Check if inp1 is BBANDS to use special format
                   if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
                     // For BBANDS, use type "C" with input "close" format
-                    lastCondition.inp2 = {
-                      type: "C",
-                      input: "close",
-                      timeframe: "36min",
-                    }
+                    lastCondition.inp2 = createConstantInput("close", "36min")
                   } else {
                     // Default behavior for other cases
                     lastCondition.inp2 = {
@@ -3344,18 +3307,10 @@ if (
                     }
                   }
                 } else if (settings.indicator === "volume") {
-                  lastCondition.inp2 = {
-                    type: "C",
-                    input: "volume",
-                    timeframe: settings.timeframe || "3h",
-                  }
+                  lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
                 } else {
                   // For other existing indicators
-                  lastCondition.inp2 = {
-                    type: "C",
-                    input: settings.indicator,
-                    timeframe: settings.timeframe || "3h",
-                  }
+                  lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
                 }
               } else if (settings.valueType === "other" && settings.indicator) {
                 // Handle indicator type for "other" option
@@ -3393,18 +3348,10 @@ if (
                     },
                   }
                 } else if (settings.indicator === "volume") {
-                  lastCondition.inp2 = {
-                    type: "C",
-                    input: "volume",
-                    timeframe: settings.timeframe || "3h",
-                  }
+                  lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
                 } else {
                   // For other indicators like price, close, open, etc.
-                  lastCondition.inp2 = {
-                    type: "C",
-                    input: settings.indicator,
-                    timeframe: settings.timeframe || "3h",
-                  }
+                  lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
                 }
               }
             }
@@ -3535,20 +3482,12 @@ if (
                   }
                 } else if (["open", "high", "low", "close"].includes(settings.indicator)) {
                   // Handle OHLC price indicators
-                  lastCondition.inp2 = {
-                    type: "C",
-                    input: settings.indicator,
-                    timeframe: settings.timeframe || "3h",
-                  }
+                  lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
                 } else if (settings.indicator === "bollinger") {
                   // Check if inp1 is BBANDS to use special format
                   if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
                     // For BBANDS, use type "C" with input "close" format
-                    lastCondition.inp2 = {
-                      type: "C",
-                      input: "close",
-                      timeframe: "36min",
-                    }
+                    lastCondition.inp2 = createConstantInput("close", "36min")
                   } else {
                     // Default behavior for other cases
                     lastCondition.inp2 = {
@@ -3567,18 +3506,10 @@ if (
                     }
                   }
                 } else if (settings.indicator === "volume") {
-                  lastCondition.inp2 = {
-                    type: "C",
-                    input: "volume",
-                    timeframe: settings.timeframe || "3h",
-                  }
+                  lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
                 } else {
                   // For other existing indicators
-                  lastCondition.inp2 = {
-                    type: "C",
-                    input: settings.indicator,
-                    timeframe: settings.timeframe || "3h",
-                  }
+                  lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
                 }
               } else if (settings.valueType === "other" && settings.indicator) {
                 // Handle indicator type for "other" option
@@ -3616,18 +3547,10 @@ if (
                     },
                   }
                 } else if (settings.indicator === "volume") {
-                  lastCondition.inp2 = {
-                    type: "C",
-                    input: "volume",
-                    timeframe: settings.timeframe || "3h",
-                  }
+                  lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
                 } else {
                   // For other indicators like price, close, open, etc.
-                  lastCondition.inp2 = {
-                    type: "C",
-                    input: settings.indicator,
-                    timeframe: settings.timeframe || "3h",
-                  }
+                  lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
                 }
               }
 
@@ -3764,30 +3687,18 @@ if (
                     break
 
                   case "volume":
-                    lastCondition.inp2 = {
-                      type: "C",
-                      input: "volume",
-                      timeframe: tf,
-                    }
+                    lastCondition.inp2 = createConstantInput("volume", tf)
                     break
 
                   case "open":
                   case "high":
                   case "low":
                   case "close":
-                    lastCondition.inp2 = {
-                      type: "C",
-                      input: settings.indicator,
-                      timeframe: tf,
-                    }
+                    lastCondition.inp2 = createConstantInput(settings.indicator, tf)
                     break
 
                   default:
-                    lastCondition.inp2 = {
-                      type: "C",
-                      input: settings.indicator,
-                      timeframe: tf,
-                    }
+                    lastCondition.inp2 = createConstantInput(settings.indicator, tf)
                     break
                 }
               }
@@ -3928,30 +3839,18 @@ if (
                     break
 
                   case "volume":
-                    lastCondition.inp2 = {
-                      type: "C",
-                      input: "volume",
-                      timeframe: tf,
-                    }
+                    lastCondition.inp2 = createConstantInput("volume", tf)
                     break
 
                   case "open":
                   case "high":
                   case "low":
                   case "close":
-                    lastCondition.inp2 = {
-                      type: "C",
-                      input: settings.indicator,
-                      timeframe: tf,
-                    }
+                    lastCondition.inp2 = createConstantInput(settings.indicator, tf)
                     break
 
                   default:
-                    lastCondition.inp2 = {
-                      type: "C",
-                      input: settings.indicator,
-                      timeframe: tf,
-                    }
+                    lastCondition.inp2 = createConstantInput(settings.indicator, tf)
                     break
                 }
               }
@@ -4268,11 +4167,7 @@ if (
                   }
                 } else {
                   // Regular Volume
-                  const updatedIndicator = {
-                    type: "C",
-                    input: "volume",
-                    timeframe: targetIndicator.timeframe,
-                  }
+                  const updatedIndicator = createConstantInput("volume", targetIndicator.timeframe)
 
                   if (editingComponent.componentType === "inp1") {
                     condition.inp1 = updatedIndicator
@@ -4298,11 +4193,7 @@ if (
                   }
                 } else {
                   // Regular Volume
-                  lastCondition.inp1 = {
-                    type: "C",
-                    input: "volume",
-                    timeframe: lastCondition.inp1.timeframe,
-                  }
+                  lastCondition.inp1 = createConstantInput("volume", lastCondition.inp1.timeframe)
                 }
               }
             }
@@ -4604,30 +4495,18 @@ if (
                     break
 
                   case "volume":
-                    currentCondition.inp2 = {
-                      type: "C",
-                      input: "volume",
-                      timeframe: tf,
-                    }
+                    currentCondition.inp2 = createConstantInput("volume", tf)
                     break
 
                   case "open":
                   case "high":
                   case "low":
                   case "close":
-                    currentCondition.inp2 = {
-                      type: "C",
-                      input: settings.indicator,
-                      timeframe: tf,
-                    }
+                    currentCondition.inp2 = createConstantInput(settings.indicator, tf)
                     break
 
                   default:
-                    currentCondition.inp2 = {
-                      type: "C",
-                      input: settings.indicator,
-                      timeframe: tf,
-                    }
+                    currentCondition.inp2 = createConstantInput(settings.indicator, tf)
                     break
                 }
               }
