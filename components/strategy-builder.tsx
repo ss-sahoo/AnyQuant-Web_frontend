@@ -163,6 +163,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const [activeTab, setActiveTab] = useState("create")
   const [showStochasticModal, setShowStochasticModal] = useState(false)
   const [showCrossingUpModal, setShowCrossingUpModal] = useState(false)
+  const [crossingUpInitialSettings, setCrossingUpInitialSettings] = useState<any>(undefined)
   const [showCrossingDownModal, setShowCrossingDownModal] = useState(false)
   const [showAboveModal, setShowAboveModal] = useState(false)
   const [showBelowModal, setShowBelowModal] = useState(false)
@@ -723,6 +724,84 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     return behavior.toLowerCase()
   }
 
+  // Helper function to extract initial settings from inp2
+  const extractInp2Settings = (inp2: any, inp1: any) => {
+    if (!inp2) return undefined;
+
+    const settings: any = {};
+
+    // Check if it's a value type
+    if (inp2.type === "value") {
+      settings.valueType = "value";
+      settings.customValue = String(inp2.value || "50");
+      return settings;
+    }
+
+    // Check if it's an indicator type
+    if (inp2.type === "I" || inp2.type === "CUSTOM_I" || inp2.type === "C") {
+      // Determine indicator name
+      let indicatorName = "";
+      if (inp2.name === "RSI") {
+        indicatorName = "rsi";
+      } else if (inp2.name === "RSI_MA") {
+        indicatorName = "rsi-ma";
+      } else if (inp2.name === "BBANDS") {
+        indicatorName = "bollinger";
+      } else if (inp2.name === "Volume_MA") {
+        indicatorName = "volume-ma";
+      } else if (inp2.input === "volume") {
+        indicatorName = "volume";
+      } else if (["open", "close", "high", "low"].includes(inp2.input?.toLowerCase() || "")) {
+        indicatorName = inp2.input?.toLowerCase();
+      }
+
+      // If we couldn't determine the indicator name, return undefined
+      if (!indicatorName) {
+        return undefined;
+      }
+
+      // Determine if it's an existing indicator or other
+      const isExistingIndicator = inp1 && (
+        (inp1.name === "RSI" || inp1.name === "RSI_MA") && (indicatorName === "rsi" || indicatorName === "rsi-ma") ||
+        (inp1.name === "BBANDS") && (indicatorName === "high" || indicatorName === "low" || indicatorName === "mid") ||
+        (inp1.name === "Volume_MA" || inp1.input === "volume") && (indicatorName === "volume" || indicatorName === "volume-ma") ||
+        (["open", "close", "high", "low"].includes(inp1.input?.toLowerCase() || "")) && ["open", "close", "high", "low"].includes(indicatorName)
+      );
+
+      settings.valueType = isExistingIndicator ? "indicator" : "other";
+      settings.indicator = indicatorName;
+
+      // Extract indicator-specific parameters
+      if (inp2.name === "RSI") {
+        settings.rsiLength = inp2.input_params?.timeperiod || 14;
+        settings.rsiSource = inp2.input_params?.source ? 
+          inp2.input_params.source.charAt(0).toUpperCase() + inp2.input_params.source.slice(1) : "Close";
+      } else if (inp2.name === "RSI_MA") {
+        settings.rsiMaLength = inp2.input_params?.rsi_length || 14;
+        settings.maLength = inp2.input_params?.ma_length || 14;
+        settings.rsiSource = inp2.input_params?.rsi_source || "Close";
+        settings.maType = inp2.input_params?.ma_type || "SMA";
+        settings.bbStdDev = inp2.input_params?.bb_stddev || 2.0;
+      } else if (inp2.name === "BBANDS") {
+        settings.band = inp2.input || "upperband";
+        settings.timeperiod = inp2.input_params?.timeperiod || 20;
+        settings.bbSource = inp2.input_params?.source || "close";
+        settings.bbStdDev = inp2.input_params?.nbdevup || inp2.input_params?.nbdevdn || 2.0;
+      } else if (inp2.name === "Volume_MA") {
+        settings.volumeMaLength = inp2.input_params?.ma_length || 20;
+      }
+
+      if (inp2.timeframe) {
+        settings.timeframe = inp2.timeframe;
+      }
+      
+      return settings;
+    }
+
+    // If inp2.type is not recognized, return undefined
+    return undefined;
+  };
+
   // Add function to handle component clicks for editing
   const handleComponentClick = (
     statementIndex: number,
@@ -783,6 +862,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       case "operator":
         if (condition.operator_name === "crossabove" || condition.operator_name === "crossbelow") {
           if (condition.operator_name === "crossabove") {
+            const initialSettings = extractInp2Settings(condition.inp2, condition.inp1)
+            setCrossingUpInitialSettings(initialSettings)
             setShowCrossingUpModal(true)
           } else {
             setShowCrossingDownModal(true)
@@ -1112,11 +1193,21 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     const newStatements = [...statements]
     const currentStatement = newStatements[statementIndex]
 
-    // If the component is a price option, add as inp1 with correct structure
+    // If the component is a price option, add as inp1 or inp2 with correct structure
     if (["Price Open", "Price Close", "Price Low", "Price High"].includes(component)) {
       const priceType = component.split(" ")[1].toLowerCase()
       const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-      lastCondition.inp1 = createConstantInput(priceType, selectedTimeframe || "12min")
+      
+      // Check if we already have inp1 and an operator - if so, we're adding to inp2
+      if (lastCondition.inp1 && lastCondition.operator_name) {
+        // We're adding to inp2
+        const timeframe = lastCondition.timeframe || selectedTimeframe
+        lastCondition.inp2 = createConstantInput(priceType, timeframe)
+      } else {
+        // Create or update inp1 with the selected price type
+        lastCondition.inp1 = createConstantInput(priceType, selectedTimeframe || "12min")
+      }
+      
       setStatements(newStatements)
       setActiveStatementIndex(statementIndex)
       setSearchTerm("")
@@ -1222,10 +1313,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
         // Special handling for "price" component - it should go to inp1 if no inp1 exists
         if (component.toLowerCase() === "price") {
-          // Show the Price Settings modal for inp1
+          // Show the Price Settings modal - handlePriceSelection will determine inp1 vs inp2
           setShowPriceSettingsModal(true)
           setActiveStatementIndex(statementIndex)
-        } else
+          return
+        }
+        
         // Check if we already have inp1 and an operator - if so, we're adding to inp2
         if (lastCondition.inp1 && lastCondition.operator_name) {
           // Get the timeframe from the condition or use the selected timeframe
@@ -2158,8 +2251,16 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     const currentStatement = newStatements[activeStatementIndex]
     const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
-    // Create or update inp1 with the selected price type
-    lastCondition.inp1 = createConstantInput(priceType.toLowerCase(), selectedTimeframe || "12min")
+    // Check if we already have inp1 and an operator - if so, we're adding to inp2
+    if (lastCondition.inp1 && lastCondition.operator_name) {
+      // We're adding to inp2
+      const timeframe = lastCondition.timeframe || selectedTimeframe
+      lastCondition.inp2 = createConstantInput(priceType.toLowerCase(), timeframe)
+    } else {
+      // Create or update inp1 with the selected price type
+      const timeframe = lastCondition.timeframe || selectedTimeframe
+      lastCondition.inp1 = createConstantInput(priceType.toLowerCase(), timeframe)
+    }
 
     setStatements(newStatements)
   }
@@ -3184,10 +3285,14 @@ if (
       )}
       {showCrossingUpModal && (
         <CrossingUpSettingsModal
-          onClose={() => setShowCrossingUpModal(false)}
+          onClose={() => {
+            setShowCrossingUpModal(false)
+            setCrossingUpInitialSettings(undefined)
+          }}
           currentInp1={
             statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]?.inp1
           }
+          initialSettings={crossingUpInitialSettings}
           onSave={(settings) => {
             console.log('🔍 DEBUG: Strategy builder received settings:', settings);
             console.log('🔍 DEBUG: settings.indicator:', settings.indicator);
@@ -3358,12 +3463,14 @@ if (
 
             setStatements(newStatements)
             setShowCrossingUpModal(false)
+            setCrossingUpInitialSettings(undefined)
             setTimeout(() => {
               searchInputRefs.current[activeStatementIndex]?.focus()
             }, 100)
           }}
           onNext={(indicator, timeframe) => {
             setShowCrossingUpModal(false)
+            setCrossingUpInitialSettings(undefined)
             setPendingOtherIndicator(indicator)
             setPendingTimeframe(timeframe)
             if (indicator === "rsi") {

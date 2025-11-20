@@ -12,6 +12,31 @@ import { RsiSettingsModal } from "@/components/modals/rsi-settings-modal"
 interface CrossingUpSettingsModalProps {
   onClose: () => void
   currentInp1?: any 
+  initialSettings?: {
+    valueType?: string
+    customValue?: string
+    indicator?: string
+    timeframe?: string
+    band?: string
+    timeperiod?: number
+    // RSI parameters
+    rsiLength?: number
+    // RSI-MA parameters
+    rsiMaLength?: number
+    maLength?: number
+    rsiSource?: string
+    maType?: string
+    bbStdDev?: number
+    bbSource?: string
+    // Volume-MA parameters
+    volumeMaLength?: number
+    fastPeriod?: number
+    slowPeriod?: number
+    signalPeriod?: number
+    kPeriod?: number
+    dPeriod?: number
+    period?: number
+  }
   onSave: (settings: {
     valueType: string
     customValue?: string
@@ -40,7 +65,7 @@ interface CrossingUpSettingsModalProps {
   onNext: (indicator: string, timeframe: string) => void
 }
 
-export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }: CrossingUpSettingsModalProps) {
+export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings, onSave, onNext }: CrossingUpSettingsModalProps) {
   const [valueType, setValueType] = useState("value")
   const [customValue, setCustomValue] = useState("50")
   const [indicator, setIndicator] = useState("")
@@ -132,8 +157,51 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
 
   const existingIndicatorOptions = getExistingIndicatorOptions()
 
-  // Initialize parameters based on current inp1
+  // Initialize form fields from initialSettings when modal opens
   useEffect(() => {
+    if (initialSettings) {
+      console.log('🔍 DEBUG: Initializing form from initialSettings:', initialSettings);
+      if (initialSettings.valueType) setValueType(initialSettings.valueType);
+      if (initialSettings.customValue !== undefined) setCustomValue(String(initialSettings.customValue));
+      if (initialSettings.indicator) setIndicator(initialSettings.indicator);
+      if (initialSettings.timeframe) {
+        // Check if timeframe is a custom value (not in standard list)
+        const standardTimeframes = ["1min", "5min", "15min", "30min", "45min", "1h", "2h", "3h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"];
+        if (standardTimeframes.includes(initialSettings.timeframe)) {
+          setTimeframe(initialSettings.timeframe);
+        } else {
+          // It's a custom timeframe
+          setTimeframe("custom");
+          setCustomTimeframe(initialSettings.timeframe);
+        }
+      }
+      if (initialSettings.band) setBand(initialSettings.band);
+      if (initialSettings.timeperiod) setTimeperiod(initialSettings.timeperiod);
+      if (initialSettings.rsiLength) setRsiLength(initialSettings.rsiLength);
+      if (initialSettings.rsiMaLength) setRsiMaLength(initialSettings.rsiMaLength);
+      if (initialSettings.maLength) setMaLength(initialSettings.maLength);
+      if (initialSettings.rsiSource) setRsiSource(initialSettings.rsiSource);
+      if (initialSettings.maType) setMaType(initialSettings.maType);
+      if (initialSettings.bbStdDev !== undefined) setBbStdDev(initialSettings.bbStdDev);
+      if (initialSettings.bbSource) setBbSource(initialSettings.bbSource);
+      if (initialSettings.volumeMaLength) setVolumeMaLength(initialSettings.volumeMaLength);
+      if (initialSettings.fastPeriod) setFastPeriod(initialSettings.fastPeriod);
+      if (initialSettings.slowPeriod) setSlowPeriod(initialSettings.slowPeriod);
+      if (initialSettings.signalPeriod) setSignalPeriod(initialSettings.signalPeriod);
+      if (initialSettings.kPeriod) setKPeriod(initialSettings.kPeriod);
+      if (initialSettings.dPeriod) setDPeriod(initialSettings.dPeriod);
+      if (initialSettings.period) setPeriod(initialSettings.period);
+    }
+  }, [initialSettings]);
+
+  // Initialize parameters based on current inp1
+  // Skip this if initialSettings is provided (editing existing settings)
+  useEffect(() => {
+    if (initialSettings) {
+      // If we have initialSettings, don't initialize from currentInp1
+      // as initialSettings represents the actual saved state
+      return;
+    }
     console.log('🔍 DEBUG: useEffect triggered with currentInp1:', currentInp1);
     if (currentInp1) {
       if (currentInp1.name === "RSI") {
@@ -192,7 +260,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
         setTimeframe(currentInp1.timeframe)
       }
     }
-  }, [currentInp1])
+  }, [currentInp1, initialSettings])
 
   const handleSave = () => {
     console.log('🔍 handleSave called with indicator:', indicator, 'valueType:', valueType);
