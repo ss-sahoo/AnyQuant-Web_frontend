@@ -113,7 +113,7 @@ const refreshAlgorithms = async (pageToFetch = page) => {
 
       <MobileSidebar currentPage="home" />
 
-      <main className="flex-1 p-4 md:p-8 w-full">
+      <main className="flex-1 p-4 md:p-8 w-full md:ml-16">
         <div className="max-w-7xl mx-auto">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 md:mb-8 gap-4 md:gap-0">
             <h1 className="text-2xl md:text-3xl font-normal">Draft Algorithms</h1>
