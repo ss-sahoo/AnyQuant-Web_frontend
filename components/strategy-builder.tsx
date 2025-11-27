@@ -484,6 +484,16 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         return true
       }
 
+      // If searching for "stochastic", show both "Stochastic" and "Stochastic"
+      if (searchLower === "stochastic" && (componentLower === "stochastic" || componentLower === "Stochastic")) {
+        return true
+      }
+
+      // If searching for "Stochastic" or "stochastic-oscillator", show it
+      if ((searchLower === "Stochastic" || searchLower === "stochastic-oscillator") && componentLower === "Stochastic") {
+        return true
+      }
+
       // Reverse relationships - if searching for child, show parent too
       // If searching for "rsi ma", also show "RSI"
       if (searchLower.includes("rsi") && componentLower === "rsi") {
@@ -631,6 +641,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     { id: "bollinger", label: "Bollinger" },
     { id: "price", label: "Price" },
     { id: "stochastic", label: "Stochastic" },
+    { id: "stochastic-oscillator", label: "Stochastic" },
     { id: "atr", label: "ATR" },
     { id: "general-pa", label: "GENERAL PA" },
     { id: "gradient", label: "Gradient" },
@@ -827,8 +838,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             setShowVolumeModal(true)
           } else if (condition.inp1.name === "ATR") {
             setShowAtrModal(true)
-          } else if (condition.inp1.name === "Stochastic") {
-            setShowStochasticModal(true)
+          } else if (condition.inp1.name === "Stochastic" || condition.inp1.name === "Stochastic") {
+            openStochasticModal(statementIndex, conditionIndex, "inp1")
           }
         } else if (condition.inp1 && "input" in condition.inp1) {
           if (condition.inp1.input === "volume") {
@@ -849,6 +860,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             setShowMacdModal(true)
           } else if (condition.inp2.name === "Volume_MA") {
             setShowVolumeModal(true)
+          } else if (condition.inp2.name === "Stochastic" || condition.inp2.name === "Stochastic") {
+            openStochasticModal(statementIndex, conditionIndex, "inp2")
           }
         } else if (condition.inp2 && "input" in condition.inp2) {
           if (condition.inp2.input === "volume") {
@@ -1192,6 +1205,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const handleAddComponent = (statementIndex: number, component: string) => {
     const newStatements = [...statements]
     const currentStatement = newStatements[statementIndex]
+    let lastAddedStochasticTarget: { target: "inp1" | "inp2"; timeframe?: string } | null = null
 
     // If the component is a price option, add as inp1 or inp2 with correct structure
     if (["Price Open", "Price Close", "Price Low", "Price High"].includes(component)) {
@@ -1348,6 +1362,19 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             }
           } else if (component.toLowerCase() === "volume") {
             lastCondition.inp2 = createConstantInput("volume", timeframe)
+          } else if (component.toLowerCase() === "stochastic" || component.toLowerCase() === "stochastic-oscillator") {
+            lastCondition.inp2 = {
+              type: "CUSTOM_I",
+              name: "Stochastic",
+              timeframe: timeframe,
+              input_params: {
+                fastk_period: 14,
+                slowk_period: 3,
+                slowd_period: 3,
+                output: "slowk",
+              },
+            }
+          lastAddedStochasticTarget = { target: "inp2", timeframe }
           } else if (component.toLowerCase() === "rsi_ma" || component.toLowerCase() === "rsi-ma") {
             // Special handling for RSI_MA
             let rsiLength = 14;
@@ -1447,6 +1474,19 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             }
           } else if (component.toLowerCase() === "volume") {
             lastCondition.inp1 = createConstantInput("volume", timeframe)
+          } else if (component.toLowerCase() === "stochastic" || component.toLowerCase() === "stochastic-oscillator") {
+            lastCondition.inp1 = {
+              type: "CUSTOM_I",
+              name: "Stochastic",
+              timeframe: timeframe,
+              input_params: {
+                fastk_period: 14,
+                slowk_period: 3,
+                slowd_period: 3,
+                output: "slowk",
+              },
+            }
+          lastAddedStochasticTarget = { target: "inp1", timeframe }
           } else if (component.toLowerCase() === "rsi_ma" || component.toLowerCase() === "rsi-ma") {
             // Special handling for RSI_MA
             let rsiLength = 14;
@@ -1559,7 +1599,35 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           ) {
             setShowRsiModal(true)
           } else if (component === "Stochastic") {
-            setShowStochasticModal(true)
+            const conditionIndex = currentStatement.strategy.length - 1
+            const targetInput =
+              lastAddedStochasticTarget?.target ||
+              (lastCondition.operator_name && lastCondition.inp2 ? "inp2" : "inp1")
+            const timeframeForModal =
+              lastAddedStochasticTarget?.timeframe ||
+              (targetInput === "inp1"
+                ? (lastCondition.inp1 && "timeframe" in lastCondition.inp1 ? lastCondition.inp1.timeframe : undefined)
+                : (lastCondition.inp2 && typeof lastCondition.inp2 === "object" && "timeframe" in lastCondition.inp2
+                    ? lastCondition.inp2.timeframe
+                    : undefined)) ||
+              lastCondition.timeframe ||
+              selectedTimeframe
+            openStochasticModal(statementIndex, conditionIndex, targetInput, timeframeForModal)
+          } else if (component.toLowerCase() === "stochastic" || component.toLowerCase() === "stochastic-oscillator") {
+            const conditionIndex = currentStatement.strategy.length - 1
+            const targetInput =
+              lastAddedStochasticTarget?.target ||
+              (lastCondition.operator_name && lastCondition.inp2 ? "inp2" : "inp1")
+            const timeframeForModal =
+              lastAddedStochasticTarget?.timeframe ||
+              (targetInput === "inp1"
+                ? (lastCondition.inp1 && "timeframe" in lastCondition.inp1 ? lastCondition.inp1.timeframe : undefined)
+                : (lastCondition.inp2 && typeof lastCondition.inp2 === "object" && "timeframe" in lastCondition.inp2
+                    ? lastCondition.inp2.timeframe
+                    : undefined)) ||
+              lastCondition.timeframe ||
+              selectedTimeframe
+            openStochasticModal(statementIndex, conditionIndex, targetInput, timeframeForModal)
           } else if (component === "Bollinger") {
             setShowBollingerModal(true)
           } else if (component.toLowerCase() === "volume") {
@@ -1753,6 +1821,50 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
             },
           }
+        } else if (inp1.name === "Stochastic") {
+          const indicatorTypeValue = (inp1.input_params?.indicatorType ||
+            (inp1.input_params?.output === "slowd" ? "d" : "k") ||
+            "k").toLowerCase()
+          return {
+            title: "Stochastic",
+            details: {
+              indicator_type: indicatorTypeValue === "k" ? "%K" : "%D",
+              k_length:
+                inp1.input_params?.kLength ??
+                inp1.input_params?.fastk_period ??
+                14,
+              k_smoothing:
+                inp1.input_params?.kSmoothing ??
+                inp1.input_params?.slowk_period ??
+                3,
+              d_smoothing:
+                inp1.input_params?.dSmoothing ??
+                inp1.input_params?.slowd_period ??
+                3,
+              ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
+            },
+          }
+        } else if (inp1.name === "Stochastic") {
+          const outputValue = inp1.input_params?.output || "slowk"
+          return {
+            title: "Stochastic Oscillator",
+            details: {
+              fastk_period:
+                inp1.input_params?.fastk_period ??
+                inp1.input_params?.kLength ??
+                14,
+              slowk_period:
+                inp1.input_params?.slowk_period ??
+                inp1.input_params?.kSmoothing ??
+                3,
+              slowd_period:
+                inp1.input_params?.slowd_period ??
+                inp1.input_params?.dSmoothing ??
+                3,
+              output: outputValue === "slowk" ? "%K" : "%D",
+              ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
+            },
+          }
         } else if (inp1.name === "MACD") {
           return {
             title: "MACD",
@@ -1845,6 +1957,50 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           details: {
             timeperiod: inp2.input_params?.timeperiod || 17,
             input: inp2.input || "upperband",
+            ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
+          },
+        }
+      } else if ("name" in inp2 && inp2.name === "Stochastic") {
+        const indicatorTypeValue = (inp2.input_params?.indicatorType ||
+          (inp2.input_params?.output === "slowd" ? "d" : "k") ||
+          "k").toLowerCase()
+        return {
+          title: "Stochastic",
+          details: {
+            indicator_type: indicatorTypeValue === "k" ? "%K" : "%D",
+            k_length:
+              inp2.input_params?.kLength ??
+              inp2.input_params?.fastk_period ??
+              14,
+            k_smoothing:
+              inp2.input_params?.kSmoothing ??
+              inp2.input_params?.slowk_period ??
+              3,
+            d_smoothing:
+              inp2.input_params?.dSmoothing ??
+              inp2.input_params?.slowd_period ??
+              3,
+            ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
+          },
+        }
+      } else if ("name" in inp2 && inp2.name === "Stochastic") {
+        const outputValue = inp2.input_params?.output || "slowk"
+        return {
+          title: "Stochastic Oscillator",
+          details: {
+            fastk_period:
+              inp2.input_params?.fastk_period ??
+              inp2.input_params?.kLength ??
+              14,
+            slowk_period:
+              inp2.input_params?.slowk_period ??
+              inp2.input_params?.kSmoothing ??
+              3,
+            slowd_period:
+              inp2.input_params?.slowd_period ??
+              inp2.input_params?.dSmoothing ??
+              3,
+            output: outputValue === "slowk" ? "%K" : "%D",
             ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
           },
         }
@@ -2263,6 +2419,169 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     }
 
     setStatements(newStatements)
+  }
+
+  const openStochasticModal = (
+    statementIndex: number,
+    conditionIndex: number,
+    inputType: "inp1" | "inp2",
+    timeframeOverride?: string,
+  ) => {
+    setStochasticModalTarget({
+      statementIndex,
+      conditionIndex,
+      inputType,
+      timeframeOverride,
+    })
+    setShowStochasticModal(true)
+  }
+
+  const resolveStochasticTarget = () => {
+    if (stochasticModalTarget) {
+      return stochasticModalTarget
+    }
+
+    if (editingComponent && (editingComponent.componentType === "inp1" || editingComponent.componentType === "inp2")) {
+      return {
+        statementIndex: editingComponent.statementIndex,
+        conditionIndex: editingComponent.conditionIndex,
+        inputType: editingComponent.componentType,
+      }
+    }
+
+    const fallbackStatement = statements[activeStatementIndex]
+    if (!fallbackStatement) return null
+    const fallbackConditionIndex = Math.max(0, fallbackStatement.strategy.length - 1)
+    const fallbackCondition = fallbackStatement.strategy[fallbackConditionIndex]
+    const fallbackInput: "inp1" | "inp2" =
+      fallbackCondition?.inp1 && fallbackCondition?.operator_name && !fallbackCondition?.inp2 ? "inp2" : "inp1"
+
+    return {
+      statementIndex: activeStatementIndex,
+      conditionIndex: fallbackConditionIndex,
+      inputType: fallbackInput,
+    }
+  }
+
+  const getStochasticInitialSettings = () => {
+    const target = resolveStochasticTarget()
+    if (!target) return undefined
+    const condition = statements[target.statementIndex]?.strategy[target.conditionIndex]
+    if (!condition) return undefined
+    const indicator =
+      target.inputType === "inp1"
+        ? condition?.inp1
+        : condition?.inp2
+
+    if (indicator && "name" in indicator) {
+      if (indicator.name === "Stochastic" || indicator.name === "Stochastic") {
+        const fastk = indicator.input_params?.fastk_period ?? indicator.input_params?.kLength ?? 14
+        const slowk = indicator.input_params?.slowk_period ?? indicator.input_params?.kSmoothing ?? 3
+        const slowd = indicator.input_params?.slowd_period ?? indicator.input_params?.dSmoothing ?? 3
+        const outputValue = indicator.input_params?.output || "slowk"
+        const indicatorTypeValue =
+          (indicator.input_params?.indicatorType || (outputValue === "slowd" ? "d" : "k")) ?? "k"
+
+        return {
+          fastk_period: fastk,
+          slowk_period: slowk,
+          slowd_period: slowd,
+          output: outputValue,
+          indicatorType: indicatorTypeValue,
+          kLength: indicator.input_params?.kLength ?? fastk,
+          kSmoothing: indicator.input_params?.kSmoothing ?? slowk,
+          dSmoothing: indicator.input_params?.dSmoothing ?? slowd,
+          timeframe: indicator.timeframe || "3h",
+        }
+      }
+    }
+
+    return undefined
+  }
+
+  const applyStochasticSettings = (settings: any) => {
+    const target = resolveStochasticTarget()
+    if (!target) return
+
+    const newStatements = [...statements]
+    const targetStatement = newStatements[target.statementIndex]
+    const condition = targetStatement?.strategy[target.conditionIndex]
+    if (!condition) return
+
+    const getExistingTimeframe = () => {
+      const existing =
+        target.inputType === "inp1"
+          ? condition.inp1 && typeof condition.inp1 === "object" && "timeframe" in condition.inp1
+            ? condition.inp1.timeframe
+            : undefined
+          : condition.inp2 && typeof condition.inp2 === "object" && "timeframe" in condition.inp2
+            ? condition.inp2.timeframe
+            : undefined
+      return existing
+    }
+
+    const timeframe =
+      target.timeframeOverride ||
+      pendingTimeframe ||
+      getExistingTimeframe() ||
+      condition.timeframe ||
+      selectedTimeframe
+
+    const normalizedIndicatorType =
+      typeof settings.indicatorType === "string"
+        ? settings.indicatorType.toLowerCase()
+        : undefined
+    const derivedFastk = Number(settings.fastk_period ?? settings.kLength ?? 14)
+    const derivedSlowk = Number(settings.slowk_period ?? settings.kSmoothing ?? 3)
+    const derivedSlowd = Number(settings.slowd_period ?? settings.dSmoothing ?? 3)
+    const outputValue =
+      settings.output ||
+      (normalizedIndicatorType === "d" ? "slowd" : "slowk")
+
+    const indicatorData = {
+      type: "CUSTOM_I" as const,
+      name: "Stochastic" as const,
+      timeframe,
+      input_params: {
+        fastk_period: derivedFastk,
+        slowk_period: derivedSlowk,
+        slowd_period: derivedSlowd,
+        output: outputValue,
+        indicatorType: normalizedIndicatorType || (outputValue === "slowd" ? "d" : "k"),
+        kLength: Number(settings.kLength ?? derivedFastk),
+        kSmoothing: Number(settings.kSmoothing ?? derivedSlowk),
+        dSmoothing: Number(settings.dSmoothing ?? derivedSlowd),
+      },
+    }
+
+    if (target.inputType === "inp1") {
+      condition.inp1 = indicatorData
+    } else {
+      condition.inp2 = indicatorData
+    }
+
+    if (condition.pendingAtCandle) {
+      if (target.inputType === "inp1" && condition.pendingAtCandle.inp1 && condition.inp1 && typeof condition.inp1 === "object") {
+        condition.inp1.index = condition.pendingAtCandle.inp1
+        delete condition.pendingAtCandle.inp1
+      }
+      if (target.inputType === "inp2" && condition.pendingAtCandle.inp2 && condition.inp2 && typeof condition.inp2 === "object") {
+        condition.inp2.index = condition.pendingAtCandle.inp2
+        delete condition.pendingAtCandle.inp2
+      }
+      if (Object.keys(condition.pendingAtCandle).length === 0) {
+        delete condition.pendingAtCandle
+      }
+    }
+
+    setStatements(newStatements)
+    setEditingComponent(null)
+    setStochasticModalTarget(null)
+    setShowStochasticModal(false)
+    setPendingTimeframe("3h")
+    setTimeout(() => {
+      searchInputRefs.current[activeStatementIndex]?.focus()
+    }, 100)
   }
 
   // Update the renderStrategyConditions function to properly display At Candle components
@@ -3037,6 +3356,12 @@ if (
 
   // Add this state near other useState hooks
   const [pendingBollingerForInp2, setPendingBollingerForInp2] = useState<null | { statementIndex: number; conditionIndex: number; timeframe: string }>(null);
+  const [stochasticModalTarget, setStochasticModalTarget] = useState<{
+    statementIndex: number
+    conditionIndex: number
+    inputType: "inp1" | "inp2"
+    timeframeOverride?: string
+  } | null>(null)
 
   return (
     <div className="flex-1 flex flex-col">
@@ -3265,24 +3590,6 @@ if (
       )}
 
       {/* Modals */}
-      {showStochasticModal && (
-        <StochasticSettingsModal
-          onClose={() => setShowStochasticModal(false)}
-          onSave={(settings: any) => {
-            setShowStochasticModal(false)
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-            lastCondition.inp2 = {
-              type: "I",
-              name: "Stochastic",
-              timeframe: pendingTimeframe,
-              input_params: settings,
-            }
-            setStatements(newStatements)
-          }}
-        />
-      )}
       {showCrossingUpModal && (
         <CrossingUpSettingsModal
           onClose={() => {
@@ -3454,6 +3761,62 @@ if (
                   }
                 } else if (settings.indicator === "volume") {
                   lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
+                } else if (settings.indicator === "stochastic") {
+                  // Use the same settings from inp1 if it's a Stochastic indicator
+                  if (lastCondition.inp1 && (lastCondition.inp1.name === "Stochastic" || lastCondition.inp1.name === "Stochastic")) {
+                    lastCondition.inp2 = {
+                      type: "I",
+                      name: "Stochastic",
+                      timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
+                      input_params: lastCondition.inp1.input_params || {
+                        indicatorType: "k",
+                        kLength: 12,
+                        kSmoothing: 26,
+                        dSmoothing: 9,
+                      },
+                    }
+                  } else {
+                    // Default Stochastic settings
+                    lastCondition.inp2 = {
+                      type: "I",
+                      name: "Stochastic",
+                      timeframe: settings.timeframe || "3h",
+                      input_params: {
+                        indicatorType: "k",
+                        kLength: 12,
+                        kSmoothing: 26,
+                        dSmoothing: 9,
+                      },
+                    }
+                  }
+                } else if (settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
+                  // Use the same settings from inp1 if it's a Stochastic indicator
+                  if (lastCondition.inp1 && (lastCondition.inp1.name === "Stochastic" || lastCondition.inp1.name === "Stochastic")) {
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "Stochastic",
+                      timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
+                      input_params: lastCondition.inp1.input_params || {
+                        fastk_period: 14,
+                        slowk_period: 3,
+                        slowd_period: 3,
+                        output: "slowk",
+                      },
+                    }
+                  } else {
+                    // Default Stochastic settings
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "Stochastic",
+                      timeframe: settings.timeframe || "3h",
+                      input_params: {
+                        fastk_period: 14,
+                        slowk_period: 3,
+                        slowd_period: 3,
+                        output: "slowk",
+                      },
+                    }
+                  }
                 } else {
                   // For other indicators like price, close, open, etc.
                   lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
@@ -3473,20 +3836,23 @@ if (
             setCrossingUpInitialSettings(undefined)
             setPendingOtherIndicator(indicator)
             setPendingTimeframe(timeframe)
+
+            const conditionIndex =
+              activeConditionIndex ?? (statements[activeStatementIndex]?.strategy.length ?? 1) - 1
+
             if (indicator === "rsi") {
               setShowIndicatorModal(true)
             } else if (indicator === "rsi-ma") {
               setShowIndicatorModal(true)
             } else if (indicator === "bollinger") {
-              // Track which statement/condition/timeframe to update
               setPendingBollingerForInp2({
                 statementIndex: activeStatementIndex,
-                conditionIndex: statements[activeStatementIndex].strategy.length - 1,
+                conditionIndex,
                 timeframe,
               });
               setShowBollingerModal(true);
-            } else if (indicator === "stochastic") {
-              setShowStochasticModal(true)
+            } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
+              openStochasticModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
@@ -3655,6 +4021,30 @@ if (
                   }
                 } else if (settings.indicator === "volume") {
                   lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
+                } else if (settings.indicator === "stochastic") {
+                  lastCondition.inp2 = {
+                    type: "I",
+                    name: "Stochastic",
+                    timeframe: settings.timeframe || "3h",
+                    input_params: {
+                      indicatorType: settings.indicatorType || "k",
+                      kLength: settings.kLength || 12,
+                      kSmoothing: settings.kSmoothing || 26,
+                      dSmoothing: settings.dSmoothing || 9,
+                    },
+                  }
+                } else if (settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
+                  lastCondition.inp2 = {
+                    type: "CUSTOM_I",
+                    name: "Stochastic",
+                    timeframe: settings.timeframe || "3h",
+                    input_params: {
+                      fastk_period: settings.fastk_period || 14,
+                      slowk_period: settings.slowk_period || 3,
+                      slowd_period: settings.slowd_period || 3,
+                      output: settings.output || "slowk",
+                    },
+                  }
                 } else {
                   // For other indicators like price, close, open, etc.
                   lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
@@ -3669,6 +4059,10 @@ if (
             setShowCrossingDownModal(false)
             setPendingOtherIndicator(indicator)
             setPendingTimeframe(timeframe)
+
+            const conditionIndex =
+              activeConditionIndex ?? (statements[activeStatementIndex]?.strategy.length ?? 1) - 1
+
             if (indicator === "rsi") {
               setShowIndicatorModal(true)
             } else if (indicator === "rsi-ma") {
@@ -3676,12 +4070,12 @@ if (
             } else if (indicator === "bollinger") {
               setPendingBollingerForInp2({
                 statementIndex: activeStatementIndex,
-                conditionIndex: statements[activeStatementIndex].strategy.length - 1,
+                conditionIndex,
                 timeframe,
               });
               setShowBollingerModal(true);
-            } else if (indicator === "stochastic") {
-              setShowStochasticModal(true)
+            } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
+              openStochasticModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
@@ -3797,6 +4191,21 @@ if (
                     lastCondition.inp2 = createConstantInput("volume", tf)
                     break
 
+                  case "Stochastic":
+                  case "stochastic-oscillator":
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "Stochastic",
+                      timeframe: tf,
+                      input_params: {
+                        fastk_period: 14,
+                        slowk_period: 3,
+                        slowd_period: 3,
+                        output: "slowk",
+                      },
+                    }
+                    break
+
                   case "open":
                   case "high":
                   case "low":
@@ -3821,6 +4230,10 @@ if (
             setShowAboveModal(false)
             setPendingOtherIndicator(indicator)
             setPendingTimeframe(timeframe)
+
+            const conditionIndex =
+              activeConditionIndex ?? (statements[activeStatementIndex]?.strategy.length ?? 1) - 1
+
             if (indicator === "rsi") {
               setShowIndicatorModal(true)
             } else if (indicator === "rsi-ma") {
@@ -3828,12 +4241,12 @@ if (
             } else if (indicator === "bollinger") {
               setPendingBollingerForInp2({
                 statementIndex: activeStatementIndex,
-                conditionIndex: statements[activeStatementIndex].strategy.length - 1,
+                conditionIndex,
                 timeframe,
               });
               setShowBollingerModal(true);
-            } else if (indicator === "stochastic") {
-              setShowStochasticModal(true)
+            } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
+              openStochasticModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
@@ -3949,6 +4362,21 @@ if (
                     lastCondition.inp2 = createConstantInput("volume", tf)
                     break
 
+                  case "Stochastic":
+                  case "stochastic-oscillator":
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "Stochastic",
+                      timeframe: tf,
+                      input_params: {
+                        fastk_period: 14,
+                        slowk_period: 3,
+                        slowd_period: 3,
+                        output: "slowk",
+                      },
+                    }
+                    break
+
                   case "open":
                   case "high":
                   case "low":
@@ -3973,6 +4401,10 @@ if (
             setShowBelowModal(false)
             setPendingOtherIndicator(indicator)
             setPendingTimeframe(timeframe)
+
+            const conditionIndex =
+              activeConditionIndex ?? (statements[activeStatementIndex]?.strategy.length ?? 1) - 1
+
             if (indicator === "rsi") {
               setShowIndicatorModal(true)
             } else if (indicator === "rsi-ma") {
@@ -3980,12 +4412,12 @@ if (
             } else if (indicator === "bollinger") {
               setPendingBollingerForInp2({
                 statementIndex: activeStatementIndex,
-                conditionIndex: statements[activeStatementIndex].strategy.length - 1,
+                conditionIndex,
                 timeframe,
               });
               setShowBollingerModal(true);
-            } else if (indicator === "stochastic") {
-              setShowStochasticModal(true)
+            } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
+              openStochasticModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
@@ -4605,6 +5037,21 @@ if (
                     currentCondition.inp2 = createConstantInput("volume", tf)
                     break
 
+                  case "Stochastic":
+                  case "stochastic-oscillator":
+                    currentCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "Stochastic",
+                      timeframe: tf,
+                      input_params: {
+                        fastk_period: 14,
+                        slowk_period: 3,
+                        slowd_period: 3,
+                        output: "slowk",
+                      },
+                    }
+                    break
+
                   case "open":
                   case "high":
                   case "low":
@@ -4998,20 +5445,14 @@ if (
        
       {showStochasticModal && (
         <StochasticSettingsModal
-          onClose={() => setShowStochasticModal(false)}
-          onSave={(settings: any) => {
+          onClose={() => {
             setShowStochasticModal(false)
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-            lastCondition.inp2 = {
-              type: "I",
-              name: "Stochastic",
-              timeframe: pendingTimeframe,
-              input_params: settings,
-            }
-            setStatements(newStatements)
+            setEditingComponent(null)
+            setStochasticModalTarget(null)
+            setPendingTimeframe("3h")
           }}
+          initialSettings={getStochasticInitialSettings()}
+          onSave={applyStochasticSettings}
         />
       )}
 

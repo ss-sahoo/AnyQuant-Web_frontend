@@ -111,6 +111,10 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave, onNext }: Abo
       options.push({ value: "mid", label: "Mid" })
     } else if (currentInp1.name === "MACD") {
       options.push({ value: "macd", label: "MACD" })
+    } else if (currentInp1.name === "Stochastic") {
+      options.push({ value: "stochastic", label: "Stochastic" })
+    } else if (currentInp1.name === "Stochastic") {
+      options.push({ value: "stochastic-oscillator", label: "Stochastic Oscillator" })
     } else if (
       currentInp1.name === "Volume_MA" ||
       currentInp1.input === "volume" ||
@@ -428,6 +432,15 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave, onNext }: Abo
               BB Std Dev (from original indicator)
             </Label>
             <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.bbStdDev}</div>
+          </div>
+        </div>
+      )
+    }
+    if (indicator === "stochastic" || indicator === "stochastic-oscillator") {
+      return (
+        <div className="space-y-4">
+          <div className="text-sm text-gray-600">
+            Stochastic parameters will use the same settings as the original indicator.
           </div>
         </div>
       )

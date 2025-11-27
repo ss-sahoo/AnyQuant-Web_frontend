@@ -105,6 +105,10 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
       options.push({ value: "mid", label: "Mid" })
     } else if (currentInp1.name === "MACD") {
       options.push({ value: "macd", label: "MACD" })
+    } else if (currentInp1.name === "Stochastic") {
+      options.push({ value: "stochastic", label: "Stochastic" })
+    } else if (currentInp1.name === "Stochastic") {
+      options.push({ value: "stochastic-oscillator", label: "Stochastic Oscillator" })
     } else if (
       currentInp1.name === "Volume_MA" ||
       currentInp1.input === "volume" ||
