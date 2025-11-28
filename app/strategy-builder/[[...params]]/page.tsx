@@ -45,6 +45,11 @@ export default function StrategyBuilderPage() {
     const id = params?.params?.[0];
     if (id) {
       setStrategyId(id)
+      // Update localStorage immediately when opening a strategy from URL
+      // This ensures saves use the correct ID from URL, not an old ID in localStorage
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('strategy_id', id)
+      }
       fetchStrategyData(id)
       return
     }

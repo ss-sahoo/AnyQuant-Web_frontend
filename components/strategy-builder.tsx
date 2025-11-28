@@ -310,6 +310,18 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   // Add a new state variable to track the currently selected search result index
   const [selectedSearchIndex, setSelectedSearchIndex] = useState<number>(-1)
 
+  // Update localStorage whenever strategyId prop changes (from URL)
+  // This ensures localStorage always matches the current strategy being edited
+  useEffect(() => {
+    if (strategyId && typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('strategy_id', strategyId)
+      } catch (error) {
+        console.error('Error updating localStorage with strategy_id:', error)
+      }
+    }
+  }, [strategyId])
+
   // Load strategy data if strategyId is provided
   useEffect(() => {
     if (strategyData && strategyId) {
@@ -2214,10 +2226,16 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
       let result
 
-      // Rule: if localStorage has strategy_id, EDIT; else if URL has one, EDIT; otherwise CREATE
+      // Rule: if URL has strategy_id (strategyId prop), use it; else if localStorage has one, use it; otherwise CREATE
+      // Prioritize strategyId from URL over localStorage to ensure correct strategy is edited
       let existingId: string | null = null
-      try { existingId = localStorage.getItem("strategy_id") } catch {}
-      if (!existingId) existingId = strategyId || null
+      if (strategyId) {
+        existingId = strategyId
+        // Update localStorage to match URL ID
+        try { localStorage.setItem("strategy_id", strategyId) } catch {}
+      } else {
+        try { existingId = localStorage.getItem("strategy_id") } catch {}
+      }
 
       if (existingId) {
         result = await editStrategy(existingId, apiStatement)
@@ -2295,10 +2313,16 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
       let result
 
-      // Rule on proceed: if localStorage has strategy_id, EDIT; else if URL has one, EDIT; otherwise CREATE
+      // Rule on proceed: if URL has strategy_id (strategyId prop), use it; else if localStorage has one, use it; otherwise CREATE
+      // Prioritize strategyId from URL over localStorage to ensure correct strategy is edited
       let existingId: string | null = null
-      try { existingId = localStorage.getItem("strategy_id") } catch {}
-      if (!existingId) existingId = strategyId || null
+      if (strategyId) {
+        existingId = strategyId
+        // Update localStorage to match URL ID
+        try { localStorage.setItem("strategy_id", strategyId) } catch {}
+      } else {
+        try { existingId = localStorage.getItem("strategy_id") } catch {}
+      }
 
       if (existingId) {
         result = await editStrategy(existingId, apiStatement)

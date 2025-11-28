@@ -1,14 +1,15 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { MobileSidebar } from "@/components/mobile-sidebar"
 import { AlgorithmTable } from "@/components/algorithm-table"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import Link from "next/link"
 import { AlgorithmShortTable } from "@/components/algorithm-shorttable"
 import { fetchStatement, editStrategy, deleteStatement } from "@/app/AllApiCalls"
-
+import { Search, X } from "lucide-react"
 
 import { useRouter } from "next/navigation"
 import { mockAlgorithms, mockShortlistedAlgorithms } from "@/lib/mock-data"
@@ -22,13 +23,15 @@ export function ResponsiveTradingPlatform() {
   const [algorithms, setAlgorithms] = useState<Algorithm[]>([])
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
-const [totalCount, setTotalCount] = useState(0)
-const pageSize = 10
+  const [totalCount, setTotalCount] = useState(0)
+  const pageSize = 10
+  const [searchQuery, setSearchQuery] = useState("")
+  const [isSearchOpen, setIsSearchOpen] = useState(false)
 
-const refreshAlgorithms = async (pageToFetch = page) => {
+const refreshAlgorithms = async (pageToFetch = page, search = searchQuery) => {
   setLoading(true)
   try {
-    const { strategies, total } = await fetchStatement(pageToFetch, pageSize)
+    const { strategies, total } = await fetchStatement(pageToFetch, pageSize, search)
 
     const mapped = strategies.map((item, index) => ({
       ...item,
@@ -50,8 +53,25 @@ const refreshAlgorithms = async (pageToFetch = page) => {
 
   
   useEffect(() => {
-    refreshAlgorithms()
+    refreshAlgorithms(page, searchQuery)
   }, [page])
+
+  // Debounced search effect
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1) // Reset to first page on search
+      refreshAlgorithms(1, searchQuery)
+    }, 500) // 500ms debounce
+
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  const handleSearchToggle = () => {
+    setIsSearchOpen(!isSearchOpen)
+    if (isSearchOpen) {
+      setSearchQuery("") // Clear search when closing
+    }
+  }
 
   const handleDeleteAlgorithm = async (id: string) => {
     try {
@@ -117,7 +137,37 @@ const refreshAlgorithms = async (pageToFetch = page) => {
         <div className="max-w-7xl mx-auto">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 md:mb-8 gap-4 md:gap-0">
             <h1 className="text-2xl md:text-3xl font-normal">Draft Algorithms</h1>
-            <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+              {isSearchOpen && (
+                <div className="relative flex items-center">
+                  <Input
+                    type="text"
+                    placeholder="Search strategies..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="bg-[#1a1d2e] border-[#6BCAE2] text-white placeholder:text-gray-400 pr-10 w-full sm:w-64"
+                    autoFocus
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleSearchToggle}
+                    className="absolute right-1 h-7 w-7 text-gray-400 hover:text-white hover:bg-transparent"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+              {!isSearchOpen && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={handleSearchToggle}
+                  className="border-[#6BCAE2] text-[#6BCAE2] hover:bg-[#6BCAE2]/10 hover:text-white"
+                >
+                  <Search className="h-4 w-4" />
+                </Button>
+              )}
               <Link href="/dashboard">
                 <Button
                   variant="outline"

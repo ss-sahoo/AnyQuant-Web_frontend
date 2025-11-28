@@ -463,19 +463,23 @@ export const createStatement = async ({ account, statement }) => {
 
 
 
-export const fetchStatement = async (page = 1, pageSize = 10) => {
+export const fetchStatement = async (page = 1, pageSize = 10, search = "") => {
   const accountId = localStorage.getItem("user_id")
   if (!accountId) throw new Error("Account ID not found")
 
-  const response = await Fetch(
-    `/api/strategies/?page=${page}&page_size=${pageSize}&account=${accountId}`,
-    {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    }
-  )
+  let url = `/api/strategies/?page=${page}&page_size=${pageSize}&account=${accountId}`
+  
+  // Add search parameter if provided
+  if (search && search.trim()) {
+    url += `&search=${encodeURIComponent(search.trim())}`
+  }
+
+  const response = await Fetch(url, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  })
 
   if (!response.ok) throw new Error("Failed to fetch strategies")
 
