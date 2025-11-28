@@ -9,6 +9,11 @@ export const metadata: Metadata = {
   title: "AnyQuant - Trading Platform",
   description: "A no-code trading platform for algorithmic trading",
   generator: "v0.dev",
+  icons: {
+    icon: "/images/logo.png",
+    shortcut: "/images/logo.png",
+    apple: "/images/logo.png",
+  },
 }
 
 export default function RootLayout({
@@ -22,7 +27,3 @@ export default function RootLayout({
     </html>
   )
 }
-
-import "./globals.css"
-
-import "./globals.css"

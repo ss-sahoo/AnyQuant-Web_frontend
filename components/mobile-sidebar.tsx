@@ -1,10 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Home, User, LogOut, Menu, X, BarChart2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { getUserProfile } from "@/app/AllApiCalls"
 
 interface MobileSidebarProps {
   currentPage?: string
@@ -13,9 +14,32 @@ interface MobileSidebarProps {
 export function MobileSidebar({ currentPage = "home" }: MobileSidebarProps) {
   const [isOpen, setIsOpen] = useState(false)
   const router = useRouter()
+  const [userData, setUserData] = useState({
+    name: "",
+    email: "",
+  })
+
+  useEffect(() => {
+    const fetchUserData = async () => {
+      const userId = localStorage.getItem("user_id")
+      if (userId) {
+        try {
+          const data = await getUserProfile(userId)
+          setUserData({
+            name: data.username || "User",
+            email: data.email || "",
+          })
+        } catch (err) {
+          console.error("Failed to load profile", err)
+        }
+      }
+    }
+    fetchUserData()
+  }, [])
 
   const handleLogout = () => {
     localStorage.removeItem("auth_token")
+    localStorage.removeItem("user_id")
     router.push("/")
     setIsOpen(false)
   }
@@ -65,9 +89,22 @@ export function MobileSidebar({ currentPage = "home" }: MobileSidebarProps) {
             </Link>
           </div>
 
+          {/* User Profile Card */}
+          <div className="bg-[#1E2132] rounded-lg p-4 mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#6BCAE2] to-[#5AB9D1] flex items-center justify-center text-black font-semibold text-lg flex-shrink-0">
+                {userData.name.charAt(0).toUpperCase() || "U"}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-white font-medium truncate">{userData.name || "User"}</p>
+                <p className="text-gray-400 text-xs truncate">{userData.email || "No email"}</p>
+              </div>
+            </div>
+          </div>
+
           <nav className="flex flex-col gap-6 flex-1">
             <Link
-              href="/"
+              href="/home"
               className={cn(
                 "flex items-center gap-3 transition-colors",
                 currentPage === "home" ? "text-[#6BCAE2]" : "text-white hover:text-[#6BCAE2]",

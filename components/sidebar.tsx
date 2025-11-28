@@ -2,8 +2,10 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Home, User, LogOut } from "lucide-react"
+import { Home, LogOut } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useState, useEffect } from "react"
+import { getUserProfile } from "@/app/AllApiCalls"
 
 interface SidebarProps {
   currentPage?: string
@@ -11,9 +13,33 @@ interface SidebarProps {
 
 export function Sidebar({ currentPage = "home" }: SidebarProps) {
   const router = useRouter()
+  const [showProfileTooltip, setShowProfileTooltip] = useState(false)
+  const [userData, setUserData] = useState({
+    name: "",
+    email: "",
+  })
+
+  useEffect(() => {
+    const fetchUserData = async () => {
+      const userId = localStorage.getItem("user_id")
+      if (userId) {
+        try {
+          const data = await getUserProfile(userId)
+          setUserData({
+            name: data.username || "User",
+            email: data.email || "",
+          })
+        } catch (err) {
+          console.error("Failed to load profile", err)
+        }
+      }
+    }
+    fetchUserData()
+  }, [])
 
   const handleLogout = () => {
     localStorage.removeItem("auth_token")
+    localStorage.removeItem("user_id")
     router.push("/")
   }
 
@@ -38,16 +64,60 @@ export function Sidebar({ currentPage = "home" }: SidebarProps) {
           <Home className="w-6 h-6 mb-1" />
           <span>Home</span>
         </Link>
-        <Link
-          href="/profile"
-          className={cn(
-            "flex flex-col items-center text-xs transition-colors",
-            currentPage === "profile" ? "text-[#6BCAE2]" : "text-white hover:text-[#6BCAE2]",
-          )}
+        <div 
+          className="relative group"
+          onMouseEnter={() => setShowProfileTooltip(true)}
+          onMouseLeave={() => setShowProfileTooltip(false)}
         >
-          <User className="w-6 h-6 mb-1" />
-          <span>Profile</span>
-        </Link>
+          {/* Always visible user avatar - clickable */}
+          <Link href="/profile" className="flex flex-col items-center text-xs cursor-pointer">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#6BCAE2] to-[#5AB9D1] flex items-center justify-center text-black font-semibold text-base mb-1 hover:scale-105 transition-transform">
+              {userData.name.charAt(0).toUpperCase() || "U"}
+            </div>
+            <span className={cn(
+              "transition-colors",
+              currentPage === "profile" ? "text-[#6BCAE2]" : "text-white group-hover:text-[#6BCAE2]"
+            )}>
+              Profile
+            </span>
+          </Link>
+          
+          {/* Invisible bridge to keep tooltip open when moving mouse */}
+          {showProfileTooltip && (
+            <div 
+              className="absolute left-10 top-0 w-12 h-full"
+              onMouseEnter={() => setShowProfileTooltip(true)}
+              onMouseLeave={() => setShowProfileTooltip(false)}
+            />
+          )}
+          
+          {/* Profile Tooltip - stays open when hovering over it */}
+          {showProfileTooltip && (
+            <div 
+              className="absolute left-20 top-0 bg-[#1E2132] border border-gray-700 rounded-lg shadow-xl p-4 w-64 z-50 animate-in fade-in slide-in-from-left-2 duration-200"
+              onMouseEnter={() => setShowProfileTooltip(true)}
+              onMouseLeave={() => setShowProfileTooltip(false)}
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#6BCAE2] to-[#5AB9D1] flex items-center justify-center text-black font-semibold text-lg flex-shrink-0">
+                  {userData.name.charAt(0).toUpperCase() || "U"}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-medium truncate">{userData.name || "User"}</p>
+                  <p className="text-gray-400 text-xs truncate">{userData.email || "No email"}</p>
+                </div>
+              </div>
+              <div className="pt-3 border-t border-gray-700">
+                <Link 
+                  href="/profile"
+                  className="text-[#6BCAE2] text-sm hover:text-[#5AB9D1] transition-colors flex items-center gap-1"
+                >
+                  View full profile →
+                </Link>
+              </div>
+            </div>
+          )}
+        </div>
       </nav>
 
       {/* 🔥 Logout Button */}
