@@ -9,8 +9,9 @@ interface AlgorithmTableProps {
   algorithms: Algorithm[]
   loading: boolean
   onDelete: (id: string) => void
-  onDuplicate?: (algorithm: Algorithm) => void
+  onDuplicate?: (name: string, instrument: string) => void
   onEdit: (id: string, name: string) => void
+  onAddToShortlist?: (id: string) => void
 }
 
 export function AlgorithmTable({
@@ -19,6 +20,7 @@ export function AlgorithmTable({
   onDuplicate,
   onEdit,
   loading,
+  onAddToShortlist,
 }: AlgorithmTableProps) {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const menuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
@@ -72,8 +74,9 @@ export function AlgorithmTable({
                   onEdit(algorithm.id, name)
                 }
                 onDuplicate={(name, instrument) =>
-                  onDuplicate?.({ ...algorithm, name, instrument })
+                  onDuplicate?.(name, instrument)
                 }
+                onAddToShortlist={onAddToShortlist}
               />
             )}
           </div>

@@ -5,6 +5,7 @@ import type React from "react"
 import { useRef, useEffect, useState } from "react"
 import { X, ChevronDown } from "lucide-react"
 import type { Algorithm } from "@/lib/types"
+import { duplicateStrategy } from "@/app/AllApiCalls"
 
 interface DuplicateStrategyModalProps {
   strategy: Algorithm
@@ -16,6 +17,8 @@ export function DuplicateStrategyModal({ strategy, onClose, onSave }: DuplicateS
   const [strategyName, setStrategyName] = useState(strategy.name)
   const [instrument, setInstrument] = useState(strategy.instrument)
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState("")
   const modalRef = useRef<HTMLDivElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
@@ -67,10 +70,32 @@ export function DuplicateStrategyModal({ strategy, onClose, onSave }: DuplicateS
 
   const instrumentOptions = ["XAU/USD", "XAG/USD", "GBP/JPY", "USD/CAD", "GBP/USD", "EUR/USD", "USD/JPY"]
 
-  const handleSave = (e: React.MouseEvent) => {
+  const handleSave = async (e: React.MouseEvent) => {
     e.stopPropagation() // Prevent event from bubbling up
-    onSave(strategyName, instrument)
-    onClose()
+    
+    if (!strategyName.trim()) {
+      setError("Strategy name is required")
+      return
+    }
+
+    setIsLoading(true)
+    setError("")
+
+    try {
+      // Get the numeric ID from the strategy
+      const numericId = strategy.id.toString().split("-")[0]
+      
+      // Call the duplicate API
+      await duplicateStrategy(numericId, strategyName.trim())
+      
+      // Call the parent's onSave callback to refresh the list
+      onSave(strategyName, instrument)
+      onClose()
+    } catch (err: any) {
+      console.error("Duplicate failed:", err)
+      setError(err.message || "Failed to duplicate strategy")
+      setIsLoading(false)
+    }
   }
 
   const toggleDropdown = (e: React.MouseEvent) => {
@@ -114,8 +139,12 @@ export function DuplicateStrategyModal({ strategy, onClose, onSave }: DuplicateS
               value={strategyName}
               onChange={(e) => setStrategyName(e.target.value)}
               onClick={(e) => e.stopPropagation()} // Prevent event from bubbling up
-              className="w-full p-3 border border-gray-300 rounded-lg text-[#1e1e1e] focus:outline-none focus:ring-2 focus:ring-[#6BCAE2]"
+              disabled={isLoading}
+              className="w-full p-3 border border-gray-300 rounded-lg text-[#1e1e1e] focus:outline-none focus:ring-2 focus:ring-[#6BCAE2] disabled:opacity-50 disabled:cursor-not-allowed"
             />
+            {error && (
+              <p className="text-red-600 text-sm mt-2">{error}</p>
+            )}
           </div>
 
           <div className="mb-8">
@@ -160,15 +189,17 @@ export function DuplicateStrategyModal({ strategy, onClose, onSave }: DuplicateS
                 e.stopPropagation() // Prevent event from bubbling up
                 onClose()
               }}
-              className="px-8 py-3 border border-gray-300 rounded-full text-[#1e1e1e] hover:bg-gray-100 transition-colors"
+              disabled={isLoading}
+              className="px-8 py-3 border border-gray-300 rounded-full text-[#1e1e1e] hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Cancel
             </button>
             <button
               onClick={handleSave}
-              className="px-8 py-3 bg-[#6BCAE2] rounded-full text-[#1e1e1e] hover:bg-[#5AB9D1] transition-colors"
+              disabled={isLoading}
+              className="px-8 py-3 bg-[#6BCAE2] rounded-full text-[#1e1e1e] hover:bg-[#5AB9D1] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Save
+              {isLoading ? "Duplicating..." : "Save"}
             </button>
           </div>
         </div>

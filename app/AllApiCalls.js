@@ -644,6 +644,36 @@ export async function editStrategy(id, data) {
     throw error
   }
 }
+/**
+ * Duplicate an existing strategy with a new name
+ * @param {string} id - The strategy ID to duplicate
+ * @param {string} newName - The new name for the duplicated strategy
+ * @returns {Promise} Promise with the duplicated strategy data
+ */
+export async function duplicateStrategy(id, newName) {
+  try {
+    const response = await Fetch(`/api/strategies/${id}/duplicate/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: newName }),
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData?.error || `Failed to duplicate strategy: ${response.status}`)
+    }
+
+    const responseData = await response.json()
+    console.log("🔍 DEBUG: duplicateStrategy response:", JSON.stringify(responseData, null, 2))
+    return responseData
+  } catch (error) {
+    console.error("Error duplicating strategy:", error)
+    throw error
+  }
+}
+
 export const changePassword = async (old_password, new_password,user_id) => {
 
   const response = await Fetch(`/api/change-password/${user_id}/`, {
@@ -1398,6 +1428,79 @@ export const deleteBacktestResult = async (backtestId) => {
   if (!response.ok) {
     const errorData = await response.json();
     throw new Error(errorData.error || "Failed to delete backtest result");
+  }
+
+  return response.json();
+};
+
+// Shortlist API Functions
+
+/**
+ * Add a strategy to shortlist
+ * @param {string} strategyId - The strategy ID to add to shortlist
+ */
+export const addToShortlist = async (strategyId) => {
+  const response = await Fetch(`/api/strategies/${strategyId}/shortlist/`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to add strategy to shortlist");
+  }
+
+  return response.json();
+};
+
+/**
+ * Remove a strategy from shortlist
+ * @param {string} strategyId - The strategy ID to remove from shortlist
+ */
+export const removeFromShortlist = async (strategyId) => {
+  const response = await Fetch(`/api/strategies/${strategyId}/remove-from-shortlist/`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to remove strategy from shortlist");
+  }
+
+  return response.json();
+};
+
+/**
+ * Get all shortlisted strategies with pagination
+ * @param {Object} params - Query parameters
+ * @param {number} [params.page] - Page number for pagination
+ * @param {number} [params.page_size] - Results per page
+ */
+export const getShortlistedStrategies = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+  
+  if (params.page) {
+    queryParams.append('page', params.page);
+  }
+  if (params.page_size) {
+    queryParams.append('page_size', params.page_size);
+  }
+
+  const response = await Fetch(`/api/shortlisted-strategies/?${queryParams}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get shortlisted strategies");
   }
 
   return response.json();

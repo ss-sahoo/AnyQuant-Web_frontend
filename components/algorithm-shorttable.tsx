@@ -8,11 +8,13 @@ import { AlgorithmMenu } from "@/components/algorithm-menu"
 interface AlgorithmTableProps {
   algorithm: Algorithm[]
   onDelete: (id: string) => void
-  onDuplicate?: (algorithm: Algorithm) => void
+  onDuplicate?: (name: string, instrument: string) => void
   onEdit?: (algorithm: Algorithm) => void
+  onRemoveFromShortlist?: (id: string) => void
+  loading?: boolean
 }
 
-export function AlgorithmShortTable({ algorithm, onDelete, onDuplicate, onEdit }: AlgorithmTableProps) {
+export function AlgorithmShortTable({ algorithm, onDelete, onDuplicate, onEdit, onRemoveFromShortlist, loading = false }: AlgorithmTableProps) {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const buttonRefs = useRef<Record<string, HTMLButtonElement>>({})
 
@@ -22,16 +24,7 @@ export function AlgorithmShortTable({ algorithm, onDelete, onDuplicate, onEdit }
 
   const handleDuplicate = (id: string, name: string, instrument: string) => {
     if (onDuplicate) {
-      const algorithms = algorithm.find((algo) => algo.id === id)
-      if (algorithms) {
-        const duplicatedAlgorithm: Algorithm = {
-          ...algorithms,
-          id: `${algorithms.id}-duplicate-${Date.now()}`,
-          name,
-          instrument,
-        }
-        onDuplicate(duplicatedAlgorithm)
-      }
+      onDuplicate(name, instrument)
     }
   }
 
@@ -57,7 +50,12 @@ export function AlgorithmShortTable({ algorithm, onDelete, onDuplicate, onEdit }
         <div className="col-span-1"></div>
       </div>
 
-      {algorithm.map((algo) => (
+      {loading ? (
+        <div className="p-8 text-center text-gray-400">Loading shortlisted strategies...</div>
+      ) : algorithm.length === 0 ? (
+        <div className="p-8 text-center text-gray-400">No shortlisted strategies yet</div>
+      ) : (
+        algorithm.map((algo) => (
         <div key={algo.id} className="grid grid-cols-12 p-4 border-b border-gray-800 last:border-0 items-center">
           <div className="col-span-4">{algo.name}</div>
           <div className="col-span-4">{algo.instrument}</div>
@@ -91,11 +89,17 @@ export function AlgorithmShortTable({ algorithm, onDelete, onDuplicate, onEdit }
                   handleEdit(algo.id, name)
                   setOpenMenuId(null)
                 }}
+                onRemoveFromShortlist={onRemoveFromShortlist ? (id) => {
+                  onRemoveFromShortlist(id)
+                  setOpenMenuId(null)
+                } : undefined}
+                isShortlisted={true}
               />
             )}
           </div>
         </div>
-      ))}
+        ))
+      )}
     </div>
   )
 }

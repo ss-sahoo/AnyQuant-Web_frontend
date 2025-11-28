@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import Link from "next/link"
 import { AlgorithmShortTable } from "@/components/algorithm-shorttable"
-import { fetchStatement, editStrategy, deleteStatement } from "@/app/AllApiCalls"
+import { fetchStatement, editStrategy, deleteStatement, addToShortlist, removeFromShortlist, getShortlistedStrategies, duplicateStrategy } from "@/app/AllApiCalls"
 import { Search, X } from "lucide-react"
 
 import { useRouter } from "next/navigation"
@@ -19,12 +19,16 @@ import AuthGuard from "@/hooks/useAuthGuard"
 export function ResponsiveTradingPlatform() {
   const router = useRouter()
   const [algorithm, setAlgorithm] = useState(mockAlgorithms)
-  const [shortlistedAlgorithms, setShortlistedAlgorithms] = useState(mockShortlistedAlgorithms)
+  const [shortlistedAlgorithms, setShortlistedAlgorithms] = useState<Algorithm[]>([])
   const [algorithms, setAlgorithms] = useState<Algorithm[]>([])
   const [loading, setLoading] = useState(true)
+  const [shortlistLoading, setShortlistLoading] = useState(true)
   const [page, setPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
+  const [shortlistPage, setShortlistPage] = useState(1)
+  const [shortlistTotalCount, setShortlistTotalCount] = useState(0)
   const pageSize = 10
+  const shortlistPageSize = 10
   const [searchQuery, setSearchQuery] = useState("")
   const [isSearchOpen, setIsSearchOpen] = useState(false)
 
@@ -33,7 +37,7 @@ const refreshAlgorithms = async (pageToFetch = page, search = searchQuery) => {
   try {
     const { strategies, total } = await fetchStatement(pageToFetch, pageSize, search)
 
-    const mapped = strategies.map((item, index) => ({
+    const mapped = strategies.map((item: any, index: number): Algorithm => ({
       ...item,
       id: item.id ? `${item.id}-${index}` : `strategy-${index}`,
       name: item.name || item.saveresult || "Unnamed Strategy",
@@ -50,11 +54,38 @@ const refreshAlgorithms = async (pageToFetch = page, search = searchQuery) => {
   }
 }
 
+const refreshShortlistedAlgorithms = async (pageToFetch = shortlistPage) => {
+  setShortlistLoading(true)
+  try {
+    const response = await getShortlistedStrategies({ page: pageToFetch, page_size: shortlistPageSize })
+
+    const mapped = response.results.map((item: any, index: number): Algorithm => ({
+      ...item,
+      id: item.id ? `${item.id}-${index}` : `strategy-${index}`,
+      name: item.name || item.saveresult || "Unnamed Strategy",
+      instrument: item.instrument || "Unknown",
+      strategy: item.strategy || false,
+    }))
+
+    setShortlistedAlgorithms(mapped)
+    setShortlistTotalCount(response.count)
+  } catch (err) {
+    console.error("Error fetching shortlisted strategies:", err)
+    setShortlistedAlgorithms([])
+  } finally {
+    setShortlistLoading(false)
+  }
+}
+
 
   
   useEffect(() => {
     refreshAlgorithms(page, searchQuery)
   }, [page])
+
+  useEffect(() => {
+    refreshShortlistedAlgorithms(shortlistPage)
+  }, [shortlistPage])
 
   // Debounced search effect
   useEffect(() => {
@@ -105,11 +136,60 @@ const refreshAlgorithms = async (pageToFetch = page, search = searchQuery) => {
   const user_id = localStorage.getItem("user_id")
 
 
-  const handleDuplicateAlgorithm = (duplicatedAlgorithm: Algorithm, isShortlisted: boolean) => {
-    if (isShortlisted) {
-      setShortlistedAlgorithms([...shortlistedAlgorithms, duplicatedAlgorithm])
-    } else {
-      setAlgorithm([...algorithm, duplicatedAlgorithm])
+  const handleDuplicateAlgorithm = async (name: string, instrument: string) => {
+    // Refresh the algorithms list after successful duplication
+    await refreshAlgorithms()
+  }
+
+  const handleAddToShortlist = async (id: string) => {
+    try {
+      const numericId = id.split("-")[0]
+      await addToShortlist(numericId)
+      // Refresh both lists
+      await refreshAlgorithms()
+      await refreshShortlistedAlgorithms()
+    } catch (err) {
+      console.error("Failed to add to shortlist:", err)
+      alert("Failed to add strategy to shortlist")
+    }
+  }
+
+  const handleRemoveFromShortlist = async (id: string) => {
+    try {
+      const numericId = id.split("-")[0]
+      await removeFromShortlist(numericId)
+      // Refresh both lists
+      await refreshShortlistedAlgorithms()
+      await refreshAlgorithms()
+    } catch (err) {
+      console.error("Failed to remove from shortlist:", err)
+      alert("Failed to remove strategy from shortlist")
+    }
+  }
+
+  const handleDuplicateShortlistedAlgorithm = async (name: string, instrument: string) => {
+    // Refresh the shortlisted algorithms list after successful duplication
+    await refreshShortlistedAlgorithms()
+  }
+
+  const handleEditShortlistedAlgorithm = async (id: string, name: string) => {
+    try {
+      const numericId = id.split("-")[0]
+      const payload = { name: String(name) }
+      await editStrategy(numericId, payload)
+      await refreshShortlistedAlgorithms()
+    } catch (err) {
+      console.error("Edit failed:", err)
+      alert("Edit failed.")
+    }
+  }
+
+  const handleDeleteShortlistedAlgorithm = async (id: string) => {
+    try {
+      await deleteStatement(id.split("-")[0])
+      await refreshShortlistedAlgorithms()
+    } catch (err) {
+      await refreshShortlistedAlgorithms()
     }
   }
 
@@ -190,7 +270,8 @@ const refreshAlgorithms = async (pageToFetch = page, search = searchQuery) => {
               loading={loading}
               onDelete={handleDeleteAlgorithm}
               onEdit={(id, name) => handleEditAlgorithm(id, name)}
-              onDuplicate={(algorithm) => handleDuplicateAlgorithm(algorithm, false)}
+              onDuplicate={handleDuplicateAlgorithm}
+              onAddToShortlist={handleAddToShortlist}
               />
               
               {/* Pagination Section */}
@@ -241,14 +322,65 @@ const refreshAlgorithms = async (pageToFetch = page, search = searchQuery) => {
 
 
 
-          <h1 className="text-2xl md:text-3xl font-normal mt-8 md:mt-12 mb-6 md:mb-8">shortlisted strategy variants</h1>
+          {/* Only show shortlisted section if there are shortlisted strategies or loading */}
+          {(shortlistLoading || shortlistTotalCount > 0) && (
+            <>
+              <h1 className="text-2xl md:text-3xl font-normal mt-8 md:mt-12 mb-6 md:mb-8">shortlisted strategy variants</h1>
 
-          <AlgorithmShortTable
-            algorithm={shortlistedAlgorithms}
-            onDelete={(id) => handleDeleteAlgorithm(id)}
-            onDuplicate={(algorithm) => handleDuplicateAlgorithm(algorithm, true)}
-            onEdit={(algorithm) => handleEditAlgorithm(algorithm.id, algorithm.name)}
-          />
+              <AlgorithmShortTable
+                algorithm={shortlistedAlgorithms}
+                loading={shortlistLoading}
+                onDelete={handleDeleteShortlistedAlgorithm}
+                onDuplicate={handleDuplicateShortlistedAlgorithm}
+                onEdit={(algorithm) => handleEditShortlistedAlgorithm(algorithm.id, algorithm.name)}
+                onRemoveFromShortlist={handleRemoveFromShortlist}
+              />
+
+              {/* Shortlist Pagination Section */}
+              <div className="mt-6 relative">
+                {/* Left: Showing text */}
+                <div className="text-xs text-gray-400 mb-4 md:mb-0 md:absolute md:left-0 md:top-1/2 md:-translate-y-1/2">
+                  {shortlistTotalCount > 0 && (
+                    <span>
+                      Showing {((shortlistPage - 1) * shortlistPageSize) + 1} to {Math.min(shortlistPage * shortlistPageSize, shortlistTotalCount)} of {shortlistTotalCount} shortlisted strategies
+                    </span>
+                  )}
+                </div>
+
+                {/* Center: Pagination buttons */}
+                {shortlistTotalCount > shortlistPageSize && (
+                  <div className="flex items-center justify-center gap-4">
+                    <Button
+                      onClick={() => {
+                        if (shortlistPage > 1) {
+                          setShortlistPage((prev) => prev - 1)
+                        }
+                      }}
+                      disabled={shortlistPage === 1}
+                      variant="outline"
+                      className="text-[#6BCAE2] border-[#6BCAE2] hover:text-white hover:bg-[#6BCAE2]/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Previous
+                    </Button>
+                    <span className="text-sm text-gray-300">
+                      Page {shortlistPage} of {Math.ceil(shortlistTotalCount / shortlistPageSize)}
+                    </span>
+                    <Button
+                      onClick={() => {
+                        if (shortlistPage * shortlistPageSize < shortlistTotalCount) {
+                          setShortlistPage((prev) => prev + 1)
+                        }
+                      }}
+                      disabled={shortlistPage * shortlistPageSize >= shortlistTotalCount}
+                      className="bg-[#6BCAE2] text-black hover:bg-[#5AB9D1] disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </main>
     </div>

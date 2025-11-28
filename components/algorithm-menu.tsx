@@ -15,9 +15,12 @@ interface AlgorithmMenuProps {
   onDelete: (id: string) => void
   onDuplicate: (name: string, instrument: string) => void
   onEdit: (name: string) => void
+  onAddToShortlist?: (id: string) => void
+  onRemoveFromShortlist?: (id: string) => void
+  isShortlisted?: boolean
 }
 
-export function AlgorithmMenu({ anchorRef, algorithm, onClose, onDelete, onDuplicate, onEdit }: AlgorithmMenuProps) {
+export function AlgorithmMenu({ anchorRef, algorithm, onClose, onDelete, onDuplicate, onEdit, onAddToShortlist, onRemoveFromShortlist, isShortlisted = false }: AlgorithmMenuProps) {
   const [position, setPosition] = useState<"top" | "bottom">("bottom")
   const [showDuplicateModal, setShowDuplicateModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
@@ -60,6 +63,18 @@ export function AlgorithmMenu({ anchorRef, algorithm, onClose, onDelete, onDupli
       <button className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={handleDuplicateClick}>
         Duplicate
       </button>
+      {!isShortlisted && onAddToShortlist && (
+        <button
+          className="w-full text-left px-4 py-2 hover:bg-gray-100"
+          onClick={(e) => {
+            e.stopPropagation()
+            onAddToShortlist(getNumericId())
+            onClose()
+          }}
+        >
+          Add to Shortlist
+        </button>
+      )}
       <button
         className="w-full text-left px-4 py-2 hover:bg-gray-100"
         onClick={(e) => {
@@ -70,6 +85,18 @@ export function AlgorithmMenu({ anchorRef, algorithm, onClose, onDelete, onDupli
       >
         Proceed to testing
       </button>
+      {isShortlisted && onRemoveFromShortlist ? (
+        <button
+          className="w-full text-left px-4 py-2 text-orange-600 hover:bg-gray-100"
+          onClick={(e) => {
+            e.stopPropagation()
+            onRemoveFromShortlist(getNumericId())
+            onClose()
+          }}
+        >
+          Remove from Shortlist
+        </button>
+      ) : null}
       <button
         className="w-full text-left px-4 py-2 text-red-600 hover:bg-gray-100"
         onClick={(e) => {
