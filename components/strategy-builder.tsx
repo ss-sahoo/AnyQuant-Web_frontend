@@ -2571,10 +2571,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         slowk_period: derivedSlowk,
         slowd_period: derivedSlowd,
         output: outputValue,
-        indicatorType: normalizedIndicatorType || (outputValue === "slowd" ? "d" : "k"),
-        kLength: Number(settings.kLength ?? derivedFastk),
-        kSmoothing: Number(settings.kSmoothing ?? derivedSlowk),
-        dSmoothing: Number(settings.dSmoothing ?? derivedSlowd),
       },
     }
 
@@ -3788,28 +3784,29 @@ if (
                 } else if (settings.indicator === "stochastic") {
                   // Use the same settings from inp1 if it's a Stochastic indicator
                   if (lastCondition.inp1 && (lastCondition.inp1.name === "Stochastic" || lastCondition.inp1.name === "Stochastic")) {
+                    const inp1Params = lastCondition.inp1.input_params || {}
                     lastCondition.inp2 = {
-                      type: "I",
+                      type: "CUSTOM_I",
                       name: "Stochastic",
                       timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
-                      input_params: lastCondition.inp1.input_params || {
-                        indicatorType: "k",
-                        kLength: 12,
-                        kSmoothing: 26,
-                        dSmoothing: 9,
+                      input_params: {
+                        fastk_period: inp1Params.fastk_period || inp1Params.kLength || 14,
+                        slowk_period: inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                        slowd_period: inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                        output: inp1Params.output || "slowk",
                       },
                     }
                   } else {
                     // Default Stochastic settings
                     lastCondition.inp2 = {
-                      type: "I",
+                      type: "CUSTOM_I",
                       name: "Stochastic",
                       timeframe: settings.timeframe || "3h",
                       input_params: {
-                        indicatorType: "k",
-                        kLength: 12,
-                        kSmoothing: 26,
-                        dSmoothing: 9,
+                        fastk_period: 14,
+                        slowk_period: 3,
+                        slowd_period: 3,
+                        output: "slowk",
                       },
                     }
                   }
@@ -4047,14 +4044,14 @@ if (
                   lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
                 } else if (settings.indicator === "stochastic") {
                   lastCondition.inp2 = {
-                    type: "I",
+                    type: "CUSTOM_I",
                     name: "Stochastic",
                     timeframe: settings.timeframe || "3h",
                     input_params: {
-                      indicatorType: settings.indicatorType || "k",
-                      kLength: settings.kLength || 12,
-                      kSmoothing: settings.kSmoothing || 26,
-                      dSmoothing: settings.dSmoothing || 9,
+                      fastk_period: settings.fastk_period || settings.kLength || 14,
+                      slowk_period: settings.slowk_period || settings.kSmoothing || 3,
+                      slowd_period: settings.slowd_period || settings.dSmoothing || 3,
+                      output: settings.output || "slowk",
                     },
                   }
                 } else if (settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
