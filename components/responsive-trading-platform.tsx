@@ -192,36 +192,52 @@ const refreshAlgorithms = async (pageToFetch = page, search = searchQuery) => {
               onEdit={(id, name) => handleEditAlgorithm(id, name)}
               onDuplicate={(algorithm) => handleDuplicateAlgorithm(algorithm, false)}
               />
-              {totalCount > pageSize && (
-  <div className="flex justify-center items-center mt-6 gap-4">
-    <Button
-      onClick={() => {
-        if (page > 1) {
-          setPage((prev) => prev - 1)
-          refreshAlgorithms(page - 1)
-        }
-      }}
-      disabled={page === 1}
-      variant="outline"
-      className="text-[#6BCAE2] border-[#6BCAE2]"
-    >
-      Previous
-    </Button>
-    <span className="text-sm text-gray-300">Page {page}</span>
-    <Button
-      onClick={() => {
-        if (page * pageSize < totalCount) {
-          setPage((prev) => prev + 1)
-          refreshAlgorithms(page + 1)
-        }
-      }}
-      disabled={page * pageSize >= totalCount}
-      className="bg-[#6BCAE2] text-black"
-    >
-      Next
-    </Button>
-  </div>
-)}
+              
+              {/* Pagination Section */}
+              <div className="mt-6 relative">
+                {/* Left: Showing text */}
+                <div className="text-xs text-gray-400 mb-4 md:mb-0 md:absolute md:left-0 md:top-1/2 md:-translate-y-1/2">
+                  {totalCount > 0 && (
+                    <span>
+                      Showing {((page - 1) * pageSize) + 1} to {Math.min(page * pageSize, totalCount)} of {totalCount} strategies
+                    </span>
+                  )}
+                </div>
+
+                {/* Center: Pagination buttons */}
+                {totalCount > pageSize && (
+                  <div className="flex items-center justify-center gap-4">
+                    <Button
+                      onClick={() => {
+                        if (page > 1) {
+                          setPage((prev) => prev - 1)
+                          refreshAlgorithms(page - 1)
+                        }
+                      }}
+                      disabled={page === 1}
+                      variant="outline"
+                      className="text-[#6BCAE2] border-[#6BCAE2] hover:text-white hover:bg-[#6BCAE2]/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Previous
+                    </Button>
+                    <span className="text-sm text-gray-300">
+                      Page {page} of {Math.ceil(totalCount / pageSize)}
+                    </span>
+                    <Button
+                      onClick={() => {
+                        if (page * pageSize < totalCount) {
+                          setPage((prev) => prev + 1)
+                          refreshAlgorithms(page + 1)
+                        }
+                      }}
+                      disabled={page * pageSize >= totalCount}
+                      className="bg-[#6BCAE2] text-black hover:bg-[#5AB9D1] disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </Button>
+                  </div>
+                )}
+              </div>
 
 
 
