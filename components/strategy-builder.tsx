@@ -707,6 +707,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
   const addStatement = () => {
     const newStatements = [...statements]
+    const newStatementIndex = statements.length
     newStatements.push({
       side: "s",
       saveresult: `Statement ${statements.length + 1}`,
@@ -719,6 +720,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       Equity: [],
     })
     setStatements(newStatements)
+    // Set the new statement as active so components are added to it
+    setActiveStatementIndex(newStatementIndex)
   }
 
   // Function to map component labels to statement structure
@@ -2183,48 +2186,17 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const handleSaveDraft = async (name: string) => {
     try {
       setIsSavingDraft(true)
-      const currentStatement = statements[activeStatementIndex]
-
-      // Clean up any Volume_MA indicators before saving
-      const cleanedStrategy = currentStatement.strategy.map((condition: any) => ({
-        ...condition,
-        inp1: cleanupVolumeMAIndicator(condition.inp1),
-        inp2: cleanupVolumeMAIndicator(condition.inp2),
-      }))
-
-      // Create the statement object to send to the API with the structure you want
-      const apiStatement: any = {
-        name: name,
-        side: currentStatement.side,
-        saveresult: currentStatement.saveresult || "Statement 1",
-        strategy: cleanedStrategy,
-        Equity: currentStatement.Equity || [],
-        instrument: initialInstrument,
-        TradingType: currentStatement.TradingType || {
-          NewTrade: "MTOOTAAT",
-          commission: 0.00007,
-          margin: 1,
-          lot: "mini",
-          cash: 100000,
-          nTrade_max: 1,
-        },
-        // Add TradingSession if it exists in the current statement
-        ...(currentStatement.TradingSession && { TradingSession: currentStatement.TradingSession }),
+      
+      // Save all statements, not just the active one
+      // If there's only one statement, save it normally
+      // If there are multiple statements, save each one separately
+      const account = localStorage.getItem("user_id")
+      if (!account) {
+        throw new Error("No account found in localStorage")
       }
 
-      // Debug: Log the API statement to verify TradingType and TradingSession are included
-      console.log("🔍 DEBUG: API Statement being sent:", JSON.stringify(apiStatement, null, 2))
-      console.log("🔍 DEBUG: Strategy conditions with wait properties:")
-      apiStatement.strategy.forEach((condition: any, index: number) => {
-        console.log(`  Condition ${index}:`, {
-          inp1_wait: condition.inp1?.wait,
-          inp2_wait: condition.inp2?.wait,
-          inp1: condition.inp1,
-          inp2: condition.inp2
-        })
-      })
-
       let result
+      let firstStatementId: string | null = null
 
       // Rule: if URL has strategy_id (strategyId prop), use it; else if localStorage has one, use it; otherwise CREATE
       // Prioritize strategyId from URL over localStorage to ensure correct strategy is edited
@@ -2237,18 +2209,59 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         try { existingId = localStorage.getItem("strategy_id") } catch {}
       }
 
-      if (existingId) {
-        result = await editStrategy(existingId, apiStatement)
-      } else {
-        const account = localStorage.getItem("user_id")
-        if (!account) {
-          throw new Error("No account found in localStorage")
+      // Save each statement
+      for (let i = 0; i < statements.length; i++) {
+        const currentStatement = statements[i]
+
+        // Clean up any Volume_MA indicators before saving
+        const cleanedStrategy = currentStatement.strategy.map((condition: any) => ({
+          ...condition,
+          inp1: cleanupVolumeMAIndicator(condition.inp1),
+          inp2: cleanupVolumeMAIndicator(condition.inp2),
+        }))
+
+        // Create the statement object to send to the API with the structure you want
+        const apiStatement: any = {
+          name: statements.length > 1 ? `${name} - ${currentStatement.saveresult}` : name,
+          side: currentStatement.side,
+          saveresult: currentStatement.saveresult || `Statement ${i + 1}`,
+          strategy: cleanedStrategy,
+          Equity: currentStatement.Equity || [],
+          instrument: initialInstrument,
+          TradingType: currentStatement.TradingType || {
+            NewTrade: "MTOOTAAT",
+            commission: 0.00007,
+            margin: 1,
+            lot: "mini",
+            cash: 100000,
+            nTrade_max: 1,
+          },
+          // Add TradingSession if it exists in the current statement
+          ...(currentStatement.TradingSession && { TradingSession: currentStatement.TradingSession }),
         }
-        result = await createStatement({ account, statement: apiStatement })
-        if (result && result.id) {
-          localStorage.setItem("strategy_id", result.id)
-          // persist id so subsequent saves use edit
+
+        // Debug: Log the API statement to verify TradingType and TradingSession are included
+        console.log(`🔍 DEBUG: API Statement ${i + 1} being sent:`, JSON.stringify(apiStatement, null, 2))
+
+        // For the first statement, use existingId if available
+        // For subsequent statements, always create new ones
+        if (i === 0 && existingId) {
+          result = await editStrategy(existingId, apiStatement)
+          firstStatementId = existingId
+        } else {
+          result = await createStatement({ account, statement: apiStatement })
+          if (result && result.id) {
+            if (i === 0) {
+              firstStatementId = result.id
+              localStorage.setItem("strategy_id", result.id)
+            }
+          }
         }
+      }
+
+      // Update localStorage with the first statement ID for subsequent edits
+      if (firstStatementId) {
+        localStorage.setItem("strategy_id", firstStatementId)
       }
 
       setIsSavingDraft(false)
@@ -2267,7 +2280,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const handleProceedToTesting = async (name: string) => {
     try {
       setIsProceeding(true)
-      const currentStatement = statements[activeStatementIndex]
+      
+      // Save all statements, not just the active one
+      // Use the first statement for testing (or combine them if needed)
+      const currentStatement = statements[0] // Use first statement for testing
 
       // Clean up any Volume_MA indicators before saving
       const cleanedStrategy = currentStatement.strategy.map((condition: any) => ({
@@ -2311,7 +2327,14 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       // Save the complete statement for local use
       localStorage.setItem("savedStrategy", JSON.stringify(apiStatement))
 
+      // Save all statements first
+      const account = localStorage.getItem("user_id")
+      if (!account) {
+        throw new Error("No account found in localStorage")
+      }
+
       let result
+      let firstStatementId: string | null = null
 
       // Rule on proceed: if URL has strategy_id (strategyId prop), use it; else if localStorage has one, use it; otherwise CREATE
       // Prioritize strategyId from URL over localStorage to ensure correct strategy is edited
@@ -2324,19 +2347,55 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         try { existingId = localStorage.getItem("strategy_id") } catch {}
       }
 
-      if (existingId) {
-        result = await editStrategy(existingId, apiStatement)
-        localStorage.setItem("strategy_id", existingId)
-      } else {
-        const account = localStorage.getItem("user_id")
-        if (!account) {
-          throw new Error("No account found in localStorage")
+      // Save each statement
+      for (let i = 0; i < statements.length; i++) {
+        const statementToSave = statements[i]
+
+        // Clean up any Volume_MA indicators before saving
+        const cleanedStrategyForSave = statementToSave.strategy.map((condition: any) => ({
+          ...condition,
+          inp1: cleanupVolumeMAIndicator(condition.inp1),
+          inp2: cleanupVolumeMAIndicator(condition.inp2),
+        }))
+
+        // Create the statement object to send to the API
+        const statementPayload: any = {
+          name: statements.length > 1 ? `${name} - ${statementToSave.saveresult}` : name,
+          side: statementToSave.side,
+          saveresult: statementToSave.saveresult || `Statement ${i + 1}`,
+          strategy: cleanedStrategyForSave,
+          Equity: statementToSave.Equity || [],
+          instrument: initialInstrument,
+          TradingType: statementToSave.TradingType || {
+            NewTrade: "MTOOTAAT",
+            commission: 0.00007,
+            margin: 1,
+            lot: "mini",
+            cash: 100000,
+            nTrade_max: 1,
+          },
+          ...(statementToSave.TradingSession && { TradingSession: statementToSave.TradingSession }),
         }
-        result = await createStatement({ account, statement: apiStatement })
-        if (result && result.id) {
-          localStorage.setItem("strategy_id", result.id)
-          // persist id so subsequent saves use edit
+
+        // For the first statement, use existingId if available
+        // For subsequent statements, always create new ones
+        if (i === 0 && existingId) {
+          result = await editStrategy(existingId, statementPayload)
+          firstStatementId = existingId
+        } else {
+          const createResult = await createStatement({ account, statement: statementPayload })
+          if (createResult && createResult.id) {
+            if (i === 0) {
+              firstStatementId = createResult.id
+              result = createResult
+            }
+          }
         }
+      }
+
+      // Update localStorage with the first statement ID
+      if (firstStatementId) {
+        localStorage.setItem("strategy_id", firstStatementId)
       }
 
       // Store timeframes_required if it exists in the response
@@ -2759,6 +2818,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           // Format as "Price Type" with first letter capitalized
           const priceType = condition.inp1.input?.charAt(0).toUpperCase() + condition.inp1.input?.slice(1)
           displayName = `Price ${priceType}`
+        } else if (
+          ("name" in condition.inp1 && condition.inp1.name === "BBANDS") ||
+          (condition.inp1.type === "I" && condition.inp1.input && ["upperband", "lowerband", "middleband"].includes(condition.inp1.input?.toLowerCase()))
+        ) {
+          // Always show "Bollinger" for BBANDS indicators
+          // Check by name or by type+input combination to catch all cases
+          displayName = "Bollinger"
         } else {
           // For other indicators, use the existing logic
           displayName =
@@ -2985,7 +3051,13 @@ if (
             )
           } else if (condition.inp2.type === "I" && "name" in condition.inp2) {
             // Handle regular indicators like RSI, BBANDS, etc.
-            const displayName = condition.inp2.name
+            // Always show "Bollinger" for BBANDS, not "BBANDS" or the input value
+            // Check by name or by type+input combination to catch all cases
+            const displayName = 
+              condition.inp2.name === "BBANDS" || 
+              (condition.inp2.input && ["upperband", "lowerband", "middleband"].includes(condition.inp2.input?.toLowerCase()))
+                ? "Bollinger" 
+                : condition.inp2.name
 
             components.push(
               <div key={`inp2-${index}`} className="flex items-center relative group">
@@ -3008,7 +3080,13 @@ if (
           }
         } else if ("name" in condition.inp2) {
           // Handle cases where inp2 has a name property but no type
-          let displayName = condition.inp2.name
+          // Always show "Bollinger" for BBANDS, not "BBANDS" or the input value
+          // Check by name or by input value to catch all cases
+          let displayName = 
+            condition.inp2.name === "BBANDS" || 
+            (condition.inp2.input && ["upperband", "lowerband", "middleband"].includes(condition.inp2.input?.toLowerCase()))
+              ? "Bollinger" 
+              : condition.inp2.name
           if (condition.inp2.Derivative) {
             displayName = `${displayName} (Derivative)`
           }
@@ -3303,6 +3381,7 @@ if (
   const [showIndicatorModal, setShowIndicatorModal] = useState(false)
   const [pendingOtherIndicator, setPendingOtherIndicator] = useState<string | null>(null)
   const [pendingTimeframe, setPendingTimeframe] = useState<string>("3h")
+  const [pendingVolumeIndicatorType, setPendingVolumeIndicatorType] = useState<"volume" | "volume-ma" | null>(null)
 
   // Utility function to ensure Volume_MA only gets ma_length parameter
   // Volume_MA should NEVER have ma_type, bb_stddev, or any other parameters
@@ -3740,6 +3819,35 @@ if (
                   }
                 } else if (settings.indicator === "volume") {
                   lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
+                } else if (settings.indicator === "stochastic" || settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
+                  // Use the same settings from inp1 if it's a Stochastic indicator (for existing indicator selection)
+                  if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
+                    const inp1Params = lastCondition.inp1.input_params || {}
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "Stochastic",
+                      timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
+                      input_params: {
+                        fastk_period: inp1Params.fastk_period || inp1Params.kLength || 14,
+                        slowk_period: inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                        slowd_period: inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                        output: inp1Params.output || "slowk",
+                      },
+                    }
+                  } else {
+                    // Default Stochastic settings
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "Stochastic",
+                      timeframe: settings.timeframe || "3h",
+                      input_params: {
+                        fastk_period: 14,
+                        slowk_period: 3,
+                        slowd_period: 3,
+                        output: "slowk",
+                      },
+                    }
+                  }
                 } else {
                   // For other existing indicators
                   lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
@@ -3781,9 +3889,9 @@ if (
                   }
                 } else if (settings.indicator === "volume") {
                   lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
-                } else if (settings.indicator === "stochastic") {
+                } else if (settings.indicator === "stochastic" || settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
                   // Use the same settings from inp1 if it's a Stochastic indicator
-                  if (lastCondition.inp1 && (lastCondition.inp1.name === "Stochastic" || lastCondition.inp1.name === "Stochastic")) {
+                  if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
                     const inp1Params = lastCondition.inp1.input_params || {}
                     lastCondition.inp2 = {
                       type: "CUSTOM_I",
@@ -3794,34 +3902,6 @@ if (
                         slowk_period: inp1Params.slowk_period || inp1Params.kSmoothing || 3,
                         slowd_period: inp1Params.slowd_period || inp1Params.dSmoothing || 3,
                         output: inp1Params.output || "slowk",
-                      },
-                    }
-                  } else {
-                    // Default Stochastic settings
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "Stochastic",
-                      timeframe: settings.timeframe || "3h",
-                      input_params: {
-                        fastk_period: 14,
-                        slowk_period: 3,
-                        slowd_period: 3,
-                        output: "slowk",
-                      },
-                    }
-                  }
-                } else if (settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
-                  // Use the same settings from inp1 if it's a Stochastic indicator
-                  if (lastCondition.inp1 && (lastCondition.inp1.name === "Stochastic" || lastCondition.inp1.name === "Stochastic")) {
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "Stochastic",
-                      timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
-                      input_params: lastCondition.inp1.input_params || {
-                        fastk_period: 14,
-                        slowk_period: 3,
-                        slowd_period: 3,
-                        output: "slowk",
                       },
                     }
                   } else {
@@ -3874,6 +3954,10 @@ if (
               setShowBollingerModal(true);
             } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
               openStochasticModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
+            } else if (indicator === "volume-ma" || indicator === "volume") {
+              // Open Volume modal for volume-ma or volume indicators
+              setPendingVolumeIndicatorType(indicator === "volume-ma" ? "volume-ma" : "volume")
+              setShowVolumeModal(true)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
@@ -4001,6 +4085,35 @@ if (
                   }
                 } else if (settings.indicator === "volume") {
                   lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
+                } else if (settings.indicator === "stochastic" || settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
+                  // Use the same settings from inp1 if it's a Stochastic indicator (for existing indicator selection)
+                  if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
+                    const inp1Params = lastCondition.inp1.input_params || {}
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "Stochastic",
+                      timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
+                      input_params: {
+                        fastk_period: inp1Params.fastk_period || inp1Params.kLength || 14,
+                        slowk_period: inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                        slowd_period: inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                        output: inp1Params.output || "slowk",
+                      },
+                    }
+                  } else {
+                    // Default Stochastic settings
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "Stochastic",
+                      timeframe: settings.timeframe || "3h",
+                      input_params: {
+                        fastk_period: 14,
+                        slowk_period: 3,
+                        slowd_period: 3,
+                        output: "slowk",
+                      },
+                    }
+                  }
                 } else {
                   // For other existing indicators
                   lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
@@ -4042,29 +4155,34 @@ if (
                   }
                 } else if (settings.indicator === "volume") {
                   lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
-                } else if (settings.indicator === "stochastic") {
-                  lastCondition.inp2 = {
-                    type: "CUSTOM_I",
-                    name: "Stochastic",
-                    timeframe: settings.timeframe || "3h",
-                    input_params: {
-                      fastk_period: settings.fastk_period || settings.kLength || 14,
-                      slowk_period: settings.slowk_period || settings.kSmoothing || 3,
-                      slowd_period: settings.slowd_period || settings.dSmoothing || 3,
-                      output: settings.output || "slowk",
-                    },
-                  }
-                } else if (settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
-                  lastCondition.inp2 = {
-                    type: "CUSTOM_I",
-                    name: "Stochastic",
-                    timeframe: settings.timeframe || "3h",
-                    input_params: {
-                      fastk_period: settings.fastk_period || 14,
-                      slowk_period: settings.slowk_period || 3,
-                      slowd_period: settings.slowd_period || 3,
-                      output: settings.output || "slowk",
-                    },
+                } else if (settings.indicator === "stochastic" || settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
+                  // Use the same settings from inp1 if it's a Stochastic indicator
+                  if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
+                    const inp1Params = lastCondition.inp1.input_params || {}
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "Stochastic",
+                      timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
+                      input_params: {
+                        fastk_period: inp1Params.fastk_period || inp1Params.kLength || 14,
+                        slowk_period: inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                        slowd_period: inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                        output: inp1Params.output || "slowk",
+                      },
+                    }
+                  } else {
+                    // Default Stochastic settings
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "Stochastic",
+                      timeframe: settings.timeframe || "3h",
+                      input_params: {
+                        fastk_period: 14,
+                        slowk_period: 3,
+                        slowd_period: 3,
+                        output: "slowk",
+                      },
+                    }
                   }
                 } else {
                   // For other indicators like price, close, open, etc.
@@ -4097,6 +4215,10 @@ if (
               setShowBollingerModal(true);
             } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
               openStochasticModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
+            } else if (indicator === "volume-ma" || indicator === "volume") {
+              // Open Volume modal for volume-ma or volume indicators
+              setPendingVolumeIndicatorType(indicator === "volume-ma" ? "volume-ma" : "volume")
+              setShowVolumeModal(true)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
@@ -4212,18 +4334,36 @@ if (
                     lastCondition.inp2 = createConstantInput("volume", tf)
                     break
 
+                  case "stochastic":
                   case "Stochastic":
                   case "stochastic-oscillator":
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "Stochastic",
-                      timeframe: tf,
-                      input_params: {
-                        fastk_period: 14,
-                        slowk_period: 3,
-                        slowd_period: 3,
-                        output: "slowk",
-                      },
+                    // Use the same settings from inp1 if it's a Stochastic indicator
+                    if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
+                      const inp1Params = lastCondition.inp1.input_params || {}
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "Stochastic",
+                        timeframe: tf || lastCondition.inp1.timeframe || "3h",
+                        input_params: {
+                          fastk_period: inp1Params.fastk_period || inp1Params.kLength || 14,
+                          slowk_period: inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                          slowd_period: inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                          output: inp1Params.output || "slowk",
+                        },
+                      }
+                    } else {
+                      // Default Stochastic settings
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "Stochastic",
+                        timeframe: tf,
+                        input_params: {
+                          fastk_period: 14,
+                          slowk_period: 3,
+                          slowd_period: 3,
+                          output: "slowk",
+                        },
+                      }
                     }
                     break
 
@@ -4268,6 +4408,9 @@ if (
               setShowBollingerModal(true);
             } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
               openStochasticModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
+            } else if (indicator === "volume-ma" || indicator === "volume") {
+              // Open Volume modal for volume-ma or volume indicators
+              setShowVolumeModal(true)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
@@ -4383,18 +4526,36 @@ if (
                     lastCondition.inp2 = createConstantInput("volume", tf)
                     break
 
+                  case "stochastic":
                   case "Stochastic":
                   case "stochastic-oscillator":
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "Stochastic",
-                      timeframe: tf,
-                      input_params: {
-                        fastk_period: 14,
-                        slowk_period: 3,
-                        slowd_period: 3,
-                        output: "slowk",
-                      },
+                    // Use the same settings from inp1 if it's a Stochastic indicator
+                    if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
+                      const inp1Params = lastCondition.inp1.input_params || {}
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "Stochastic",
+                        timeframe: tf || lastCondition.inp1.timeframe || "3h",
+                        input_params: {
+                          fastk_period: inp1Params.fastk_period || inp1Params.kLength || 14,
+                          slowk_period: inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                          slowd_period: inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                          output: inp1Params.output || "slowk",
+                        },
+                      }
+                    } else {
+                      // Default Stochastic settings
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "Stochastic",
+                        timeframe: tf,
+                        input_params: {
+                          fastk_period: 14,
+                          slowk_period: 3,
+                          slowd_period: 3,
+                          output: "slowk",
+                        },
+                      }
                     }
                     break
 
@@ -4439,6 +4600,10 @@ if (
               setShowBollingerModal(true);
             } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
               openStochasticModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
+            } else if (indicator === "volume-ma" || indicator === "volume") {
+              // Open Volume modal for volume-ma or volume indicators
+              setPendingVolumeIndicatorType(indicator === "volume-ma" ? "volume-ma" : "volume")
+              setShowVolumeModal(true)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
@@ -4629,10 +4794,27 @@ if (
                 }
               }
             } else {
-              // Fallback to original behavior
+              // Fallback: determine which indicator to use based on the same logic as handleAddComponent
+              // If there's an operator_name, we're editing inp2, otherwise inp1
               const currentStatement = statements[activeStatementIndex]
               const lastCondition = currentStatement?.strategy[currentStatement.strategy.length - 1]
-              const indicator = lastCondition?.inp2?.name === "BBANDS" ? lastCondition.inp2 : lastCondition?.inp1
+              
+              let indicator = null
+              
+              // Use the same logic as handleAddComponent: if inp1 exists and has operator, we're editing inp2
+              if (lastCondition?.inp1 && lastCondition?.operator_name) {
+                // We're editing inp2
+                if (lastCondition.inp2 && "name" in lastCondition.inp2 && lastCondition.inp2.name === "BBANDS") {
+                  indicator = lastCondition.inp2
+                }
+                // If inp2 doesn't have BBANDS yet, don't use inp1's settings - return undefined for new indicator
+              } else {
+                // We're editing inp1
+                if (lastCondition?.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
+                  indicator = lastCondition.inp1
+                }
+                // If inp1 doesn't have BBANDS yet, return undefined for new indicator
+              }
 
               if (indicator && "input_params" in indicator) {
                 return {
@@ -4666,24 +4848,100 @@ if (
               const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
 
               if (targetIndicator && "name" in targetIndicator && targetIndicator.name === "BBANDS") {
+                // Preserve the name and type when updating
                 targetIndicator.input = settings.input
                 targetIndicator.input_params = settings.input_params
+                // Ensure name is always "BBANDS" (should already be set, but ensure it)
+                targetIndicator.name = "BBANDS"
+                if (!targetIndicator.type) {
+                  targetIndicator.type = "I"
+                }
               }
             } else {
-              // Fallback to original behavior
+              // Fallback: determine which input to update based on the same logic as handleAddComponent
+              // If there's an operator_name, we're updating inp2, otherwise inp1
               const currentStatement = newStatements[activeStatementIndex]
               const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
               let targetIndicator = null
-              if (lastCondition.inp2 && "name" in lastCondition.inp2 && lastCondition.inp2.name === "BBANDS") {
-                targetIndicator = lastCondition.inp2
-              } else if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
-                targetIndicator = lastCondition.inp1
+              
+              // Use the same logic as handleAddComponent: if inp1 exists and has operator, we're adding to inp2
+              if (lastCondition.inp1 && lastCondition.operator_name) {
+                // We're updating inp2
+                if (lastCondition.inp2 && "name" in lastCondition.inp2 && lastCondition.inp2.name === "BBANDS") {
+                  targetIndicator = lastCondition.inp2
+                } else if (!lastCondition.inp2) {
+                  // inp2 doesn't exist yet, create it
+                  lastCondition.inp2 = {
+                    type: "I",
+                    name: "BBANDS",
+                    timeframe: settings.timeframe || "3h",
+                    input: settings.input,
+                    input_params: settings.input_params,
+                  }
+                  setStatements(newStatements)
+                  setShowBollingerModal(false)
+                  setEditingComponent(null)
+                  setTimeout(() => {
+                    searchInputRefs.current[activeStatementIndex]?.focus()
+                  }, 100)
+                  return
+                }
+              } else {
+                // We're updating inp1
+                if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
+                  targetIndicator = lastCondition.inp1
+                } else if (!lastCondition.inp1) {
+                  // inp1 doesn't exist yet, create it
+                  lastCondition.inp1 = {
+                    type: "I",
+                    name: "BBANDS",
+                    timeframe: settings.timeframe || "3h",
+                    input: settings.input,
+                    input_params: settings.input_params,
+                  }
+                  setStatements(newStatements)
+                  setShowBollingerModal(false)
+                  setEditingComponent(null)
+                  setTimeout(() => {
+                    searchInputRefs.current[activeStatementIndex]?.focus()
+                  }, 100)
+                  return
+                }
               }
 
               if (targetIndicator) {
+                // Preserve the name and type when updating
                 targetIndicator.input = settings.input
                 targetIndicator.input_params = settings.input_params
+                // Ensure name is always "BBANDS" (should already be set, but ensure it)
+                if ("name" in targetIndicator) {
+                  targetIndicator.name = "BBANDS"
+                }
+                if (!targetIndicator.type) {
+                  targetIndicator.type = "I"
+                }
+              } else {
+                // Creating a new indicator - determine if it should be inp1 or inp2
+                if (lastCondition.inp1 && lastCondition.operator_name) {
+                  // We're adding to inp2
+                  lastCondition.inp2 = {
+                    type: "I",
+                    name: "BBANDS",
+                    timeframe: settings.timeframe || "3h",
+                    input: settings.input,
+                    input_params: settings.input_params,
+                  }
+                } else {
+                  // We're adding to inp1
+                  lastCondition.inp1 = {
+                    type: "I",
+                    name: "BBANDS",
+                    timeframe: settings.timeframe || "3h",
+                    input: settings.input,
+                    input_params: settings.input_params,
+                  }
+                }
               }
             }
 
@@ -4698,7 +4956,11 @@ if (
       )}
       {showVolumeModal && (
         <VolumeSettingsModal
-          onClose={() => setShowVolumeModal(false)}
+          onClose={() => {
+            setShowVolumeModal(false)
+            setPendingVolumeIndicatorType(null)
+          }}
+          initialIndicatorType={pendingVolumeIndicatorType || undefined}
           onSave={(settings) => {
             // Update Volume settings
             const newStatements = [...statements]
@@ -4736,6 +4998,28 @@ if (
                   }
                 }
               }
+            } else if (pendingVolumeIndicatorType && pendingTimeframe) {
+              // Handle case when opened from "Other Indicator" section via onNext
+              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+              const timeframe = pendingTimeframe
+
+              if (settings.indicatorType === "volume-ma" || pendingVolumeIndicatorType === "volume-ma") {
+                // Create Volume_MA indicator in inp2
+                lastCondition.inp2 = {
+                  type: "CUSTOM_I",
+                  name: "Volume_MA",
+                  timeframe: timeframe,
+                  input_params: {
+                    ma_length: Number(settings.maLength),
+                  },
+                }
+              } else {
+                // Create regular Volume indicator in inp2
+                lastCondition.inp2 = createConstantInput("volume", timeframe)
+              }
+
+              setPendingVolumeIndicatorType(null)
+              setPendingTimeframe("3h")
             } else {
               // Fallback to original behavior
               const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
@@ -5058,18 +5342,36 @@ if (
                     currentCondition.inp2 = createConstantInput("volume", tf)
                     break
 
+                  case "stochastic":
                   case "Stochastic":
                   case "stochastic-oscillator":
-                    currentCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "Stochastic",
-                      timeframe: tf,
-                      input_params: {
-                        fastk_period: 14,
-                        slowk_period: 3,
-                        slowd_period: 3,
-                        output: "slowk",
-                      },
+                    // Use the same settings from inp1 if it's a Stochastic indicator
+                    if (currentCondition.inp1 && currentCondition.inp1.name === "Stochastic") {
+                      const inp1Params = currentCondition.inp1.input_params || {}
+                      currentCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "Stochastic",
+                        timeframe: tf || currentCondition.inp1.timeframe || "3h",
+                        input_params: {
+                          fastk_period: inp1Params.fastk_period || inp1Params.kLength || 14,
+                          slowk_period: inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                          slowd_period: inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                          output: inp1Params.output || "slowk",
+                        },
+                      }
+                    } else {
+                      // Default Stochastic settings
+                      currentCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "Stochastic",
+                        timeframe: tf,
+                        input_params: {
+                          fastk_period: 14,
+                          slowk_period: 3,
+                          slowd_period: 3,
+                          output: "slowk",
+                        },
+                      }
                     }
                     break
 

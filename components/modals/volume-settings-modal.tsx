@@ -6,10 +6,11 @@ import { X } from "lucide-react"
 interface VolumeSettingsModalProps {
   onClose: () => void
   onSave: (settings: any) => void
+  initialIndicatorType?: "volume" | "volume-ma"
 }
 
-export function VolumeSettingsModal({ onClose, onSave }: VolumeSettingsModalProps) {
-  const [indicatorType, setIndicatorType] = useState("volume")
+export function VolumeSettingsModal({ onClose, onSave, initialIndicatorType }: VolumeSettingsModalProps) {
+  const [indicatorType, setIndicatorType] = useState<"volume" | "volume-ma">(initialIndicatorType || "volume")
   const [maLength, setMaLength] = useState("20")
   const modalRef = useRef<HTMLDivElement>(null)
 
@@ -23,14 +24,20 @@ export function VolumeSettingsModal({ onClose, onSave }: VolumeSettingsModalProp
         if (parsedSettings.maLength) {
           setMaLength(parsedSettings.maLength.toString());
         }
-        if (parsedSettings.indicatorType) {
+        // Use initialIndicatorType if provided, otherwise use saved settings
+        if (initialIndicatorType) {
+          setIndicatorType(initialIndicatorType);
+        } else if (parsedSettings.indicatorType) {
           setIndicatorType(parsedSettings.indicatorType);
         }
+      } else if (initialIndicatorType) {
+        // If no saved settings but initialIndicatorType is provided, use it
+        setIndicatorType(initialIndicatorType);
       }
     } catch (error) {
       console.log('Error reading saved Volume settings:', error);
     }
-  }, []);
+  }, [initialIndicatorType]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {

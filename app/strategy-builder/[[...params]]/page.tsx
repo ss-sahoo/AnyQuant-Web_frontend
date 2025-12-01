@@ -136,10 +136,33 @@ export default function StrategyBuilderPage() {
 
           <ComponentsSidebar
             onComponentSelect={(component) => {
-              const activeIndex =
-                document.querySelector("[data-active-statement]")?.getAttribute("data-active-index") || "0"
+              // Find the statement that has the active input field (focused search input)
+              const activeInput = document.activeElement as HTMLInputElement
+              let activeIndex = 0
+              
+              // Check if the active element is a search input field
+              if (activeInput && activeInput.type === "text" && activeInput.placeholder?.includes("component name")) {
+                // Find the parent statement container
+                const statementContainer = activeInput.closest("[data-active-index]")
+                if (statementContainer) {
+                  const indexAttr = statementContainer.getAttribute("data-active-index")
+                  if (indexAttr !== null) {
+                    activeIndex = Number.parseInt(indexAttr, 10)
+                  }
+                }
+              } else {
+                // Fallback: use the statement with data-active-statement="true"
+                const activeStatement = document.querySelector("[data-active-statement='true']")
+                if (activeStatement) {
+                  const indexAttr = activeStatement.getAttribute("data-active-index")
+                  if (indexAttr !== null) {
+                    activeIndex = Number.parseInt(indexAttr, 10)
+                  }
+                }
+              }
+              
               const event = new CustomEvent("component-selected", {
-                detail: { component, statementIndex: Number.parseInt(activeIndex, 10) },
+                detail: { component, statementIndex: activeIndex },
               })
               document.dispatchEvent(event)
             }}
