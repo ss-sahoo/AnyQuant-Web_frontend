@@ -44,6 +44,9 @@ const refreshAlgorithms = async (pageToFetch = page, search = searchQuery) => {
       instrument: item.instrument || "Unknown",
     }))
 
+    // Small delay to show loading state smoothly
+    await new Promise(resolve => setTimeout(resolve, 100))
+    
     setAlgorithms(mapped)
     setTotalCount(total)
   } catch (err) {
@@ -67,6 +70,9 @@ const refreshShortlistedAlgorithms = async (pageToFetch = shortlistPage) => {
       strategy: item.strategy || false,
     }))
 
+    // Small delay to show loading state smoothly
+    await new Promise(resolve => setTimeout(resolve, 100))
+    
     setShortlistedAlgorithms(mapped)
     setShortlistTotalCount(response.count)
   } catch (err) {
@@ -265,14 +271,22 @@ const refreshShortlistedAlgorithms = async (pageToFetch = shortlistPage) => {
             </div>
           </div>
 
-          <AlgorithmTable
+          <div className="relative min-h-[400px]">
+            {loading && algorithms.length > 0 && (
+              <div className="absolute inset-0 bg-[#121420]/60 backdrop-blur-sm z-10 flex items-center justify-center rounded-lg">
+                <div className="flex flex-col items-center gap-3">
+                </div>
+              </div>
+            )}
+            <AlgorithmTable
               algorithms={algorithms}
-              loading={loading}
+              loading={loading && algorithms.length === 0}
               onDelete={handleDeleteAlgorithm}
               onEdit={(id, name) => handleEditAlgorithm(id, name)}
               onDuplicate={handleDuplicateAlgorithm}
               onAddToShortlist={handleAddToShortlist}
-              />
+            />
+          </div>
               
               {/* Pagination Section */}
               <div className="mt-6 relative">
@@ -327,14 +341,23 @@ const refreshShortlistedAlgorithms = async (pageToFetch = shortlistPage) => {
             <>
               <h1 className="text-2xl md:text-3xl font-normal mt-8 md:mt-12 mb-6 md:mb-8">shortlisted strategy variants</h1>
 
-              <AlgorithmShortTable
-                algorithm={shortlistedAlgorithms}
-                loading={shortlistLoading}
-                onDelete={handleDeleteShortlistedAlgorithm}
-                onDuplicate={handleDuplicateShortlistedAlgorithm}
-                onEdit={(algorithm) => handleEditShortlistedAlgorithm(algorithm.id, algorithm.name)}
-                onRemoveFromShortlist={handleRemoveFromShortlist}
-              />
+              <div className="relative min-h-[400px]">
+                {shortlistLoading && shortlistedAlgorithms.length > 0 && (
+                  <div className="absolute inset-0 bg-[#121420]/60 backdrop-blur-sm z-10 flex items-center justify-center rounded-lg">
+                    <div className="flex flex-col items-center gap-3">
+                    
+                    </div>
+                  </div>
+                )}
+                <AlgorithmShortTable
+                  algorithm={shortlistedAlgorithms}
+                  loading={shortlistLoading && shortlistedAlgorithms.length === 0}
+                  onDelete={handleDeleteShortlistedAlgorithm}
+                  onDuplicate={handleDuplicateShortlistedAlgorithm}
+                  onEdit={(algorithm) => handleEditShortlistedAlgorithm(algorithm.id, algorithm.name)}
+                  onRemoveFromShortlist={handleRemoveFromShortlist}
+                />
+              </div>
 
               {/* Shortlist Pagination Section */}
               <div className="mt-6 relative">
