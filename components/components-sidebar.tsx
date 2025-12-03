@@ -46,11 +46,11 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
   const allIndicators = [
     "RSI",
     "Volume",
-    // "MACD",
+     "MACD",
     "Bollinger",
     "Price",
     "Stochastic",
-    // "ATR",
+     "ATR",
    
     "GENERAL PA",
     "Gradient",

@@ -413,7 +413,7 @@ export function BacktestTab({
               step="0.01"
               value={positionSize}
               onChange={(e) => setPositionSize(e.target.value)}
-              placeholder="e.g., 0.05, 0.13"
+              placeholder="Default: 1"
               className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
             />
           </div>

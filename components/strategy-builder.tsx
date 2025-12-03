@@ -852,7 +852,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           } else if (condition.inp1.name === "Volume_MA") {
             setShowVolumeModal(true)
           } else if (condition.inp1.name === "ATR") {
-            setShowAtrModal(true)
+            setActiveStatementIndex(statementIndex)
+            setActiveConditionIndex(conditionIndex)
+            openAtrModal(statementIndex, conditionIndex, "inp1")
           } else if (condition.inp1.name === "Stochastic" || condition.inp1.name === "Stochastic") {
             openStochasticModal(statementIndex, conditionIndex, "inp1")
           }
@@ -872,9 +874,15 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           } else if (condition.inp2.name === "BBANDS") {
             setShowBollingerModal(true)
           } else if (condition.inp2.name === "MACD") {
+            setActiveStatementIndex(statementIndex)
+            setActiveConditionIndex(conditionIndex)
             setShowMacdModal(true)
           } else if (condition.inp2.name === "Volume_MA") {
             setShowVolumeModal(true)
+          } else if (condition.inp2.name === "ATR") {
+            setActiveStatementIndex(statementIndex)
+            setActiveConditionIndex(conditionIndex)
+            openAtrModal(statementIndex, conditionIndex, "inp2")
           } else if (condition.inp2.name === "Stochastic" || condition.inp2.name === "Stochastic") {
             openStochasticModal(statementIndex, conditionIndex, "inp2")
           }
@@ -1411,6 +1419,21 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               name: "GENERAL_PA",
               timeframe: timeframe,
             }
+          } else if (component.toLowerCase() === "macd") {
+            lastCondition.inp2 = {
+              type: "CUSTOM_I",
+              name: "MACD",
+              timeframe: timeframe,
+              input_params: {
+                macd_fast_length: 12,
+                macd_slow_length: 26,
+                macd_source: "close",
+                macd_signal_smoothing: 9,
+                macd_oscillator_ma_type: "EMA",
+                macd_signal_ma_type: "EMA",
+                macd_indicator_type: "MACD",
+              },
+            }
           } else if (component.toLowerCase() === "gradient" || component.toLowerCase() === "derivative") {
             // Show the Derivative Settings modal
             setActiveStatementIndex(statementIndex)
@@ -1523,6 +1546,31 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               name: "GENERAL_PA",
               timeframe: timeframe,
             }
+          } else if (component.toLowerCase() === "atr") {
+            lastCondition.inp1 = {
+              type: "CUSTOM_I",
+              name: "ATR",
+              timeframe: timeframe,
+              input_params: {
+                atr_length: 14,
+                atr_smoothing: "RMA",
+              },
+            }
+          } else if (component.toLowerCase() === "macd") {
+            lastCondition.inp1 = {
+              type: "CUSTOM_I",
+              name: "MACD",
+              timeframe: timeframe,
+              input_params: {
+                macd_fast_length: 12,
+                macd_slow_length: 26,
+                macd_source: "close",
+                macd_signal_smoothing: 9,
+                macd_oscillator_ma_type: "EMA",
+                macd_signal_ma_type: "EMA",
+                macd_indicator_type: "MACD",
+              },
+            }
           } else if (component.toLowerCase() === "gradient" || component.toLowerCase() === "derivative") {
             // Show the Derivative Settings modal
             setActiveStatementIndex(statementIndex)
@@ -1613,6 +1661,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             component.toLowerCase() === "rsi-ma"
           ) {
             setShowRsiModal(true)
+          } else if (component.toLowerCase() === "atr") {
+            const conditionIndex = currentStatement.strategy.length - 1
+            const targetInput = lastCondition.operator_name && lastCondition.inp2 ? "inp2" : "inp1"
+            const timeframeForModal = lastCondition.timeframe || selectedTimeframe
+            openAtrModal(statementIndex, conditionIndex, targetInput, timeframeForModal)
           } else if (component === "Stochastic") {
             const conditionIndex = currentStatement.strategy.length - 1
             const targetInput =
@@ -1647,9 +1700,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             setShowBollingerModal(true)
           } else if (component.toLowerCase() === "volume") {
             setShowVolumeModal(true)
-          } else if (component === "ATR") {
-            setShowAtrModal(true)
-          } else if (component === "MACD") {
+          } else if (component === "ATR" || component.toLowerCase() === "atr") {
+            const conditionIndex = currentStatement.strategy.length - 1
+            const targetInput = lastCondition.operator_name && lastCondition.inp2 ? "inp2" : "inp1"
+            const timeframeForModal = lastCondition.timeframe || selectedTimeframe
+            openAtrModal(statementIndex, conditionIndex, targetInput, timeframeForModal)
+          } else if (component === "MACD" || component.toLowerCase() === "macd") {
             setShowMacdModal(true)
           }
         }
@@ -1884,9 +1940,22 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           return {
             title: "MACD",
             details: {
-              fastperiod: inp1.input_params?.fastperiod || 12,
-              slowperiod: inp1.input_params?.slowperiod || 26,
-              signalperiod: inp1.input_params?.signalperiod || 9,
+              indicator_type: inp1.input_params?.macd_indicator_type || "MACD",
+              fast_length: inp1.input_params?.macd_fast_length || 12,
+              slow_length: inp1.input_params?.macd_slow_length || 26,
+              source: inp1.input_params?.macd_source || "close",
+              signal_smoothing: inp1.input_params?.macd_signal_smoothing || 9,
+              oscillator_ma_type: inp1.input_params?.macd_oscillator_ma_type || "EMA",
+              signal_ma_type: inp1.input_params?.macd_signal_ma_type || "EMA",
+              ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
+            },
+          }
+        } else if (inp1.name === "ATR") {
+          return {
+            title: "ATR",
+            details: {
+              atr_length: inp1.input_params?.atr_length || 14,
+              atr_smoothing: inp1.input_params?.atr_smoothing || "RMA",
               ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
             },
           }
@@ -1972,6 +2041,29 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           details: {
             timeperiod: inp2.input_params?.timeperiod || 17,
             input: inp2.input || "upperband",
+            ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
+          },
+        }
+      } else if ("name" in inp2 && inp2.name === "MACD") {
+        return {
+          title: "MACD",
+          details: {
+            indicator_type: inp2.input_params?.macd_indicator_type || "MACD",
+            fast_length: inp2.input_params?.macd_fast_length || 12,
+            slow_length: inp2.input_params?.macd_slow_length || 26,
+            source: inp2.input_params?.macd_source || "close",
+            signal_smoothing: inp2.input_params?.macd_signal_smoothing || 9,
+            oscillator_ma_type: inp2.input_params?.macd_oscillator_ma_type || "EMA",
+            signal_ma_type: inp2.input_params?.macd_signal_ma_type || "EMA",
+            ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
+          },
+        }
+      } else if ("name" in inp2 && inp2.name === "ATR") {
+        return {
+          title: "ATR",
+          details: {
+            atr_length: inp2.input_params?.atr_length || 14,
+            atr_smoothing: inp2.input_params?.atr_smoothing || "RMA",
             ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
           },
         }
@@ -2657,6 +2749,137 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     setEditingComponent(null)
     setStochasticModalTarget(null)
     setShowStochasticModal(false)
+    setPendingTimeframe("3h")
+    setTimeout(() => {
+      searchInputRefs.current[activeStatementIndex]?.focus()
+    }, 100)
+  }
+
+  // ATR Modal Helper Functions
+  const openAtrModal = (
+    statementIndex: number,
+    conditionIndex: number,
+    inputType: "inp1" | "inp2",
+    timeframeOverride?: string,
+  ) => {
+    setAtrModalTarget({
+      statementIndex,
+      conditionIndex,
+      inputType,
+      timeframeOverride,
+    })
+    setShowAtrModal(true)
+  }
+
+  const resolveAtrTarget = () => {
+    if (atrModalTarget) {
+      return atrModalTarget
+    }
+
+    if (editingComponent && (editingComponent.componentType === "inp1" || editingComponent.componentType === "inp2")) {
+      return {
+        statementIndex: editingComponent.statementIndex,
+        conditionIndex: editingComponent.conditionIndex,
+        inputType: editingComponent.componentType,
+      }
+    }
+
+    const fallbackStatement = statements[activeStatementIndex]
+    if (!fallbackStatement) return null
+    const fallbackConditionIndex = Math.max(0, fallbackStatement.strategy.length - 1)
+    const fallbackCondition = fallbackStatement.strategy[fallbackConditionIndex]
+    const fallbackInput: "inp1" | "inp2" =
+      fallbackCondition?.inp1 && fallbackCondition?.operator_name && !fallbackCondition?.inp2 ? "inp2" : "inp1"
+
+    return {
+      statementIndex: activeStatementIndex,
+      conditionIndex: fallbackConditionIndex,
+      inputType: fallbackInput,
+    }
+  }
+
+  const getAtrInitialSettings = () => {
+    const target = resolveAtrTarget()
+    if (!target) return undefined
+    const condition = statements[target.statementIndex]?.strategy[target.conditionIndex]
+    if (!condition) return undefined
+    const indicator =
+      target.inputType === "inp1"
+        ? condition?.inp1
+        : condition?.inp2
+
+    if (indicator && "name" in indicator && indicator.name === "ATR" && "input_params" in indicator) {
+      return {
+        atr_length: String(indicator.input_params?.atr_length || 14),
+        atr_smoothing: indicator.input_params?.atr_smoothing || "RMA",
+      }
+    }
+
+    return undefined
+  }
+
+  const applyAtrSettings = (settings: any) => {
+    const target = resolveAtrTarget()
+    if (!target) return
+
+    const newStatements = [...statements]
+    const targetStatement = newStatements[target.statementIndex]
+    const condition = targetStatement?.strategy[target.conditionIndex]
+    if (!condition) return
+
+    const getExistingTimeframe = () => {
+      const existing =
+        target.inputType === "inp1"
+          ? condition.inp1 && typeof condition.inp1 === "object" && "timeframe" in condition.inp1
+            ? condition.inp1.timeframe
+            : undefined
+          : condition.inp2 && typeof condition.inp2 === "object" && "timeframe" in condition.inp2
+            ? condition.inp2.timeframe
+            : undefined
+      return existing
+    }
+
+    const timeframe =
+      target.timeframeOverride ||
+      pendingTimeframe ||
+      getExistingTimeframe() ||
+      condition.timeframe ||
+      selectedTimeframe
+
+    const indicatorData = {
+      type: "CUSTOM_I" as const,
+      name: "ATR" as const,
+      timeframe,
+      input_params: {
+        atr_length: Number(settings.atr_length),
+        atr_smoothing: settings.atr_smoothing,
+      },
+    }
+
+    if (target.inputType === "inp1") {
+      condition.inp1 = indicatorData
+    } else {
+      condition.inp2 = indicatorData
+    }
+
+    if (condition.pendingAtCandle) {
+      if (target.inputType === "inp1" && condition.pendingAtCandle.inp1 && condition.inp1 && typeof condition.inp1 === "object") {
+        condition.inp1.index = condition.pendingAtCandle.inp1
+        delete condition.pendingAtCandle.inp1
+      }
+      if (target.inputType === "inp2" && condition.pendingAtCandle.inp2 && condition.inp2 && typeof condition.inp2 === "object") {
+        condition.inp2.index = condition.pendingAtCandle.inp2
+        delete condition.pendingAtCandle.inp2
+      }
+      if (Object.keys(condition.pendingAtCandle).length === 0) {
+        delete condition.pendingAtCandle
+      }
+    }
+
+    setStatements(newStatements)
+    setEditingComponent(null)
+    setAtrModalTarget(null)
+    setShowAtrModal(false)
     setPendingTimeframe("3h")
     setTimeout(() => {
       searchInputRefs.current[activeStatementIndex]?.focus()
@@ -3461,6 +3684,12 @@ if (
     inputType: "inp1" | "inp2"
     timeframeOverride?: string
   } | null>(null)
+  const [atrModalTarget, setAtrModalTarget] = useState<{
+    statementIndex: number
+    conditionIndex: number
+    inputType: "inp1" | "inp2"
+    timeframeOverride?: string
+  } | null>(null)
 
   return (
     <div className="flex-1 flex flex-col">
@@ -3958,6 +4187,9 @@ if (
               // Open Volume modal for volume-ma or volume indicators
               setPendingVolumeIndicatorType(indicator === "volume-ma" ? "volume-ma" : "volume")
               setShowVolumeModal(true)
+            } else if (indicator === "atr") {
+              // Open ATR modal for ATR indicator
+              openAtrModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
@@ -4219,6 +4451,9 @@ if (
               // Open Volume modal for volume-ma or volume indicators
               setPendingVolumeIndicatorType(indicator === "volume-ma" ? "volume-ma" : "volume")
               setShowVolumeModal(true)
+            } else if (indicator === "atr") {
+              // Open ATR modal for ATR indicator
+              openAtrModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
@@ -4411,6 +4646,9 @@ if (
             } else if (indicator === "volume-ma" || indicator === "volume") {
               // Open Volume modal for volume-ma or volume indicators
               setShowVolumeModal(true)
+            } else if (indicator === "atr") {
+              // Open ATR modal for ATR indicator
+              openAtrModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
@@ -4604,6 +4842,9 @@ if (
               // Open Volume modal for volume-ma or volume indicators
               setPendingVolumeIndicatorType(indicator === "volume-ma" ? "volume-ma" : "volume")
               setShowVolumeModal(true)
+            } else if (indicator === "atr") {
+              // Open ATR modal for ATR indicator
+              openAtrModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
@@ -5053,48 +5294,58 @@ if (
       )}
       {showAtrModal && (
         <AtrSettingsModal
-          onClose={() => setShowAtrModal(false)}
-          onSave={(settings) => {
-            // Update ATR settings
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-
-            if (editingComponent) {
-              const condition = currentStatement.strategy[editingComponent.conditionIndex]
-              const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
-
-              if (targetIndicator && "name" in targetIndicator && targetIndicator.name === "ATR") {
-                targetIndicator.input_params = {
-                  ...targetIndicator.input_params,
-                  ...settings,
-                }
-              }
-            } else {
-              // Fallback to original behavior
-              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-
-              if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
-                lastCondition.inp1.input_params = {
-                  ...lastCondition.inp1.input_params,
-                  ...settings,
-                }
-              }
-            }
-
-            setStatements(newStatements)
+          onClose={() => {
             setShowAtrModal(false)
             setEditingComponent(null)
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
+            setAtrModalTarget(null)
+            setPendingTimeframe("3h")
           }}
+          initialSettings={getAtrInitialSettings()}
+          onSave={applyAtrSettings}
         />
       )}
       {showMacdModal && (
         <MacdSettingsModal
-          onClose={() => setShowMacdModal(false)}
+          onClose={() => {
+            setShowMacdModal(false)
+            setEditingComponent(null)
+          }}
+          initialSettings={(() => {
+            if (editingComponent) {
+              const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+              const indicator = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
+
+              if (indicator && "name" in indicator && indicator.name === "MACD" && "input_params" in indicator) {
+                return {
+                  indicatorType: indicator.input_params?.macd_indicator_type || "MACD",
+                  fastLength: String(indicator.input_params?.macd_fast_length || 12),
+                  slowLength: String(indicator.input_params?.macd_slow_length || 26),
+                  source: indicator.input_params?.macd_source || "close",
+                  signalSmoothing: String(indicator.input_params?.macd_signal_smoothing || 9),
+                  oscillatorMaType: indicator.input_params?.macd_oscillator_ma_type || "EMA",
+                  signalLineMaType: indicator.input_params?.macd_signal_ma_type || "EMA",
+                }
+              }
+            } else {
+              const currentStatement = statements[activeStatementIndex]
+              const lastCondition = currentStatement?.strategy[currentStatement.strategy.length - 1]
+              const indicator = lastCondition?.inp1
+
+              if (indicator && "name" in indicator && indicator.name === "MACD" && "input_params" in indicator) {
+                return {
+                  indicatorType: indicator.input_params?.macd_indicator_type || "MACD",
+                  fastLength: String(indicator.input_params?.macd_fast_length || 12),
+                  slowLength: String(indicator.input_params?.macd_slow_length || 26),
+                  source: indicator.input_params?.macd_source || "close",
+                  signalSmoothing: String(indicator.input_params?.macd_signal_smoothing || 9),
+                  oscillatorMaType: indicator.input_params?.macd_oscillator_ma_type || "EMA",
+                  signalLineMaType: indicator.input_params?.macd_signal_ma_type || "EMA",
+                }
+              }
+            }
+            return undefined
+          })()}
           onSave={(settings) => {
-            // Update MACD settings
             const newStatements = [...statements]
             const currentStatement = newStatements[activeStatementIndex]
 
@@ -5104,18 +5355,27 @@ if (
 
               if (targetIndicator && "name" in targetIndicator && targetIndicator.name === "MACD") {
                 targetIndicator.input_params = {
-                  ...targetIndicator.input_params,
-                  ...settings,
+                  macd_fast_length: Number(settings.fastLength),
+                  macd_slow_length: Number(settings.slowLength),
+                  macd_source: settings.source,
+                  macd_signal_smoothing: Number(settings.signalSmoothing),
+                  macd_oscillator_ma_type: settings.oscillatorMaType,
+                  macd_signal_ma_type: settings.signalLineMaType,
+                  macd_indicator_type: settings.indicatorType,
                 }
               }
             } else {
-              // Fallback to original behavior
               const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
               if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "MACD") {
                 lastCondition.inp1.input_params = {
-                  ...lastCondition.inp1.input_params,
-                  ...settings,
+                  macd_fast_length: Number(settings.fastLength),
+                  macd_slow_length: Number(settings.slowLength),
+                  macd_source: settings.source,
+                  macd_signal_smoothing: Number(settings.signalSmoothing),
+                  macd_oscillator_ma_type: settings.oscillatorMaType,
+                  macd_signal_ma_type: settings.signalLineMaType,
+                  macd_indicator_type: settings.indicatorType,
                 }
               }
             }
@@ -5397,6 +5657,36 @@ if (
             setTimeout(() => {
               searchInputRefs.current[activeStatementIndex]?.focus()
             }, 100)
+          }}
+          onNext={(indicator, timeframe) => {
+            setShowPipsModal({ show: false, statementIndex: 0, conditionIndex: 0 })
+            setPendingOtherIndicator(indicator)
+            setPendingTimeframe(timeframe)
+
+            const conditionIndex = showPipsModal.conditionIndex
+
+            if (indicator === "rsi") {
+              setShowIndicatorModal(true)
+            } else if (indicator === "rsi-ma") {
+              setShowIndicatorModal(true)
+            } else if (indicator === "bollinger") {
+              setPendingBollingerForInp2({
+                statementIndex: showPipsModal.statementIndex,
+                conditionIndex,
+                timeframe,
+              });
+              setShowBollingerModal(true);
+            } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
+              openStochasticModal(showPipsModal.statementIndex, conditionIndex, "inp2", timeframe)
+            } else if (indicator === "volume-ma" || indicator === "volume") {
+              setPendingVolumeIndicatorType(indicator === "volume-ma" ? "volume-ma" : "volume")
+              setShowVolumeModal(true)
+            } else if (indicator === "atr") {
+              // Open ATR modal for ATR indicator
+              openAtrModal(showPipsModal.statementIndex, conditionIndex, "inp2", timeframe)
+            } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
+              setShowPriceSettingsModal(true)
+            }
           }}
         />
       )}

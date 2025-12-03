@@ -37,9 +37,10 @@ interface PipsSettingsModalProps {
     dPeriod?: number
     period?: number
   }) => void
+  onNext: (indicator: string, timeframe: string) => void
 }
 
-export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, onSave }: PipsSettingsModalProps) {
+export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, onSave, onNext }: PipsSettingsModalProps) {
   const [valueType, setValueType] = useState("value")
   const [customValue, setCustomValue] = useState(initialValue.toString())
   const [indicator, setIndicator] = useState("")
@@ -538,6 +539,20 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
                   )}
                 </div>
               </div>
+
+              {indicator && (
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button
+                    onClick={() => {
+                      onNext(indicator, timeframe === "custom" ? customTimeframe : timeframe)
+                    }}
+                    className="rounded-full px-6 bg-[#85e1fe] text-black hover:bg-[#6bc8e3] border-none"
+                    disabled={!indicator || !timeframe || (timeframe === "custom" && !customTimeframe)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              )}
 
               {/* Comprehensive Parameter Configuration */}
               {indicator &&

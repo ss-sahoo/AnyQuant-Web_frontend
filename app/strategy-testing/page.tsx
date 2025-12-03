@@ -35,7 +35,7 @@ import {
   getAllBrokerSymbols,
   findSymbolsWithTimeframe,
 } from "../AllApiCalls" // Import new functions
-import { X } from "lucide-react"
+import { X, ArrowLeft } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
 import { extractErrorMessage, formatErrorForDisplay } from "@/lib/error-utils"
 import { StrategyTab } from "@/components/strategy-tab"
@@ -114,7 +114,7 @@ export default function StrategyTestingPage() {
   // Add state variables for TradingType configuration
   const [commission, setCommission] = useState(0.00007)
   const [assetType, setAssetType] = useState("gold")
-  const [positionSize, setPositionSize] = useState("1")
+  const [positionSize, setPositionSize] = useState("1") // Default value is 1
 
   // New states for OptimisationTab
   const [selectedMaximiseOption, setSelectedMaximiseOption] = useState<string>("")
@@ -295,7 +295,8 @@ export default function StrategyTestingPage() {
             const currentCommission = parsed.TradingType.commission || 0.00007
             console.log("🔍 Commission update check:", { currentCommission })
             setCommission(currentCommission)
-            setAssetType(parsed.TradingType.Asset_type || "gold")
+            setAssetType(parsed.TradingType.asset_type || "gold")
+            setPositionSize(parsed.TradingType.position_size?.toString() || "1")
             
             // Update the parsed statement with the dynamic commission value
             const updatedStatement = {
@@ -303,7 +304,8 @@ export default function StrategyTestingPage() {
               TradingType: {
                 ...parsed.TradingType,
                 commission: Number.parseFloat(currentCommission),
-                asset_type: parsed.TradingType.asset_type || "gold"
+                asset_type: parsed.TradingType.asset_type || "gold",
+                position_size: parsed.TradingType.position_size || 1
               }
             }
             setParsedStatement(updatedStatement)
@@ -1573,6 +1575,7 @@ export default function StrategyTestingPage() {
         commission: commission, // Use dynamic commission from form
         NewTrade: selectedTradingMode, // Add the selected trading mode
         asset_type: assetType, // Add the asset type
+        position_size: Number.parseFloat(positionSize) || 1, // Add position size with default value of 1
       }
       
       console.log("🔍 Commission being sent to API:", { 
@@ -1602,6 +1605,7 @@ export default function StrategyTestingPage() {
           lot: lot,
           commission: commission,
           asset_type: assetType,
+          position_size: Number.parseFloat(positionSize) || 1,
         },
         // Add date range
         date_range: dateRange,
@@ -2441,6 +2445,21 @@ export default function StrategyTestingPage() {
 
               {/* Content area with overflow to allow scrolling */}
               <div className="flex-1 overflow-y-auto pb-[160px] bg-[#000000] ml-[63px]">
+                {/* Back Button - Sticky */}
+                {strategy_id && (
+                  <div className="sticky top-4 z-50 w-fit ml-5 mt-4 md:ml-10">
+                    <button
+                      onClick={() => {
+                        router.push(`/strategy-builder/${strategy_id}`)
+                      }}
+                      className="flex items-center gap-2 bg-[#1A1D2D] hover:bg-[#2B2E38] text-white px-4 py-2 rounded-full transition-colors border border-gray-700 shadow-lg"
+                      title="Back to Strategy Editor"
+                    >
+                      <ArrowLeft className="w-4 h-4" />
+                      <span className="hidden sm:inline">Back to Editor</span>
+                    </button>
+                  </div>
+                )}
                 {activeTab === "strategy" && (
                   <div className="p-6 space-y-6">
                     {/* Data Source Toggle */}
