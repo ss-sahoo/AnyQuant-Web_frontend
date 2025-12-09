@@ -51,7 +51,7 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
     "Price",
     "Stochastic",
      "ATR",
-   
+     "SuperTrend",   
     "GENERAL PA",
     "Gradient",
     // "EMA",

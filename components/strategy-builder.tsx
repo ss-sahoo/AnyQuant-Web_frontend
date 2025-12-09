@@ -10,6 +10,7 @@ import { BollingerBandsSettingsModal } from "@/components/modals/bollinger-bands
 import { VolumeSettingsModal } from "@/components/modals/volume-settings-modal"
 import { AtrSettingsModal } from "@/components/modals/atr-settings-modal"
 import { MacdSettingsModal } from "@/components/modals/macd-settings-modal"
+import { SuperTrendSettingsModal } from "@/components/modals/supertrend-settings-modal"
 import { RsiSettingsModal } from "@/components/modals/rsi-settings-modal"
 import { ChannelSettingsModal } from "@/components/modals/channel-settings-modal"
 import { SLTPSettingsModal, type SLTPSettings } from "@/components/modals/sl-tp-settings-modal"
@@ -171,6 +172,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const [showVolumeModal, setShowVolumeModal] = useState(false)
   const [showAtrModal, setShowAtrModal] = useState(false)
   const [showMacdModal, setShowMacdModal] = useState(false)
+  const [showSuperTrendModal, setShowSuperTrendModal] = useState(false)
   const [showRsiModal, setShowRsiModal] = useState(false)
   const [showChannelModal, setShowChannelModal] = useState(false)
   const [showSLTPSettings, setShowSLTPSettings] = useState<{ show: boolean; type: "SL" | "TP" }>({
@@ -650,6 +652,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     { id: "open", label: "Price Open" },
     { id: "close", label: "Price Close" },
     { id: "macd", label: "MACD" },
+    { id: "supertrend", label: "SuperTrend" },
     { id: "bollinger", label: "Bollinger" },
     { id: "price", label: "Price" },
     { id: "stochastic", label: "Stochastic" },
@@ -849,6 +852,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             setShowBollingerModal(true)
           } else if (condition.inp1.name === "MACD") {
             setShowMacdModal(true)
+          } else if (condition.inp1.name === "SupertrendIndicator") {
+            setShowSuperTrendModal(true)
           } else if (condition.inp1.name === "Volume_MA") {
             setShowVolumeModal(true)
           } else if (condition.inp1.name === "ATR") {
@@ -877,6 +882,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             setActiveStatementIndex(statementIndex)
             setActiveConditionIndex(conditionIndex)
             setShowMacdModal(true)
+          } else if (condition.inp2.name === "SupertrendIndicator") {
+            setActiveStatementIndex(statementIndex)
+            setActiveConditionIndex(conditionIndex)
+            setShowSuperTrendModal(true)
           } else if (condition.inp2.name === "Volume_MA") {
             setShowVolumeModal(true)
           } else if (condition.inp2.name === "ATR") {
@@ -1434,6 +1443,18 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 macd_indicator_type: "MACD",
               },
             }
+          } else if (component.toLowerCase() === "supertrend") {
+            lastCondition.inp2 = {
+              type: "CUSTOM_I",
+              name: "SupertrendIndicator",
+              timeframe: timeframe,
+              input_params: {
+                period: 10,
+                multiplier: 3.0,
+                change_atr_method: true,
+                output: "SellSignal",
+              },
+            }
           } else if (component.toLowerCase() === "gradient" || component.toLowerCase() === "derivative") {
             // Show the Derivative Settings modal
             setActiveStatementIndex(statementIndex)
@@ -1569,6 +1590,18 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 macd_oscillator_ma_type: "EMA",
                 macd_signal_ma_type: "EMA",
                 macd_indicator_type: "MACD",
+              },
+            }
+          } else if (component.toLowerCase() === "supertrend") {
+            lastCondition.inp1 = {
+              type: "CUSTOM_I",
+              name: "SupertrendIndicator",
+              timeframe: timeframe,
+              input_params: {
+                period: 10,
+                multiplier: 3.0,
+                change_atr_method: true,
+                output: "SellSignal",
               },
             }
           } else if (component.toLowerCase() === "gradient" || component.toLowerCase() === "derivative") {
@@ -1707,6 +1740,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             openAtrModal(statementIndex, conditionIndex, targetInput, timeframeForModal)
           } else if (component === "MACD" || component.toLowerCase() === "macd") {
             setShowMacdModal(true)
+          } else if (component === "SuperTrend" || component.toLowerCase() === "supertrend") {
+            setShowSuperTrendModal(true)
           }
         }
       }
@@ -1950,6 +1985,17 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
             },
           }
+        } else if (inp1.name === "SupertrendIndicator") {
+          return {
+            title: "SuperTrend",
+            details: {
+              period: inp1.input_params?.period || 10,
+              multiplier: inp1.input_params?.multiplier || 3.0,
+              change_atr_method: inp1.input_params?.change_atr_method ? "Yes" : "No",
+              output: inp1.input_params?.output || "SellSignal",
+              ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
+            },
+          }
         } else if (inp1.name === "ATR") {
           return {
             title: "ATR",
@@ -2064,6 +2110,17 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           details: {
             atr_length: inp2.input_params?.atr_length || 14,
             atr_smoothing: inp2.input_params?.atr_smoothing || "RMA",
+            ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
+          },
+        }
+      } else if ("name" in inp2 && inp2.name === "SupertrendIndicator") {
+        return {
+          title: "SuperTrend",
+          details: {
+            period: inp2.input_params?.period || 10,
+            multiplier: inp2.input_params?.multiplier || 3.0,
+            change_atr_method: inp2.input_params?.change_atr_method ? "Yes" : "No",
+            output: inp2.input_params?.output || "SellSignal",
             ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
           },
         }
@@ -5382,6 +5439,79 @@ if (
 
             setStatements(newStatements)
             setShowMacdModal(false)
+            setEditingComponent(null)
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
+          }}
+        />
+      )}
+      {showSuperTrendModal && (
+        <SuperTrendSettingsModal
+          onClose={() => {
+            setShowSuperTrendModal(false)
+            setEditingComponent(null)
+          }}
+          initialSettings={(() => {
+            if (editingComponent) {
+              const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+              const indicator = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
+
+              if (indicator && "name" in indicator && indicator.name === "SupertrendIndicator" && "input_params" in indicator) {
+                return {
+                  period: indicator.input_params?.period || 10,
+                  multiplier: indicator.input_params?.multiplier || 3.0,
+                  change_atr_method: indicator.input_params?.change_atr_method ?? true,
+                  output: indicator.input_params?.output || "SellSignal",
+                }
+              }
+            } else {
+              const currentStatement = statements[activeStatementIndex]
+              const lastCondition = currentStatement?.strategy[currentStatement.strategy.length - 1]
+              const indicator = lastCondition?.inp1
+
+              if (indicator && "name" in indicator && indicator.name === "SupertrendIndicator" && "input_params" in indicator) {
+                return {
+                  period: indicator.input_params?.period || 10,
+                  multiplier: indicator.input_params?.multiplier || 3.0,
+                  change_atr_method: indicator.input_params?.change_atr_method ?? true,
+                  output: indicator.input_params?.output || "SellSignal",
+                }
+              }
+            }
+            return undefined
+          })()}
+          onSave={(settings) => {
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+
+            if (editingComponent) {
+              const condition = currentStatement.strategy[editingComponent.conditionIndex]
+              const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
+
+              if (targetIndicator && "name" in targetIndicator && targetIndicator.name === "SupertrendIndicator") {
+                targetIndicator.input_params = {
+                  period: settings.period,
+                  multiplier: settings.multiplier,
+                  change_atr_method: settings.change_atr_method,
+                  output: settings.output,
+                }
+              }
+            } else {
+              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+              if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "SupertrendIndicator") {
+                lastCondition.inp1.input_params = {
+                  period: settings.period,
+                  multiplier: settings.multiplier,
+                  change_atr_method: settings.change_atr_method,
+                  output: settings.output,
+                }
+              }
+            }
+
+            setStatements(newStatements)
+            setShowSuperTrendModal(false)
             setEditingComponent(null)
             setTimeout(() => {
               searchInputRefs.current[activeStatementIndex]?.focus()

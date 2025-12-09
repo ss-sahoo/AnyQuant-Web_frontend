@@ -387,9 +387,9 @@ export function BacktestTab({
                 onChange={(e) => setLot(e.target.value)}
                 className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 pr-10 appearance-none focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
               >
-                <option value="mini">Mini (0.01)</option>
-                <option value="micro">Micro (0.001)</option>
-                <option value="standard">Standard (1.0)</option>
+                <option value="mini">Mini</option>
+                <option value="micro">Micro</option>
+                <option value="standard">Standard </option>
               </select>
               <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
                 <svg
