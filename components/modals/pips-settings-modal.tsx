@@ -91,6 +91,11 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
   const getExistingIndicatorOptions = () => {
     if (!currentInp1) return []
 
+    // If Super Trend is selected, no existing indicators should be shown
+    if (currentInp1.name === "SupertrendIndicator") {
+      return []
+    }
+
     const options = []
 
     if (currentInp1.name === "RSI" || currentInp1.input === "rsi") {
@@ -106,10 +111,11 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
       options.push({ value: "mid", label: "Mid" })
     } else if (currentInp1.name === "MACD") {
       options.push({ value: "macd", label: "MACD" })
+    } else if (currentInp1.name === "ATR") {
+      options.push({ value: "atr", label: "ATR" })
     } else if (currentInp1.name === "Stochastic") {
-      options.push({ value: "stochastic", label: "Stochastic" })
-    } else if (currentInp1.name === "Stochastic") {
-      options.push({ value: "stochastic-oscillator", label: "Stochastic Oscillator" })
+      options.push({ value: "stochastic-k", label: "%K (fast-line)" })
+      options.push({ value: "stochastic-d", label: "%D (slow-line)" })
     } else if (
       currentInp1.name === "Volume_MA" ||
       currentInp1.input === "volume" ||
@@ -184,6 +190,24 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
   }, [currentInp1])
 
   const handleSave = () => {
+    // For Stochastic %K or %D, copy input_params from inp1 and change output
+    if (valueType === "indicator" && (indicator === "stochastic-k" || indicator === "stochastic-d")) {
+      if (currentInp1 && currentInp1.input_params) {
+        const outputValue = indicator === "stochastic-k" ? "slowk" : "slowd"
+        onSave({
+          valueType,
+          indicator: "stochastic",
+          timeframe: currentInp1.timeframe || (timeframe === "custom" ? customTimeframe : timeframe),
+          fastk_period: currentInp1.input_params.fastk_period || 14,
+          slowk_period: currentInp1.input_params.slowk_period || 3,
+          slowd_period: currentInp1.input_params.slowd_period || 3,
+          stochasticOutput: outputValue,
+        } as any);
+        onClose()
+        return;
+      }
+    }
+    
     // Create the save object without maType for Volume_MA
     const saveObject: any = {
       valueType,
@@ -362,6 +386,29 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
       )
     }
 
+    // For ATR existing indicator, show read-only parameters
+    if (indicator === "atr") {
+      if (!currentInp1 || !currentInp1.input_params) return null
+      const params = currentInp1.input_params
+      const readOnlyStyle = "bg-gray-100 text-gray-600 cursor-not-allowed"
+      return (
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="atr_length" className="block text-sm font-medium text-gray-600 mb-2">
+              ATR Length (from original indicator)
+            </Label>
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.atr_length || 14}</div>
+          </div>
+          <div>
+            <Label htmlFor="atr_smoothing" className="block text-sm font-medium text-gray-600 mb-2">
+              ATR Smoothing (from original indicator)
+            </Label>
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.atr_smoothing || "RMA"}</div>
+          </div>
+        </div>
+      )
+    }
+
     // For OHLC price indicators, no additional parameters needed
     if (["open", "high", "low", "close"].includes(indicator)) {
       return (
@@ -476,7 +523,7 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
                   <SelectTrigger id="indicator" className="w-full border border-gray-300 text-black bg-white">
                     <SelectValue placeholder="Select indicator" />
                   </SelectTrigger>
-                  <SelectContent className="bg-white text-black">
+                  <SelectContent className="bg-white text-black max-h-[300px] overflow-y-auto">
                     {/* Price Indicators */}
                     <SelectItem value="close">Close</SelectItem>
                     <SelectItem value="open">Open</SelectItem>
@@ -492,6 +539,7 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
                     <SelectItem value="sma">Simple Moving Average (SMA)</SelectItem>
                     <SelectItem value="stochastic">Stochastic</SelectItem>
                     <SelectItem value="atr">Average True Range (ATR)</SelectItem>
+                    <SelectItem value="supertrend">Super Trend</SelectItem>
 
                     {/* Volume Indicators */}
                     <SelectItem value="volume">Volume</SelectItem>

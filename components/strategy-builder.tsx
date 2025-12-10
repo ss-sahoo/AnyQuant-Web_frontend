@@ -4105,19 +4105,46 @@ if (
                   }
                 } else if (settings.indicator === "volume") {
                   lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
+                } else if (settings.indicator === "atr") {
+                  // Use the same settings from inp1 if it's an ATR indicator (for existing indicator selection)
+                  if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
+                    const inp1Params = lastCondition.inp1.input_params || {}
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "ATR",
+                      timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
+                      input_params: {
+                        atr_length: inp1Params.atr_length || 14,
+                        atr_smoothing: inp1Params.atr_smoothing || "RMA",
+                      },
+                    }
+                  } else {
+                    // Default ATR settings
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "ATR",
+                      timeframe: settings.timeframe || "3h",
+                      input_params: {
+                        atr_length: 14,
+                        atr_smoothing: "RMA",
+                      },
+                    }
+                  }
                 } else if (settings.indicator === "stochastic" || settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
                   // Use the same settings from inp1 if it's a Stochastic indicator (for existing indicator selection)
                   if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
                     const inp1Params = lastCondition.inp1.input_params || {}
+                    // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
+                    const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
                     lastCondition.inp2 = {
                       type: "CUSTOM_I",
                       name: "Stochastic",
                       timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
                       input_params: {
-                        fastk_period: inp1Params.fastk_period || inp1Params.kLength || 14,
-                        slowk_period: inp1Params.slowk_period || inp1Params.kSmoothing || 3,
-                        slowd_period: inp1Params.slowd_period || inp1Params.dSmoothing || 3,
-                        output: inp1Params.output || "slowk",
+                        fastk_period: settings.fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
+                        slowk_period: settings.slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                        slowd_period: settings.slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                        output: outputValue,
                       },
                     }
                   } else {
@@ -4127,10 +4154,10 @@ if (
                       name: "Stochastic",
                       timeframe: settings.timeframe || "3h",
                       input_params: {
-                        fastk_period: 14,
-                        slowk_period: 3,
-                        slowd_period: 3,
-                        output: "slowk",
+                        fastk_period: settings.fastk_period || 14,
+                        slowk_period: settings.slowk_period || 3,
+                        slowd_period: settings.slowd_period || 3,
+                        output: (settings as any).stochasticOutput || "slowk",
                       },
                     }
                   }
@@ -4175,19 +4202,46 @@ if (
                   }
                 } else if (settings.indicator === "volume") {
                   lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
+                } else if (settings.indicator === "atr") {
+                  // Use the same settings from inp1 if it's an ATR indicator
+                  if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
+                    const inp1Params = lastCondition.inp1.input_params || {}
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "ATR",
+                      timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
+                      input_params: {
+                        atr_length: inp1Params.atr_length || 14,
+                        atr_smoothing: inp1Params.atr_smoothing || "RMA",
+                      },
+                    }
+                  } else {
+                    // Default ATR settings
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "ATR",
+                      timeframe: settings.timeframe || "3h",
+                      input_params: {
+                        atr_length: 14,
+                        atr_smoothing: "RMA",
+                      },
+                    }
+                  }
                 } else if (settings.indicator === "stochastic" || settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
                   // Use the same settings from inp1 if it's a Stochastic indicator
                   if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
                     const inp1Params = lastCondition.inp1.input_params || {}
+                    // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
+                    const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
                     lastCondition.inp2 = {
                       type: "CUSTOM_I",
                       name: "Stochastic",
                       timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
                       input_params: {
-                        fastk_period: inp1Params.fastk_period || inp1Params.kLength || 14,
-                        slowk_period: inp1Params.slowk_period || inp1Params.kSmoothing || 3,
-                        slowd_period: inp1Params.slowd_period || inp1Params.dSmoothing || 3,
-                        output: inp1Params.output || "slowk",
+                        fastk_period: (settings as any).fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
+                        slowk_period: (settings as any).slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                        slowd_period: (settings as any).slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                        output: outputValue,
                       },
                     }
                   } else {
@@ -4197,10 +4251,10 @@ if (
                       name: "Stochastic",
                       timeframe: settings.timeframe || "3h",
                       input_params: {
-                        fastk_period: 14,
-                        slowk_period: 3,
-                        slowd_period: 3,
-                        output: "slowk",
+                        fastk_period: (settings as any).fastk_period || 14,
+                        slowk_period: (settings as any).slowk_period || 3,
+                        slowd_period: (settings as any).slowd_period || 3,
+                        output: (settings as any).stochasticOutput || "slowk",
                       },
                     }
                   }
@@ -4247,6 +4301,24 @@ if (
             } else if (indicator === "atr") {
               // Open ATR modal for ATR indicator
               openAtrModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
+            } else if (indicator === "macd") {
+              // Open MACD modal for MACD indicator
+              setEditingComponent({
+                statementIndex: activeStatementIndex,
+                conditionIndex,
+                componentType: "inp2",
+              })
+              setPendingTimeframe(timeframe)
+              setShowMacdModal(true)
+            } else if (indicator === "supertrend") {
+              // Open Super Trend modal for Super Trend indicator
+              setEditingComponent({
+                statementIndex: activeStatementIndex,
+                conditionIndex,
+                componentType: "inp2",
+              })
+              setPendingTimeframe(timeframe)
+              setShowSuperTrendModal(true)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
@@ -4374,19 +4446,46 @@ if (
                   }
                 } else if (settings.indicator === "volume") {
                   lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
+                } else if (settings.indicator === "atr") {
+                  // Use the same settings from inp1 if it's an ATR indicator (for existing indicator selection)
+                  if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
+                    const inp1Params = lastCondition.inp1.input_params || {}
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "ATR",
+                      timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
+                      input_params: {
+                        atr_length: inp1Params.atr_length || 14,
+                        atr_smoothing: inp1Params.atr_smoothing || "RMA",
+                      },
+                    }
+                  } else {
+                    // Default ATR settings
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "ATR",
+                      timeframe: settings.timeframe || "3h",
+                      input_params: {
+                        atr_length: 14,
+                        atr_smoothing: "RMA",
+                      },
+                    }
+                  }
                 } else if (settings.indicator === "stochastic" || settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
                   // Use the same settings from inp1 if it's a Stochastic indicator (for existing indicator selection)
                   if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
                     const inp1Params = lastCondition.inp1.input_params || {}
+                    // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
+                    const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
                     lastCondition.inp2 = {
                       type: "CUSTOM_I",
                       name: "Stochastic",
                       timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
                       input_params: {
-                        fastk_period: inp1Params.fastk_period || inp1Params.kLength || 14,
-                        slowk_period: inp1Params.slowk_period || inp1Params.kSmoothing || 3,
-                        slowd_period: inp1Params.slowd_period || inp1Params.dSmoothing || 3,
-                        output: inp1Params.output || "slowk",
+                        fastk_period: (settings as any).fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
+                        slowk_period: (settings as any).slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                        slowd_period: (settings as any).slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                        output: outputValue,
                       },
                     }
                   } else {
@@ -4396,10 +4495,10 @@ if (
                       name: "Stochastic",
                       timeframe: settings.timeframe || "3h",
                       input_params: {
-                        fastk_period: 14,
-                        slowk_period: 3,
-                        slowd_period: 3,
-                        output: "slowk",
+                        fastk_period: (settings as any).fastk_period || 14,
+                        slowk_period: (settings as any).slowk_period || 3,
+                        slowd_period: (settings as any).slowd_period || 3,
+                        output: (settings as any).stochasticOutput || "slowk",
                       },
                     }
                   }
@@ -4444,19 +4543,46 @@ if (
                   }
                 } else if (settings.indicator === "volume") {
                   lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
+                } else if (settings.indicator === "atr") {
+                  // Use the same settings from inp1 if it's an ATR indicator
+                  if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
+                    const inp1Params = lastCondition.inp1.input_params || {}
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "ATR",
+                      timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
+                      input_params: {
+                        atr_length: inp1Params.atr_length || 14,
+                        atr_smoothing: inp1Params.atr_smoothing || "RMA",
+                      },
+                    }
+                  } else {
+                    // Default ATR settings
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "ATR",
+                      timeframe: settings.timeframe || "3h",
+                      input_params: {
+                        atr_length: 14,
+                        atr_smoothing: "RMA",
+                      },
+                    }
+                  }
                 } else if (settings.indicator === "stochastic" || settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
                   // Use the same settings from inp1 if it's a Stochastic indicator
                   if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
                     const inp1Params = lastCondition.inp1.input_params || {}
+                    // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
+                    const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
                     lastCondition.inp2 = {
                       type: "CUSTOM_I",
                       name: "Stochastic",
                       timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
                       input_params: {
-                        fastk_period: inp1Params.fastk_period || inp1Params.kLength || 14,
-                        slowk_period: inp1Params.slowk_period || inp1Params.kSmoothing || 3,
-                        slowd_period: inp1Params.slowd_period || inp1Params.dSmoothing || 3,
-                        output: inp1Params.output || "slowk",
+                        fastk_period: (settings as any).fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
+                        slowk_period: (settings as any).slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                        slowd_period: (settings as any).slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                        output: outputValue,
                       },
                     }
                   } else {
@@ -4466,10 +4592,10 @@ if (
                       name: "Stochastic",
                       timeframe: settings.timeframe || "3h",
                       input_params: {
-                        fastk_period: 14,
-                        slowk_period: 3,
-                        slowd_period: 3,
-                        output: "slowk",
+                        fastk_period: (settings as any).fastk_period || 14,
+                        slowk_period: (settings as any).slowk_period || 3,
+                        slowd_period: (settings as any).slowd_period || 3,
+                        output: (settings as any).stochasticOutput || "slowk",
                       },
                     }
                   }
@@ -4511,6 +4637,24 @@ if (
             } else if (indicator === "atr") {
               // Open ATR modal for ATR indicator
               openAtrModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
+            } else if (indicator === "macd") {
+              // Open MACD modal for MACD indicator
+              setEditingComponent({
+                statementIndex: activeStatementIndex,
+                conditionIndex,
+                componentType: "inp2",
+              })
+              setPendingTimeframe(timeframe)
+              setShowMacdModal(true)
+            } else if (indicator === "supertrend") {
+              // Open Super Trend modal for Super Trend indicator
+              setEditingComponent({
+                statementIndex: activeStatementIndex,
+                conditionIndex,
+                componentType: "inp2",
+              })
+              setPendingTimeframe(timeframe)
+              setShowSuperTrendModal(true)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
@@ -4626,21 +4770,50 @@ if (
                     lastCondition.inp2 = createConstantInput("volume", tf)
                     break
 
+                  case "atr":
+                    // Use the same settings from inp1 if it's an ATR indicator
+                    if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
+                      const inp1Params = lastCondition.inp1.input_params || {}
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "ATR",
+                        timeframe: tf || lastCondition.inp1.timeframe || "3h",
+                        input_params: {
+                          atr_length: inp1Params.atr_length || 14,
+                          atr_smoothing: inp1Params.atr_smoothing || "RMA",
+                        },
+                      }
+                    } else {
+                      // Default ATR settings
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "ATR",
+                        timeframe: tf,
+                        input_params: {
+                          atr_length: 14,
+                          atr_smoothing: "RMA",
+                        },
+                      }
+                    }
+                    break
+
                   case "stochastic":
                   case "Stochastic":
                   case "stochastic-oscillator":
                     // Use the same settings from inp1 if it's a Stochastic indicator
                     if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
                       const inp1Params = lastCondition.inp1.input_params || {}
+                      // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
+                      const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
                       lastCondition.inp2 = {
                         type: "CUSTOM_I",
                         name: "Stochastic",
                         timeframe: tf || lastCondition.inp1.timeframe || "3h",
                         input_params: {
-                          fastk_period: inp1Params.fastk_period || inp1Params.kLength || 14,
-                          slowk_period: inp1Params.slowk_period || inp1Params.kSmoothing || 3,
-                          slowd_period: inp1Params.slowd_period || inp1Params.dSmoothing || 3,
-                          output: inp1Params.output || "slowk",
+                          fastk_period: (settings as any).fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
+                          slowk_period: (settings as any).slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                          slowd_period: (settings as any).slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                          output: outputValue,
                         },
                       }
                     } else {
@@ -4650,10 +4823,10 @@ if (
                         name: "Stochastic",
                         timeframe: tf,
                         input_params: {
-                          fastk_period: 14,
-                          slowk_period: 3,
-                          slowd_period: 3,
-                          output: "slowk",
+                          fastk_period: (settings as any).fastk_period || 14,
+                          slowk_period: (settings as any).slowk_period || 3,
+                          slowd_period: (settings as any).slowd_period || 3,
+                          output: (settings as any).stochasticOutput || "slowk",
                         },
                       }
                     }
@@ -4674,7 +4847,7 @@ if (
             }
 
             setStatements(newStatements)
-            setShowBelowModal(false)
+            setShowAboveModal(false)
             setTimeout(() => {
               searchInputRefs.current[activeStatementIndex]?.focus()
             }, 100)
@@ -4706,6 +4879,24 @@ if (
             } else if (indicator === "atr") {
               // Open ATR modal for ATR indicator
               openAtrModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
+            } else if (indicator === "macd") {
+              // Open MACD modal for MACD indicator
+              setEditingComponent({
+                statementIndex: activeStatementIndex,
+                conditionIndex,
+                componentType: "inp2",
+              })
+              setPendingTimeframe(timeframe)
+              setShowMacdModal(true)
+            } else if (indicator === "supertrend") {
+              // Open Super Trend modal for Super Trend indicator
+              setEditingComponent({
+                statementIndex: activeStatementIndex,
+                conditionIndex,
+                componentType: "inp2",
+              })
+              setPendingTimeframe(timeframe)
+              setShowSuperTrendModal(true)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
@@ -4821,21 +5012,50 @@ if (
                     lastCondition.inp2 = createConstantInput("volume", tf)
                     break
 
+                  case "atr":
+                    // Use the same settings from inp1 if it's an ATR indicator
+                    if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
+                      const inp1Params = lastCondition.inp1.input_params || {}
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "ATR",
+                        timeframe: tf || lastCondition.inp1.timeframe || "3h",
+                        input_params: {
+                          atr_length: inp1Params.atr_length || 14,
+                          atr_smoothing: inp1Params.atr_smoothing || "RMA",
+                        },
+                      }
+                    } else {
+                      // Default ATR settings
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "ATR",
+                        timeframe: tf,
+                        input_params: {
+                          atr_length: 14,
+                          atr_smoothing: "RMA",
+                        },
+                      }
+                    }
+                    break
+
                   case "stochastic":
                   case "Stochastic":
                   case "stochastic-oscillator":
                     // Use the same settings from inp1 if it's a Stochastic indicator
                     if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
                       const inp1Params = lastCondition.inp1.input_params || {}
+                      // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
+                      const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
                       lastCondition.inp2 = {
                         type: "CUSTOM_I",
                         name: "Stochastic",
                         timeframe: tf || lastCondition.inp1.timeframe || "3h",
                         input_params: {
-                          fastk_period: inp1Params.fastk_period || inp1Params.kLength || 14,
-                          slowk_period: inp1Params.slowk_period || inp1Params.kSmoothing || 3,
-                          slowd_period: inp1Params.slowd_period || inp1Params.dSmoothing || 3,
-                          output: inp1Params.output || "slowk",
+                          fastk_period: (settings as any).fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
+                          slowk_period: (settings as any).slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                          slowd_period: (settings as any).slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                          output: outputValue,
                         },
                       }
                     } else {
@@ -4845,10 +5065,10 @@ if (
                         name: "Stochastic",
                         timeframe: tf,
                         input_params: {
-                          fastk_period: 14,
-                          slowk_period: 3,
-                          slowd_period: 3,
-                          output: "slowk",
+                          fastk_period: (settings as any).fastk_period || 14,
+                          slowk_period: (settings as any).slowk_period || 3,
+                          slowd_period: (settings as any).slowd_period || 3,
+                          output: (settings as any).stochasticOutput || "slowk",
                         },
                       }
                     }
@@ -5409,8 +5629,10 @@ if (
             if (editingComponent) {
               const condition = currentStatement.strategy[editingComponent.conditionIndex]
               const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
+              const timeframe = pendingTimeframe || "3h"
 
               if (targetIndicator && "name" in targetIndicator && targetIndicator.name === "MACD") {
+                // Update existing MACD indicator
                 targetIndicator.input_params = {
                   macd_fast_length: Number(settings.fastLength),
                   macd_slow_length: Number(settings.slowLength),
@@ -5419,6 +5641,22 @@ if (
                   macd_oscillator_ma_type: settings.oscillatorMaType,
                   macd_signal_ma_type: settings.signalLineMaType,
                   macd_indicator_type: settings.indicatorType,
+                }
+              } else if (editingComponent.componentType === "inp2") {
+                // Create new MACD indicator in inp2
+                condition.inp2 = {
+                  type: "CUSTOM_I",
+                  name: "MACD",
+                  timeframe: timeframe,
+                  input_params: {
+                    macd_fast_length: Number(settings.fastLength),
+                    macd_slow_length: Number(settings.slowLength),
+                    macd_source: settings.source,
+                    macd_signal_smoothing: Number(settings.signalSmoothing),
+                    macd_oscillator_ma_type: settings.oscillatorMaType,
+                    macd_signal_ma_type: settings.signalLineMaType,
+                    macd_indicator_type: settings.indicatorType,
+                  },
                 }
               }
             } else {
@@ -5440,6 +5678,7 @@ if (
             setStatements(newStatements)
             setShowMacdModal(false)
             setEditingComponent(null)
+            setPendingTimeframe("3h")
             setTimeout(() => {
               searchInputRefs.current[activeStatementIndex]?.focus()
             }, 100)
@@ -5488,13 +5727,28 @@ if (
             if (editingComponent) {
               const condition = currentStatement.strategy[editingComponent.conditionIndex]
               const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
+              const timeframe = pendingTimeframe || "3h"
 
               if (targetIndicator && "name" in targetIndicator && targetIndicator.name === "SupertrendIndicator") {
+                // Update existing Super Trend indicator
                 targetIndicator.input_params = {
                   period: settings.period,
                   multiplier: settings.multiplier,
                   change_atr_method: settings.change_atr_method,
                   output: settings.output,
+                }
+              } else if (editingComponent.componentType === "inp2") {
+                // Create new Super Trend indicator in inp2
+                condition.inp2 = {
+                  type: "CUSTOM_I",
+                  name: "SupertrendIndicator",
+                  timeframe: timeframe,
+                  input_params: {
+                    period: settings.period,
+                    multiplier: settings.multiplier,
+                    change_atr_method: settings.change_atr_method,
+                    output: settings.output,
+                  },
                 }
               }
             } else {
@@ -5513,6 +5767,7 @@ if (
             setStatements(newStatements)
             setShowSuperTrendModal(false)
             setEditingComponent(null)
+            setPendingTimeframe("3h")
             setTimeout(() => {
               searchInputRefs.current[activeStatementIndex]?.focus()
             }, 100)
@@ -5732,21 +5987,50 @@ if (
                     currentCondition.inp2 = createConstantInput("volume", tf)
                     break
 
+                  case "atr":
+                    // Use the same settings from inp1 if it's an ATR indicator
+                    if (currentCondition.inp1 && currentCondition.inp1.name === "ATR") {
+                      const inp1Params = currentCondition.inp1.input_params || {}
+                      currentCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "ATR",
+                        timeframe: tf || currentCondition.inp1.timeframe || "3h",
+                        input_params: {
+                          atr_length: inp1Params.atr_length || 14,
+                          atr_smoothing: inp1Params.atr_smoothing || "RMA",
+                        },
+                      }
+                    } else {
+                      // Default ATR settings
+                      currentCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "ATR",
+                        timeframe: tf,
+                        input_params: {
+                          atr_length: 14,
+                          atr_smoothing: "RMA",
+                        },
+                      }
+                    }
+                    break
+
                   case "stochastic":
                   case "Stochastic":
                   case "stochastic-oscillator":
                     // Use the same settings from inp1 if it's a Stochastic indicator
                     if (currentCondition.inp1 && currentCondition.inp1.name === "Stochastic") {
                       const inp1Params = currentCondition.inp1.input_params || {}
+                      // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
+                      const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
                       currentCondition.inp2 = {
                         type: "CUSTOM_I",
                         name: "Stochastic",
                         timeframe: tf || currentCondition.inp1.timeframe || "3h",
                         input_params: {
-                          fastk_period: inp1Params.fastk_period || inp1Params.kLength || 14,
-                          slowk_period: inp1Params.slowk_period || inp1Params.kSmoothing || 3,
-                          slowd_period: inp1Params.slowd_period || inp1Params.dSmoothing || 3,
-                          output: inp1Params.output || "slowk",
+                          fastk_period: (settings as any).fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
+                          slowk_period: (settings as any).slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                          slowd_period: (settings as any).slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                          output: outputValue,
                         },
                       }
                     } else {
@@ -5756,10 +6040,10 @@ if (
                         name: "Stochastic",
                         timeframe: tf,
                         input_params: {
-                          fastk_period: 14,
-                          slowk_period: 3,
-                          slowd_period: 3,
-                          output: "slowk",
+                          fastk_period: (settings as any).fastk_period || 14,
+                          slowk_period: (settings as any).slowk_period || 3,
+                          slowd_period: (settings as any).slowd_period || 3,
+                          output: (settings as any).stochasticOutput || "slowk",
                         },
                       }
                     }
@@ -5814,6 +6098,24 @@ if (
             } else if (indicator === "atr") {
               // Open ATR modal for ATR indicator
               openAtrModal(showPipsModal.statementIndex, conditionIndex, "inp2", timeframe)
+            } else if (indicator === "macd") {
+              // Open MACD modal for MACD indicator
+              setEditingComponent({
+                statementIndex: showPipsModal.statementIndex,
+                conditionIndex,
+                componentType: "inp2",
+              })
+              setPendingTimeframe(timeframe)
+              setShowMacdModal(true)
+            } else if (indicator === "supertrend") {
+              // Open Super Trend modal for Super Trend indicator
+              setEditingComponent({
+                statementIndex: showPipsModal.statementIndex,
+                conditionIndex,
+                componentType: "inp2",
+              })
+              setPendingTimeframe(timeframe)
+              setShowSuperTrendModal(true)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }

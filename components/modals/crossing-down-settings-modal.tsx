@@ -90,6 +90,11 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext
   const getExistingIndicatorOptions = () => {
     if (!currentInp1) return []
 
+    // If Super Trend is selected, no existing indicators should be shown
+    if (currentInp1.name === "SupertrendIndicator") {
+      return []
+    }
+
     const options = []
 
     if (currentInp1.name === "RSI" || currentInp1.input === "rsi") {
@@ -107,10 +112,11 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext
       options.push({ value: "close", label: "Close" })
     } else if (currentInp1.name === "MACD") {
       options.push({ value: "macd", label: "MACD" })
+    } else if (currentInp1.name === "ATR") {
+      options.push({ value: "atr", label: "ATR" })
     } else if (currentInp1.name === "Stochastic") {
-      options.push({ value: "stochastic", label: "Stochastic" })
-    } else if (currentInp1.name === "Stochastic") {
-      options.push({ value: "stochastic-oscillator", label: "Stochastic Oscillator" })
+      options.push({ value: "stochastic-k", label: "%K (fast-line)" })
+      options.push({ value: "stochastic-d", label: "%D (slow-line)" })
     } else if (
       currentInp1.name === "Volume_MA" ||
       currentInp1.input === "volume" ||
@@ -357,11 +363,56 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext
         </div>
       )
     }
-    if (indicator === "stochastic" || indicator === "stochastic-oscillator") {
+    if (indicator === "stochastic-k" || indicator === "stochastic-d") {
+      if (!currentInp1 || !currentInp1.input_params) return null
+      const params = currentInp1.input_params
+      const readOnlyStyle = "bg-gray-100 text-gray-600 cursor-not-allowed"
       return (
         <div className="space-y-4">
-          <div className="text-sm text-gray-600">
-            Stochastic parameters will use the same settings as the original indicator.
+          <div>
+            <Label htmlFor="fastk_period" className="block text-sm font-medium text-gray-600 mb-2">
+              Fast K Period (from original indicator)
+            </Label>
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.fastk_period || 14}</div>
+          </div>
+          <div>
+            <Label htmlFor="slowk_period" className="block text-sm font-medium text-gray-600 mb-2">
+              Slow K Period (from original indicator)
+            </Label>
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.slowk_period || 3}</div>
+          </div>
+          <div>
+            <Label htmlFor="slowd_period" className="block text-sm font-medium text-gray-600 mb-2">
+              Slow D Period (from original indicator)
+            </Label>
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.slowd_period || 3}</div>
+          </div>
+          <div>
+            <Label htmlFor="output" className="block text-sm font-medium text-gray-600 mb-2">
+              Output (will be set to {indicator === "stochastic-k" ? "slowk" : "slowd"})
+            </Label>
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{indicator === "stochastic-k" ? "slowk" : "slowd"}</div>
+          </div>
+        </div>
+      )
+    }
+    if (indicator === "atr") {
+      if (!currentInp1 || !currentInp1.input_params) return null
+      const params = currentInp1.input_params
+      const readOnlyStyle = "bg-gray-100 text-gray-600 cursor-not-allowed"
+      return (
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="atr_length" className="block text-sm font-medium text-gray-600 mb-2">
+              ATR Length (from original indicator)
+            </Label>
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.atr_length || 14}</div>
+          </div>
+          <div>
+            <Label htmlFor="atr_smoothing" className="block text-sm font-medium text-gray-600 mb-2">
+              ATR Smoothing (from original indicator)
+            </Label>
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.atr_smoothing || "RMA"}</div>
           </div>
         </div>
       )
@@ -400,6 +451,24 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext
   const handleSave = () => {
     console.log('🔍 handleSave called with indicator:', indicator, 'valueType:', valueType);
     console.log('🔍 currentInp1:', currentInp1);
+    
+    // For Stochastic %K or %D, copy input_params from inp1 and change output
+    if (valueType === "indicator" && (indicator === "stochastic-k" || indicator === "stochastic-d")) {
+      if (currentInp1 && currentInp1.input_params) {
+        const outputValue = indicator === "stochastic-k" ? "slowk" : "slowd"
+        onSave({
+          valueType,
+          indicator: "stochastic",
+          timeframe: currentInp1.timeframe || timeframe,
+          fastk_period: currentInp1.input_params.fastk_period || 14,
+          slowk_period: currentInp1.input_params.slowk_period || 3,
+          slowd_period: currentInp1.input_params.slowd_period || 3,
+          stochasticOutput: outputValue,
+        } as any);
+        onClose()
+        return;
+      }
+    }
     
     // For RSI_MA indicator, use saved localStorage values instead of currentInp1
     if (indicator === "rsi-ma") {
@@ -602,7 +671,7 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext
                   <SelectTrigger id="indicator" className="w-full border border-gray-300 text-black bg-white">
                     <SelectValue placeholder="Select indicator" />
                   </SelectTrigger>
-                  <SelectContent className="bg-white text-black">
+                  <SelectContent className="bg-white text-black max-h-[300px] overflow-y-auto">
                     {/* Price Indicators */}
                     <SelectItem value="close">Close</SelectItem>
                     <SelectItem value="open">Open</SelectItem>
@@ -618,6 +687,7 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext
                     <SelectItem value="sma">Simple Moving Average (SMA)</SelectItem>
                     <SelectItem value="stochastic">Stochastic</SelectItem>
                     <SelectItem value="atr">Average True Range (ATR)</SelectItem>
+                    <SelectItem value="supertrend">Super Trend</SelectItem>
 
                     {/* Volume Indicators */}
                     <SelectItem value="volume">Volume</SelectItem>
