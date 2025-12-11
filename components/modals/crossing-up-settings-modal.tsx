@@ -759,6 +759,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
                     <SelectItem value="rsi-ma">RSI-MA</SelectItem>
                     <SelectItem value="bollinger">Bollinger Bands</SelectItem>
                     <SelectItem value="macd">MACD</SelectItem>
+                    <SelectItem value="ma">Moving Average (MA)</SelectItem>
                     <SelectItem value="sma">Simple Moving Average (SMA)</SelectItem>
                     <SelectItem value="stochastic">Stochastic</SelectItem>
                     <SelectItem value="atr">Average True Range (ATR)</SelectItem>

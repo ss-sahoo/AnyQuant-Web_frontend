@@ -9,6 +9,22 @@ import { DeleteAccountModal } from "@/components/delete-account-modal"
 import { ArrowRight } from "lucide-react"
 import { getUserProfile } from "@/app/AllApiCalls"
 
+// Helper to ensure image URL is absolute
+const getAbsoluteImageUrl = (url: string | null | undefined): string | null => {
+  if (!url) return null
+  // If already absolute URL, return as is
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    return url
+  }
+  // If relative URL, convert to absolute
+  // For local dev: http://127.0.0.1:8000
+  // For production: https://anyquant.co.uk
+  const baseUrl = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://127.0.0.1:8000'
+    : 'https://anyquant.co.uk'
+  return `${baseUrl}${url.startsWith("/") ? url : `/${url}`}`
+}
+
 export function ProfilePage() {
   const [showEditModal, setShowEditModal] = useState(false)
   const [showPasswordModal, setShowPasswordModal] = useState(false)
@@ -17,11 +33,11 @@ export function ProfilePage() {
     name: "",
     email: "",
     phone: "",
+    profile_image: null as string | null,
     login: "50349898549",
     server: "AnyQuant-Demo",
     connected: "Access Point NG 1",
   })
-
   // Function to fetch user profile data
   const fetchUserProfile = async () => {
     const userId = localStorage.getItem("user_id")
@@ -33,6 +49,7 @@ export function ProfilePage() {
           name: data.username,
           email: data.email,
           phone: data.phoneno || "Not Provided",
+          profile_image: data.profile_image || null,
         }))
       } catch (err) {
         console.error("Failed to load profile", err)
@@ -45,7 +62,7 @@ export function ProfilePage() {
     fetchUserProfile()
   }, [])
 
-  const handleSaveProfile = async (name: string, email: string, phone: string) => {
+  const handleSaveProfile = async (name: string, email: string, phone: string, profileImage?: File | null) => {
     setShowEditModal(false)
     await fetchUserProfile()
   }
@@ -82,6 +99,34 @@ export function ProfilePage() {
 
           <div className="bg-[#1E2132] rounded-lg p-6">
             <div className="space-y-6">
+              {/* Profile Image Display */}
+              <div className="flex justify-center mb-6 relative">
+                {userData.profile_image ? (
+                  <>
+                    <img
+                      src={getAbsoluteImageUrl(userData.profile_image) || userData.profile_image}
+                      alt="Profile"
+                      className="w-32 h-32 rounded-full object-cover border-4 border-[#6BCAE2]"
+                      onError={(e) => {
+                        // Hide image on error and show fallback
+                        e.currentTarget.style.display = 'none'
+                        const fallback = e.currentTarget.nextElementSibling as HTMLElement
+                        if (fallback) {
+                          fallback.style.display = 'flex'
+                        }
+                      }}
+                    />
+                    <div className="w-32 h-32 rounded-full bg-gradient-to-br from-[#6BCAE2] to-[#5AB9D1] hidden items-center justify-center text-black font-semibold text-4xl border-4 border-[#6BCAE2]">
+                      {userData.name.charAt(0).toUpperCase() || "U"}
+                    </div>
+                  </>
+                ) : (
+                  <div className="w-32 h-32 rounded-full bg-gradient-to-br from-[#6BCAE2] to-[#5AB9D1] flex items-center justify-center text-black font-semibold text-4xl border-4 border-[#6BCAE2]">
+                    {userData.name.charAt(0).toUpperCase() || "U"}
+                  </div>
+                )}
+              </div>
+
               <div className="flex justify-between items-center">
                 <span className="text-gray-300">Name</span>
                 <span>{userData.name}</span>

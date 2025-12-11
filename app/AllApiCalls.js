@@ -162,23 +162,60 @@ export const getUserProfile = async (userId) => {
   return data
 }
 
-export const updateUserProfile = async (userId, updatedData) => {
+export const updateUserProfile = async (userId, updatedData, profileImage = null, removeImage = false) => {
+  // profileImage can be File, null, or undefined
+  // removeImage flag indicates user wants to remove the existing image
   const token = localStorage.getItem("auth_token")
 
-  const response = await Fetch(`/api/profile/${userId}/`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(updatedData),
-  })
+  // If profileImage is provided (File object) or removeImage is true, use FormData
+  if (profileImage instanceof File || removeImage) {
+    const formData = new FormData()
+    
+    // Add text fields
+    if (updatedData.username) formData.append("username", updatedData.username)
+    if (updatedData.email) formData.append("email", updatedData.email)
+    if (updatedData.phoneno) formData.append("phoneno", updatedData.phoneno)
+    
+    // If removing image, send empty string or null
+    // If uploading new image, send the file
+    if (removeImage) {
+      // Send empty string to indicate removal (backend should handle this)
+      formData.append("profile_image", "")
+    } else if (profileImage instanceof File) {
+      formData.append("profile_image", profileImage)
+    }
 
-  if (!response.ok) {
-    throw new Error("Failed to update profile")
+    const response = await Fetch(`/api/profile/${userId}/`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        // Don't set Content-Type - browser will set it with boundary for FormData
+      },
+      body: formData,
+    })
+
+    if (!response.ok) {
+      throw new Error("Failed to update profile")
+    }
+
+    return response.json()
+  } else {
+    // No image changes, use JSON as before
+    const response = await Fetch(`/api/profile/${userId}/`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(updatedData),
+    })
+
+    if (!response.ok) {
+      throw new Error("Failed to update profile")
+    }
+
+    return response.json()
   }
-
-  return response.json()
 }
 
 export const sendOtp = async (email) => {

@@ -54,7 +54,7 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
      "SuperTrend",   
     "GENERAL PA",
     "Gradient",
-    // "EMA",
+     "MA",
     // "SMA",
     // "WMA",
     // "VWMA",

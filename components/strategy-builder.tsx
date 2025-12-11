@@ -11,6 +11,7 @@ import { VolumeSettingsModal } from "@/components/modals/volume-settings-modal"
 import { AtrSettingsModal } from "@/components/modals/atr-settings-modal"
 import { MacdSettingsModal } from "@/components/modals/macd-settings-modal"
 import { SuperTrendSettingsModal } from "@/components/modals/supertrend-settings-modal"
+import { MaSettingsModal } from "@/components/modals/ma-settings-modal"
 import { RsiSettingsModal } from "@/components/modals/rsi-settings-modal"
 import { ChannelSettingsModal } from "@/components/modals/channel-settings-modal"
 import { SLTPSettingsModal, type SLTPSettings } from "@/components/modals/sl-tp-settings-modal"
@@ -173,6 +174,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const [showAtrModal, setShowAtrModal] = useState(false)
   const [showMacdModal, setShowMacdModal] = useState(false)
   const [showSuperTrendModal, setShowSuperTrendModal] = useState(false)
+  const [showMaModal, setShowMaModal] = useState(false)
   const [showRsiModal, setShowRsiModal] = useState(false)
   const [showChannelModal, setShowChannelModal] = useState(false)
   const [showSLTPSettings, setShowSLTPSettings] = useState<{ show: boolean; type: "SL" | "TP" }>({
@@ -1742,6 +1744,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             setShowMacdModal(true)
           } else if (component === "SuperTrend" || component.toLowerCase() === "supertrend") {
             setShowSuperTrendModal(true)
+          } else if (component === "MA" || component.toLowerCase() === "ma") {
+            setShowMaModal(true)
           }
         }
       }
@@ -4319,6 +4323,15 @@ if (
               })
               setPendingTimeframe(timeframe)
               setShowSuperTrendModal(true)
+            } else if (indicator === "ma") {
+              // Open MA modal for MA indicator
+              setEditingComponent({
+                statementIndex: activeStatementIndex,
+                conditionIndex,
+                componentType: "inp2",
+              })
+              setPendingTimeframe(timeframe)
+              setShowMaModal(true)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
@@ -4655,6 +4668,15 @@ if (
               })
               setPendingTimeframe(timeframe)
               setShowSuperTrendModal(true)
+            } else if (indicator === "ma") {
+              // Open MA modal for MA indicator
+              setEditingComponent({
+                statementIndex: activeStatementIndex,
+                conditionIndex,
+                componentType: "inp2",
+              })
+              setPendingTimeframe(timeframe)
+              setShowMaModal(true)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
@@ -4897,6 +4919,15 @@ if (
               })
               setPendingTimeframe(timeframe)
               setShowSuperTrendModal(true)
+            } else if (indicator === "ma") {
+              // Open MA modal for MA indicator
+              setEditingComponent({
+                statementIndex: activeStatementIndex,
+                conditionIndex,
+                componentType: "inp2",
+              })
+              setPendingTimeframe(timeframe)
+              setShowMaModal(true)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
@@ -5774,6 +5805,118 @@ if (
           }}
         />
       )}
+      {showMaModal && (
+        <MaSettingsModal
+          onClose={() => {
+            setShowMaModal(false)
+            setEditingComponent(null)
+          }}
+          initialSettings={(() => {
+            if (editingComponent) {
+              const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+              const indicator = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
+
+              if (indicator && "name" in indicator && (indicator.name === "MA" || indicator.name === "SMA" || indicator.name === "EMA" || indicator.name === "HMA") && "input_params" in indicator) {
+                return {
+                  maType: indicator.input_params?.ma_type || indicator.input_params?.maType || "SMA",
+                  maLength: indicator.input_params?.ma_length || indicator.input_params?.maLength || 20,
+                }
+              }
+            } else {
+              const currentStatement = statements[activeStatementIndex]
+              const lastCondition = currentStatement?.strategy[currentStatement.strategy.length - 1]
+              const indicator = lastCondition?.inp1
+
+              if (indicator && "name" in indicator && (indicator.name === "MA" || indicator.name === "SMA" || indicator.name === "EMA" || indicator.name === "HMA") && "input_params" in indicator) {
+                return {
+                  maType: indicator.input_params?.ma_type || indicator.input_params?.maType || "SMA",
+                  maLength: indicator.input_params?.ma_length || indicator.input_params?.maLength || 20,
+                }
+              }
+            }
+            return undefined
+          })()}
+          onSave={(settings) => {
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+
+            if (editingComponent) {
+              const condition = currentStatement.strategy[editingComponent.conditionIndex]
+              const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
+              const timeframe = pendingTimeframe || "3h"
+
+              if (targetIndicator && "name" in targetIndicator && (targetIndicator.name === "MA" || targetIndicator.name === "SMA" || targetIndicator.name === "EMA" || targetIndicator.name === "HMA")) {
+                // Update existing MA indicator
+                targetIndicator.input_params = {
+                  ma_type: settings.maType,
+                  ma_length: settings.maLength,
+                }
+                // Update name based on MA type
+                if (settings.maType === "SMA") {
+                  targetIndicator.name = "SMA"
+                } else if (settings.maType === "EMA") {
+                  targetIndicator.name = "EMA"
+                } else if (settings.maType === "HMA") {
+                  targetIndicator.name = "HMA"
+                } else {
+                  targetIndicator.name = "MA"
+                }
+              } else if (editingComponent.componentType === "inp2") {
+                // Create new MA indicator in inp2
+                const maName = settings.maType === "SMA" ? "SMA" : settings.maType === "EMA" ? "EMA" : settings.maType === "HMA" ? "HMA" : "MA"
+                condition.inp2 = {
+                  type: "CUSTOM_I",
+                  name: maName,
+                  timeframe: timeframe,
+                  input_params: {
+                    ma_type: settings.maType,
+                    ma_length: settings.maLength,
+                  },
+                }
+              } else if (editingComponent.componentType === "inp1") {
+                // Create new MA indicator in inp1
+                const maName = settings.maType === "SMA" ? "SMA" : settings.maType === "EMA" ? "EMA" : settings.maType === "HMA" ? "HMA" : "MA"
+                condition.inp1 = {
+                  type: "CUSTOM_I",
+                  name: maName,
+                  timeframe: timeframe,
+                  input_params: {
+                    ma_type: settings.maType,
+                    ma_length: settings.maLength,
+                  },
+                }
+              }
+            } else {
+              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+              if (lastCondition.inp1 && "name" in lastCondition.inp1 && (lastCondition.inp1.name === "MA" || lastCondition.inp1.name === "SMA" || lastCondition.inp1.name === "EMA" || lastCondition.inp1.name === "HMA")) {
+                lastCondition.inp1.input_params = {
+                  ma_type: settings.maType,
+                  ma_length: settings.maLength,
+                }
+                // Update name based on MA type
+                if (settings.maType === "SMA") {
+                  lastCondition.inp1.name = "SMA"
+                } else if (settings.maType === "EMA") {
+                  lastCondition.inp1.name = "EMA"
+                } else if (settings.maType === "HMA") {
+                  lastCondition.inp1.name = "HMA"
+                } else {
+                  lastCondition.inp1.name = "MA"
+                }
+              }
+            }
+
+            setStatements(newStatements)
+            setShowMaModal(false)
+            setEditingComponent(null)
+            setPendingTimeframe("3h")
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
+          }}
+        />
+      )}
       {showChannelModal && (
         <ChannelSettingsModal
           onClose={() => setShowChannelModal(false)}
@@ -6116,6 +6259,15 @@ if (
               })
               setPendingTimeframe(timeframe)
               setShowSuperTrendModal(true)
+            } else if (indicator === "ma") {
+              // Open MA modal for MA indicator
+              setEditingComponent({
+                statementIndex: showPipsModal.statementIndex,
+                conditionIndex,
+                componentType: "inp2",
+              })
+              setPendingTimeframe(timeframe)
+              setShowMaModal(true)
             } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
               setShowPriceSettingsModal(true)
             }
