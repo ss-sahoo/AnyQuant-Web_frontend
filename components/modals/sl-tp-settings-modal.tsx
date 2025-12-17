@@ -434,7 +434,7 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                         onChange={(e) => setSettings({ ...settings, trailingStep: e.target.value })}
                         className="w-24 bg-gray-100 border border-gray-300 px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
-                      <span className="ml-2">pips</span>
+                      <span className="ml-2">points</span>
                     </div>
                   )}
                 </div>

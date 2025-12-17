@@ -1765,7 +1765,14 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           console.warn("Please select a behavior first before adding a then condition")
         }
       }
-    } else if (behaviours.some((c) => c.label.toLowerCase() === component.toLowerCase())) {
+    } else if (
+      // Important: treat "Accumulator" via the dedicated accumulator handler below,
+      // not as a generic behaviour. Otherwise the accumulator modal won't open
+      // when selected from the search bar.
+      component.toLowerCase() !== "accumulator" &&
+      component.toLowerCase() !== "accumulate" &&
+      behaviours.some((c) => c.label.toLowerCase() === component.toLowerCase())
+    ) {
       // Adding a behavior
       if (currentStatement.strategy.length > 0) {
         const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
