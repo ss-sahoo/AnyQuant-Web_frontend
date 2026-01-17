@@ -135,7 +135,7 @@ export default function StrategyBuilderPage() {
           </div>
 
           <ComponentsSidebar
-            onComponentSelect={(component) => {
+            onComponentSelect={(component, customComponentData) => {
               // Find the statement that has the active input field (focused search input)
               const activeInput = document.activeElement as HTMLInputElement
               let activeIndex = 0
@@ -162,7 +162,14 @@ export default function StrategyBuilderPage() {
               }
               
               const event = new CustomEvent("component-selected", {
-                detail: { component, statementIndex: activeIndex },
+                detail: { component, statementIndex: activeIndex, customComponentData },
+              })
+              document.dispatchEvent(event)
+            }}
+            onEditCustomComponent={(component) => {
+              // Dispatch event to open developer mode with component data for editing
+              const event = new CustomEvent("edit-custom-component", {
+                detail: component,
               })
               document.dispatchEvent(event)
             }}

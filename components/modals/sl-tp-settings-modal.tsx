@@ -38,17 +38,33 @@ export interface SLTPSettings {
   formatType?: "simple" | "advanced" | "trailing" | "indicator" | "partial" | "fixed"
 }
 
+// Convert pips to points (1 pip = 0.1 points for display)
+const pipsToPoints = (text: string): string => {
+  return text.replace(/(\d+)pips/g, (match, num) => {
+    const points = parseInt(num) * 0.1
+    return `${points}points`
+  })
+}
+
+// Convert points back to pips (1 point = 10 pips for backend)
+const pointsToPips = (text: string): string => {
+  return text.replace(/(\d+(?:\.\d+)?)points/g, (match, num) => {
+    const pips = Math.round(parseFloat(num) * 10)
+    return `${pips}pips`
+  })
+}
+
 export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SLTPSettingsModalProps) {
   const [settings, setSettings] = useState<SLTPSettings>({
     type,
     valueType: initialSettings?.valueType || "pips",
     direction: initialSettings?.direction || (type === "SL" ? "-" : "+"),
-    value: initialSettings?.value || (type === "SL" ? "900" : "1500"),
+    value: initialSettings?.value ? pipsToPoints(initialSettings.value) : (type === "SL" ? "90" : "150"),
     useAdvanced: initialSettings?.useAdvanced || false,
     trailingStop: initialSettings?.trailingStop || false,
-    trailingStep: initialSettings?.trailingStep || "0",
+    trailingStep: initialSettings?.trailingStep ? pipsToPoints(initialSettings.trailingStep) : "0",
     inp2: initialSettings?.inp2 || "Entry_Price",
-    partialTpList: initialSettings?.partialTpList || (type === "TP" ? [{ Price: "Entry_Price + 200pips", Close: "50%" }] : undefined),
+    partialTpList: initialSettings?.partialTpList || (type === "TP" ? [{ Price: "Entry_Price + 20points", Close: "50%" }] : undefined),
     indicatorParams: initialSettings?.indicatorParams || {
       name: "nperiod_hl",
       side: "low",
@@ -68,6 +84,8 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
     // Set useAdvanced based on format type
     const updatedSettings = {
       ...settings,
+      value: pointsToPips(settings.value),
+      trailingStep: settings.trailingStep ? pointsToPips(settings.trailingStep) : settings.trailingStep,
       useAdvanced: formatType !== "simple" && formatType !== "fixed",
       trailingStop: formatType === "trailing",
       formatType: formatType,
@@ -82,20 +100,20 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
     if (!settings.partialTpList) {
       setSettings({
         ...settings,
-        partialTpList: [{ Price: "Entry_Price + 200pips", Close: "50%" }],
+        partialTpList: [{ Price: "Entry_Price + 20points", Close: "50%" }],
       })
     } else {
       setSettings({
         ...settings,
         partialTpList: [
           ...settings.partialTpList,
-          { Price: `Entry_Price + ${Number(settings.value) * 0.5}pips`, Close: "25%" },
+          { Price: `Entry_Price + ${Number(settings.value) * 0.5}points`, Close: "25%" },
         ],
       })
     }
   }
 
-  const updatePartialTpLevel = (index: number, field: keyof (typeof settings.partialTpList)[0], value: string) => {
+  const updatePartialTpLevel = (index: number, field: string, value: string) => {
     if (settings.partialTpList) {
       const newList = [...settings.partialTpList]
       newList[index] = { ...newList[index], [field]: value }
@@ -194,22 +212,7 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                   >
                     Percentage
                   </button>
-                  <button
-                    className={`px-3 py-1 rounded-md ${
-                      settings.valueType === "close"
-                        ? "bg-blue-600 text-white"
-                        : "bg-gray-100 text-black hover:bg-gray-200"
-                    }`}
-                    onClick={() =>
-                      setSettings({
-                        ...settings,
-                        valueType: "close",
-                        direction: "*",
-                      })
-                    }
-                  >
-                    Close Price
-                  </button>
+                  
                 </div>
               </div>
 

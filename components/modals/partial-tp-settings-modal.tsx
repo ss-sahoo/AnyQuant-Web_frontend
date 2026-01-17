@@ -20,15 +20,35 @@ interface PartialTPSettingsModalProps {
   initialLevels?: PartialTPLevel[]
 }
 
+// Convert pips to points (1 pip = 0.1 points for display)
+const pipsToPoints = (text: string): string => {
+  return text.replace(/(\d+)pips/g, (match, num) => {
+    const points = parseInt(num) * 0.1
+    return `${points}points`
+  })
+}
+
+// Convert points back to pips (1 point = 10 pips for backend)
+const pointsToPips = (text: string): string => {
+  return text.replace(/(\d+(?:\.\d+)?)points/g, (match, num) => {
+    const pips = Math.round(parseFloat(num) * 10)
+    return `${pips}pips`
+  })
+}
+
 export function PartialTPSettingsModal({ onClose, onSave, initialLevels }: PartialTPSettingsModalProps) {
   const [levels, setLevels] = useState<PartialTPLevel[]>(
     initialLevels && initialLevels.length > 0
-      ? initialLevels
-      : [{ Price: "Entry_Price + 200pips", Close: "50%" }],
+      ? initialLevels.map(level => ({
+          Price: pipsToPoints(level.Price),
+          Close: level.Close,
+          Action: level.Action ? pipsToPoints(level.Action) : undefined,
+        }))
+      : [{ Price: "Entry_Price + 20points", Close: "50%" }],
   )
 
   const addLevel = () => {
-    setLevels((prev) => [...prev, { Price: "Entry_Price + 200pips", Close: "50%" }])
+    setLevels((prev) => [...prev, { Price: "Entry_Price + 20points", Close: "50%" }])
   }
 
   const updateLevel = (index: number, field: keyof PartialTPLevel, value: string) => {
@@ -43,7 +63,12 @@ export function PartialTPSettingsModal({ onClose, onSave, initialLevels }: Parti
   }
 
   const handleSave = () => {
-    onSave({ type: "partial_tp", partialTpList: levels })
+    const levelsWithPips = levels.map(level => ({
+      Price: pointsToPips(level.Price),
+      Close: level.Close,
+      Action: level.Action ? pointsToPips(level.Action) : undefined,
+    }))
+    onSave({ type: "partial_tp", partialTpList: levelsWithPips })
     onClose()
   }
 
@@ -76,7 +101,7 @@ export function PartialTPSettingsModal({ onClose, onSave, initialLevels }: Parti
                     value={level.Price}
                     onChange={(e) => updateLevel(index, "Price", e.target.value)}
                     className="w-full bg-white border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
-                    placeholder="Entry_Price + 200pips"
+                    placeholder="Entry_Price + 20points"
                   />
                 </div>
 

@@ -18,17 +18,36 @@ interface ManageExitSettingsModalProps {
   initialItems?: ManageExitItem[]
 }
 
+// Convert pips to points (1 pip = 0.1 points for display)
+const pipsToPoints = (text: string): string => {
+  return text.replace(/(\d+)pips/g, (match, num) => {
+    const points = parseInt(num) * 0.1
+    return `${points}points`
+  })
+}
+
+// Convert points back to pips (1 point = 10 pips for backend)
+const pointsToPips = (text: string): string => {
+  return text.replace(/(\d+(?:\.\d+)?)points/g, (match, num) => {
+    const pips = Math.round(parseFloat(num) * 10)
+    return `${pips}pips`
+  })
+}
+
 export function ManageExitSettingsModal({ onClose, onSave, initialItems }: ManageExitSettingsModalProps) {
   const [items, setItems] = useState<ManageExitItem[]>(
     initialItems && initialItems.length > 0
-      ? initialItems
+      ? initialItems.map(item => ({
+          Price: pipsToPoints(item.Price),
+          Action: pipsToPoints(item.Action),
+        }))
       : [
-          { Price: "Entry_Price + 200pips", Action: "SL = Entry_Price + 350pips" },
+          { Price: "Entry_Price + 20points", Action: "SL = Entry_Price + 35points" },
         ],
   )
 
   const addItem = () => {
-    setItems((prev) => [...prev, { Price: "Entry_Price + 200pips", Action: "SL = Entry_Price" }])
+    setItems((prev) => [...prev, { Price: "Entry_Price + 20points", Action: "SL = Entry_Price" }])
   }
 
   const updateItem = (index: number, field: keyof ManageExitItem, value: string) => {
@@ -43,7 +62,11 @@ export function ManageExitSettingsModal({ onClose, onSave, initialItems }: Manag
   }
 
   const handleSave = () => {
-    onSave({ items })
+    const itemsWithPips = items.map(item => ({
+      Price: pointsToPips(item.Price),
+      Action: pointsToPips(item.Action),
+    }))
+    onSave({ items: itemsWithPips })
     onClose()
   }
 
@@ -76,7 +99,7 @@ export function ManageExitSettingsModal({ onClose, onSave, initialItems }: Manag
                     value={item.Price}
                     onChange={(e) => updateItem(index, "Price", e.target.value)}
                     className="w-full bg-white border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
-                    placeholder="Entry_Price + 200pips"
+                    placeholder="Entry_Price + 20points"
                   />
                 </div>
 
@@ -87,7 +110,7 @@ export function ManageExitSettingsModal({ onClose, onSave, initialItems }: Manag
                     value={item.Action}
                     onChange={(e) => updateItem(index, "Action", e.target.value)}
                     className="w-full bg-white border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
-                    placeholder="SL = Entry_Price + 350pips"
+                    placeholder="SL = Entry_Price + 35points"
                   />
                 </div>
               </div>

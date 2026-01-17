@@ -30,6 +30,9 @@ interface CrossingUpSettingsModalProps {
     bbSource?: string
     // Volume-MA parameters
     volumeMaLength?: number
+    // Volume Delta parameters
+    lowerTimeframe?: string
+    resetPeriod?: string
     fastPeriod?: number
     slowPeriod?: number
     signalPeriod?: number
@@ -55,6 +58,9 @@ interface CrossingUpSettingsModalProps {
     bbSource?: string
     // Volume-MA parameters
     volumeMaLength?: number
+    // Volume Delta parameters
+    lowerTimeframe?: string
+    resetPeriod?: string
     fastPeriod?: number
     slowPeriod?: number
     signalPeriod?: number
@@ -87,6 +93,10 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
 
   // Volume-MA parameters
   const [volumeMaLength, setVolumeMaLength] = useState(20)
+
+  // Volume Delta parameters
+  const [lowerTimeframe, setLowerTimeframe] = useState("1min")
+  const [resetPeriod, setResetPeriod] = useState("D")
 
   // Load saved Volume settings from localStorage on component mount
   useEffect(() => {
@@ -357,6 +367,8 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
       bbStdDev,
       bbSource,
       volumeMaLength,
+      lowerTimeframe,
+      resetPeriod,
       fastPeriod,
       slowPeriod,
       signalPeriod,
@@ -768,6 +780,10 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
                     {/* Volume Indicators */}
                     <SelectItem value="volume">Volume</SelectItem>
                     <SelectItem value="volume-ma">Volume MA</SelectItem>
+                    <SelectItem value="volume-delta">Volume Delta</SelectItem>
+                    <SelectItem value="cumulative-volume-delta">Cumulative Volume Delta</SelectItem>
+                    <SelectItem value="historical-price-level">Historical Price Level</SelectItem>
+                    <SelectItem value="candle-size">Candle Size</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

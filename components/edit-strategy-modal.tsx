@@ -18,6 +18,11 @@ export function EditStrategyModal({ strategy, onClose, onSave, isEdit = false }:
   const modalRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
 
+  // Update strategy name when prop changes
+  useEffect(() => {
+    setStrategyName(strategy.name)
+  }, [strategy.name])
+
   // Handle click outside modal
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {

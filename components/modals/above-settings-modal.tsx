@@ -662,6 +662,10 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave, onNext }: Abo
                     {/* Volume Indicators */}
                     <SelectItem value="volume">Volume</SelectItem>
                     <SelectItem value="volume-ma">Volume MA</SelectItem>
+                    <SelectItem value="volume-delta">Volume Delta</SelectItem>
+                    <SelectItem value="cumulative-volume-delta">Cumulative Volume Delta</SelectItem>
+                    <SelectItem value="historical-price-level">Historical Price Level</SelectItem>
+                    <SelectItem value="candle-size">Candle Size</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

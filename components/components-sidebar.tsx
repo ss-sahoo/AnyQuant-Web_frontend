@@ -1,39 +1,128 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Search } from "lucide-react"
+import { Search, Loader2, Edit2, Trash2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
+import { listCustomComponents, deleteCustomComponent, getCustomComponent } from "@/app/AllApiCalls"
 
-interface ComponentsSidebarProps {
-  onComponentSelect: (component: string) => void
+interface CustomComponent {
+  id: number
+  name: string
+  type: string
+  status: string
+  language?: string
+  code?: string
+  parameters?: Record<string, any>
 }
 
-export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps) {
+interface ComponentsSidebarProps {
+  onComponentSelect: (component: string, customComponentData?: CustomComponent) => void
+  onEditCustomComponent?: (component: CustomComponent) => void
+}
+
+export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: ComponentsSidebarProps) {
   const [showAllBasic, setShowAllBasic] = useState(false)
   const [showAllIndicators, setShowAllIndicators] = useState(false)
   const [showAllBehaviors, setShowAllBehaviors] = useState(false)
   const [showAllActions, setShowAllActions] = useState(false)
   const [showAllTradeManagement, setShowAllTradeManagement] = useState(false)
+  const [showAllCustomIndicators, setShowAllCustomIndicators] = useState(false)
+  const [deletingId, setDeletingId] = useState<number | null>(null)
 
   const [indicatorSearch, setIndicatorSearch] = useState("")
   const [behaviorSearch, setBehaviorSearch] = useState("")
+  const [customIndicatorSearch, setCustomIndicatorSearch] = useState("")
+
+  // Custom components state
+  const [customComponents, setCustomComponents] = useState<CustomComponent[]>([])
+  const [isLoadingCustom, setIsLoadingCustom] = useState(false)
+  const [customError, setCustomError] = useState<string | null>(null)
+
+  // Function to fetch custom components
+  const fetchCustomComponents = async () => {
+    setIsLoadingCustom(true)
+    setCustomError(null)
+    try {
+      const components = await listCustomComponents()
+      // Only show active components
+      const activeComponents = components.filter((c: CustomComponent) => c.status === "active")
+      setCustomComponents(activeComponents)
+    } catch (error: any) {
+      // Silently fail if custom components endpoint doesn't exist
+      // This is expected if the backend doesn't have this feature yet
+      setCustomComponents([])
+    } finally {
+      setIsLoadingCustom(false)
+    }
+  }
+
+  // Fetch custom components on mount
+  useEffect(() => {
+    fetchCustomComponents()
+  }, [])
+
+  // Listen for refresh event from developer mode
+  useEffect(() => {
+    const handleRefresh = (e: CustomEvent) => {
+      // If components are passed in the event, use them directly
+      if (e.detail) {
+        const activeComponents = e.detail.filter((c: CustomComponent) => c.status === "active")
+        setCustomComponents(activeComponents)
+      } else {
+        // Otherwise fetch fresh
+        fetchCustomComponents()
+      }
+    }
+
+    window.addEventListener('refresh-custom-components', handleRefresh as EventListener)
+    return () => {
+      window.removeEventListener('refresh-custom-components', handleRefresh as EventListener)
+    }
+  }, [])
+
+  // Filter custom indicators based on search
+  const filteredCustomIndicators = customComponents.filter((component) =>
+    component.type === "indicator" && component.name.toLowerCase().includes(customIndicatorSearch.toLowerCase())
+  )
+
+  // Filter custom behaviors
+  const customBehaviors = customComponents.filter((component) => component.type === "behavior")
+  
+  // Filter custom trade management
+  const customTradeManagement = customComponents.filter((component) => component.type === "trade_management")
+
+  // State for showing all custom behaviors and trade management
+  const [showAllCustomBehaviors, setShowAllCustomBehaviors] = useState(false)
+  const [showAllCustomTradeManagement, setShowAllCustomTradeManagement] = useState(false)
+  const [customBehaviorSearch, setCustomBehaviorSearch] = useState("")
+  const [customTradeManagementSearch, setCustomTradeManagementSearch] = useState("")
+
+  // Filtered custom behaviors and trade management
+  const filteredCustomBehaviors = customBehaviors.filter((component) =>
+    component.name.toLowerCase().includes(customBehaviorSearch.toLowerCase())
+  )
+  const filteredCustomTradeManagement = customTradeManagement.filter((component) =>
+    component.name.toLowerCase().includes(customTradeManagementSearch.toLowerCase())
+  )
+
+  // Custom indicators only
+  const customIndicators = customComponents.filter((component) => component.type === "indicator")
 
   // Complete list of basic components
   const allBasicComponents = [
     "If",
-    "Unless",
+   
     // "Then",
     "Timeframe",
-    "Duration",
-    "When",
+  
     "At Candle",
-    "Is not",
+    
     "And",
-    "Or",
-    "Not",
-    "Else",
-    "For Each",
+    // "Or",
+    // "Not",
+    // "Else",
+    // "For Each",
     // "While",
     // "Until",
     // "After",
@@ -55,6 +144,10 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
     "GENERAL PA",
     "Gradient",
      "MA",
+    "Volume Delta",
+    "Cumulative Volume Delta",
+    "Historical Price Level",
+    "Candle Size",
     // "SMA",
     // "WMA",
     // "VWMA",
@@ -129,11 +222,7 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
     "Hedge",
     "Reverse position",
     "Partial close",
-  ]
-
-  // Complete list of trade management options
-  const allTradeManagement = [
-    "Manage",
+     "Manage",
     "Close",
     "Cancel",
     "No Trade",
@@ -150,6 +239,8 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
     "Split position",
     "Merge positions",
   ]
+
+
 
   // Filter indicators based on search
   const filteredIndicators = allIndicators.filter((indicator) =>
@@ -198,9 +289,7 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
         <div className="mb-6 bg-black p-4 rounded-lg">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-medium">Indicators</h3>
-            <Button size="sm" variant="outline" className="h-8 px-3 bg-[#2B2E38] border-0 hover:bg-gray-700">
-              Create
-            </Button>
+           
           </div>
           <div className="relative mb-3">
             <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
@@ -240,6 +329,347 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
             )}
           </div>
         </div>
+
+        {/* Custom Indicators */}
+        <div className="mb-6 bg-black p-4 rounded-lg">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-medium">Custom Indicators</h3>
+          </div>
+          
+          {isLoadingCustom ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+              <span className="ml-2 text-sm text-gray-400">Loading...</span>
+            </div>
+          ) : customError ? (
+            <p className="text-sm text-red-400">{customError}</p>
+          ) : customIndicators.length === 0 ? (
+            <p className="text-sm text-gray-500">No custom indicators yet. Create one in Developer Mode.</p>
+          ) : (
+            <>
+              {customIndicators.length > 3 && (
+                <div className="relative mb-3">
+                  <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
+                  <Input
+                    className="pl-8 bg-[#2B2E38] border-0"
+                    placeholder="Search custom indicators"
+                    value={customIndicatorSearch}
+                    onChange={(e) => setCustomIndicatorSearch(e.target.value)}
+                  />
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                {(customIndicatorSearch !== ""
+                  ? filteredCustomIndicators
+                  : showAllCustomIndicators
+                    ? customIndicators
+                    : customIndicators.slice(0, 4)
+                ).map((component) => (
+                  <div key={component.id} className="flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="bg-[#2B2E38] border-0 hover:bg-gray-700 flex-1"
+                      onClick={async () => {
+                        // Fetch full component details to get parameters
+                        try {
+                          const fullComponent = await getCustomComponent(component.id)
+                          onComponentSelect(fullComponent.name, fullComponent)
+                        } catch (error) {
+                          console.error("Failed to get component details:", error)
+                          // Fallback to basic component data
+                          onComponentSelect(component.name, component)
+                        }
+                      }}
+                    >
+                      {component.name}
+                    </Button>
+                    {onEditCustomComponent && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="p-1 h-8 w-8 hover:bg-gray-700"
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          try {
+                            const fullComponent = await getCustomComponent(component.id)
+                            onEditCustomComponent(fullComponent)
+                          } catch (error) {
+                            console.error("Failed to get component:", error)
+                          }
+                        }}
+                        title="Edit"
+                      >
+                        <Edit2 className="h-3 w-3" />
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="p-1 h-8 w-8 hover:bg-red-900/50 text-red-400"
+                      disabled={deletingId === component.id}
+                      onClick={async (e) => {
+                        e.stopPropagation()
+                        if (confirm(`Delete "${component.name}"?`)) {
+                          setDeletingId(component.id)
+                          try {
+                            await deleteCustomComponent(component.id)
+                            setCustomComponents(prev => prev.filter(c => c.id !== component.id))
+                          } catch (error) {
+                            console.error("Failed to delete component:", error)
+                          } finally {
+                            setDeletingId(null)
+                          }
+                        }
+                      }}
+                      title="Delete"
+                    >
+                      {deletingId === component.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3 w-3" />
+                      )}
+                    </Button>
+                  </div>
+                ))}
+                {customIndicatorSearch === "" && customIndicators.length > 4 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
+                    onClick={() => setShowAllCustomIndicators(!showAllCustomIndicators)}
+                  >
+                    {showAllCustomIndicators ? "Show less" : "Show all"}
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Custom Behaviors */}
+        {/* <div className="mb-6 bg-black p-4 rounded-lg">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-medium">Custom Behaviors</h3>
+          </div>
+          
+          {isLoadingCustom ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+            </div>
+          ) : customBehaviors.length === 0 ? (
+            <p className="text-sm text-gray-500">No custom behaviors yet. Create one in Developer Mode.</p>
+          ) : (
+            <>
+              {customBehaviors.length > 3 && (
+                <div className="relative mb-3">
+                  <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
+                  <Input
+                    className="pl-8 bg-[#2B2E38] border-0"
+                    placeholder="Search custom behaviors"
+                    value={customBehaviorSearch}
+                    onChange={(e) => setCustomBehaviorSearch(e.target.value)}
+                  />
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                {(customBehaviorSearch !== ""
+                  ? filteredCustomBehaviors
+                  : showAllCustomBehaviors
+                    ? customBehaviors
+                    : customBehaviors.slice(0, 4)
+                ).map((component) => (
+                  <div key={component.id} className="flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="bg-[#2B2E38] border-0 hover:bg-gray-700 flex-1"
+                      onClick={async () => {
+                        try {
+                          const fullComponent = await getCustomComponent(component.id)
+                          onComponentSelect(fullComponent.name, fullComponent)
+                        } catch (error) {
+                          console.error("Failed to get component details:", error)
+                          onComponentSelect(component.name, component)
+                        }
+                      }}
+                    >
+                      {component.name}
+                    </Button>
+                    {onEditCustomComponent && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="p-1 h-8 w-8 hover:bg-gray-700"
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          try {
+                            const fullComponent = await getCustomComponent(component.id)
+                            onEditCustomComponent(fullComponent)
+                          } catch (error) {
+                            console.error("Failed to get component:", error)
+                          }
+                        }}
+                        title="Edit"
+                      >
+                        <Edit2 className="h-3 w-3" />
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="p-1 h-8 w-8 hover:bg-red-900/50 text-red-400"
+                      disabled={deletingId === component.id}
+                      onClick={async (e) => {
+                        e.stopPropagation()
+                        if (confirm(`Delete "${component.name}"?`)) {
+                          setDeletingId(component.id)
+                          try {
+                            await deleteCustomComponent(component.id)
+                            setCustomComponents(prev => prev.filter(c => c.id !== component.id))
+                          } catch (error) {
+                            console.error("Failed to delete component:", error)
+                          } finally {
+                            setDeletingId(null)
+                          }
+                        }
+                      }}
+                      title="Delete"
+                    >
+                      {deletingId === component.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3 w-3" />
+                      )}
+                    </Button>
+                  </div>
+                ))}
+                {customBehaviorSearch === "" && customBehaviors.length > 4 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
+                    onClick={() => setShowAllCustomBehaviors(!showAllCustomBehaviors)}
+                  >
+                    {showAllCustomBehaviors ? "Show less" : "Show all"}
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
+        </div> */}
+
+        {/* Custom Trade Management */}
+        {/* <div className="mb-6 bg-black p-4 rounded-lg">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-medium">Custom Trade Management</h3>
+          </div>
+          
+          {isLoadingCustom ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+            </div>
+          ) : customTradeManagement.length === 0 ? (
+            <p className="text-sm text-gray-500">No custom trade management yet. Create one in Developer Mode.</p>
+          ) : (
+            <>
+              {customTradeManagement.length > 3 && (
+                <div className="relative mb-3">
+                  <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
+                  <Input
+                    className="pl-8 bg-[#2B2E38] border-0"
+                    placeholder="Search custom trade management"
+                    value={customTradeManagementSearch}
+                    onChange={(e) => setCustomTradeManagementSearch(e.target.value)}
+                  />
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                {(customTradeManagementSearch !== ""
+                  ? filteredCustomTradeManagement
+                  : showAllCustomTradeManagement
+                    ? customTradeManagement
+                    : customTradeManagement.slice(0, 4)
+                ).map((component) => (
+                  <div key={component.id} className="flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="bg-[#2B2E38] border-0 hover:bg-gray-700 flex-1"
+                      onClick={async () => {
+                        try {
+                          const fullComponent = await getCustomComponent(component.id)
+                          onComponentSelect(fullComponent.name, fullComponent)
+                        } catch (error) {
+                          console.error("Failed to get component details:", error)
+                          onComponentSelect(component.name, component)
+                        }
+                      }}
+                    >
+                      {component.name}
+                    </Button>
+                    {onEditCustomComponent && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="p-1 h-8 w-8 hover:bg-gray-700"
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          try {
+                            const fullComponent = await getCustomComponent(component.id)
+                            onEditCustomComponent(fullComponent)
+                          } catch (error) {
+                            console.error("Failed to get component:", error)
+                          }
+                        }}
+                        title="Edit"
+                      >
+                        <Edit2 className="h-3 w-3" />
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="p-1 h-8 w-8 hover:bg-red-900/50 text-red-400"
+                      disabled={deletingId === component.id}
+                      onClick={async (e) => {
+                        e.stopPropagation()
+                        if (confirm(`Delete "${component.name}"?`)) {
+                          setDeletingId(component.id)
+                          try {
+                            await deleteCustomComponent(component.id)
+                            setCustomComponents(prev => prev.filter(c => c.id !== component.id))
+                          } catch (error) {
+                            console.error("Failed to delete component:", error)
+                          } finally {
+                            setDeletingId(null)
+                          }
+                        }
+                      }}
+                      title="Delete"
+                    >
+                      {deletingId === component.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3 w-3" />
+                      )}
+                    </Button>
+                  </div>
+                ))}
+                {customTradeManagementSearch === "" && customTradeManagement.length > 4 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
+                    onClick={() => setShowAllCustomTradeManagement(!showAllCustomTradeManagement)}
+                  >
+                    {showAllCustomTradeManagement ? "Show less" : "Show all"}
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
+        </div> */}
 
         {/* Behaviours */}
         <div className="mb-6 bg-black p-4 rounded-lg">
@@ -309,31 +739,7 @@ export function ComponentsSidebar({ onComponentSelect }: ComponentsSidebarProps)
           </div>
         </div>
 
-        {/* Trade Management */}
-        <div className="mb-6 bg-black p-4 rounded-lg">
-          <h3 className="font-medium mb-3">Trade Management</h3>
-          <div className="flex flex-wrap gap-2">
-            {(showAllTradeManagement ? allTradeManagement : allTradeManagement.slice(0, 5)).map((option) => (
-              <Button
-                key={option}
-                variant="outline"
-                size="sm"
-                className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-                onClick={() => onComponentSelect(option)}
-              >
-                {option}
-              </Button>
-            ))}
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
-              onClick={() => setShowAllTradeManagement(!showAllTradeManagement)}
-            >
-              {showAllTradeManagement ? "Show less" : "Show all"}
-            </Button>
-          </div>
-        </div>
+        
       </div>
     </div>
   )

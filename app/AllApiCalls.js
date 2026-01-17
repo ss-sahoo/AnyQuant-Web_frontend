@@ -1543,3 +1543,357 @@ export const getShortlistedStrategies = async (params = {}) => {
   return response.json();
 };
 
+
+// ============================================
+// Custom Components API (Developer Mode)
+// ============================================
+
+/**
+ * List all custom components owned by the authenticated user
+ * @returns {Promise} Promise with array of custom components
+ */
+export const listCustomComponents = async () => {
+  const response = await Fetch("/api/custom-components/", {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to list custom components");
+  }
+
+  return response.json();
+};
+
+/**
+ * Create a new custom component
+ * @param {Object} params
+ * @param {string} params.name - Component name
+ * @param {string} params.type - Component type: "indicator" | "behavior" | "trade_management"
+ * @param {string} params.language - Programming language: "python" | "pinescript"
+ * @param {string} params.code - The component code
+ * @param {Object} [params.parameters] - Optional parameters object
+ * @returns {Promise} Promise with created component data
+ */
+export const createCustomComponent = async ({ name, type, language, code, parameters = {} }) => {
+  const response = await Fetch("/api/custom-components/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ name, type, language, code, parameters }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || errorData.detail || "Failed to create custom component");
+  }
+
+  return response.json();
+};
+
+/**
+ * Get details of a specific custom component
+ * @param {number} componentId - The component ID
+ * @returns {Promise} Promise with component details
+ */
+export const getCustomComponent = async (componentId) => {
+  const response = await Fetch(`/api/custom-components/${componentId}/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get custom component");
+  }
+
+  return response.json();
+};
+
+/**
+ * Update an existing custom component
+ * @param {number} componentId - The component ID
+ * @param {Object} data - Updated data (code, name, parameters, etc.)
+ * @returns {Promise} Promise with updated component data
+ */
+export const updateCustomComponent = async (componentId, data) => {
+  const response = await Fetch(`/api/custom-components/${componentId}/`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to update custom component");
+  }
+
+  return response.json();
+};
+
+/**
+ * Delete a custom component
+ * @param {number} componentId - The component ID
+ * @returns {Promise} Promise (204 No Content on success)
+ */
+export const deleteCustomComponent = async (componentId) => {
+  const response = await Fetch(`/api/custom-components/${componentId}/`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok && response.status !== 204) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to delete custom component");
+  }
+
+  return { success: true };
+};
+
+/**
+ * Validate code without saving (optionally updates a component)
+ * @param {Object} params
+ * @param {string} params.code - The code to validate
+ * @param {number} [params.component_id] - Optional component ID to update
+ * @returns {Promise} Promise with validation result
+ */
+export const validateCustomComponentCode = async ({ code, component_id = null }) => {
+  const payload = { code };
+  if (component_id) {
+    payload.component_id = component_id;
+  }
+
+  const response = await Fetch("/api/custom-components/validate/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to validate code");
+  }
+
+  return response.json();
+};
+
+/**
+ * Activate a compiled component for use in backtests
+ * @param {number} componentId - The component ID
+ * @returns {Promise} Promise with activation result
+ */
+export const activateCustomComponent = async (componentId) => {
+  const response = await Fetch(`/api/custom-components/${componentId}/activate/`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to activate component");
+  }
+
+  return response.json();
+};
+
+// ============================================
+// Custom Strategy APIs
+// ============================================
+
+/**
+ * List all custom strategies owned by the authenticated user
+ * @returns {Promise} Promise with array of custom strategies
+ */
+export const listCustomStrategies = async () => {
+  const response = await Fetch("/api/custom-strategies/", {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to list custom strategies");
+  }
+
+  return response.json();
+};
+
+/**
+ * Create a new custom strategy
+ * @param {Object} params
+ * @param {string} params.name - Strategy name
+ * @param {string} params.code - The strategy code
+ * @returns {Promise} Promise with created strategy data
+ */
+export const createCustomStrategy = async ({ name, code }) => {
+  const response = await Fetch("/api/custom-strategies/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ name, code }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || errorData.detail || "Failed to create custom strategy");
+  }
+
+  return response.json();
+};
+
+/**
+ * Get details of a specific custom strategy
+ * @param {number} strategyId - The strategy ID
+ * @returns {Promise} Promise with strategy details
+ */
+export const getCustomStrategy = async (strategyId) => {
+  const response = await Fetch(`/api/custom-strategies/${strategyId}/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get custom strategy");
+  }
+
+  return response.json();
+};
+
+/**
+ * Update an existing custom strategy
+ * @param {number} strategyId - The strategy ID
+ * @param {Object} data - Updated data (code, name, etc.)
+ * @returns {Promise} Promise with updated strategy data
+ */
+export const updateCustomStrategy = async (strategyId, data) => {
+  const response = await Fetch(`/api/custom-strategies/${strategyId}/`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to update custom strategy");
+  }
+
+  return response.json();
+};
+
+/**
+ * Delete a custom strategy
+ * @param {number} strategyId - The strategy ID
+ * @returns {Promise} Promise (204 No Content on success)
+ */
+export const deleteCustomStrategy = async (strategyId) => {
+  const response = await Fetch(`/api/custom-strategies/${strategyId}/`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok && response.status !== 204) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to delete custom strategy");
+  }
+
+  return { success: true };
+};
+
+/**
+ * Validate custom strategy code (syntax, security, contract)
+ * @param {Object} params
+ * @param {string} params.code - The code to validate
+ * @param {number} [params.component_id] - Optional component ID to update
+ * @returns {Promise} Promise with validation result
+ */
+export const validateCustomStrategyCode = async ({ code, component_id = null }) => {
+  const body = { code };
+  if (component_id) {
+    body.component_id = component_id;
+  }
+
+  const response = await Fetch("/api/custom-strategies/validate/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to validate custom strategy code");
+  }
+
+  return response.json();
+};
+
+/**
+ * Run a backtest on a custom strategy
+ * @param {Object} params
+ * @param {number} params.strategy_id - The strategy ID
+ * @param {Object} [params.params] - Strategy parameters to override
+ * @param {number} [params.initial_equity] - Initial equity for backtest
+ * @param {string} [params.symbol] - Trading symbol
+ * @returns {Promise} Promise with backtest results
+ */
+export const runCustomStrategyBacktest = async ({ strategy_id, params = {}, initial_equity = 10000, symbol = "XAUUSD" }) => {
+  const response = await Fetch("/api/custom-strategies/backtest/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ strategy_id, params, initial_equity, symbol }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to run custom strategy backtest");
+  }
+
+  return response.json();
+};
+
+/**
+ * Get a starter template for writing custom strategies
+ * @returns {Promise} Promise with template data
+ */
+export const getCustomStrategyTemplate = async () => {
+  const response = await Fetch("/api/custom-strategies/template/", {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get strategy template");
+  }
+
+  return response.json();
+};

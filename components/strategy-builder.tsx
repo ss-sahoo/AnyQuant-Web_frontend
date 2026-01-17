@@ -3,7 +3,7 @@
 import type React from "react"
 
 import { useState, useRef, useEffect } from "react"
-import { Edit, MoreVertical, Plus, ChevronDown, X } from 'lucide-react'
+import { Edit, MoreVertical, Plus, ChevronDown, X, Code } from 'lucide-react'
 import { StochasticSettingsModal } from "@/components/modals/stochastic-settings-modal"
 import { CrossingUpSettingsModal } from "@/components/modals/crossing-up-settings-modal"
 import { BollingerBandsSettingsModal } from "@/components/modals/bollinger-bands-settings-modal"
@@ -20,7 +20,7 @@ import { AtCandleModal } from "@/components/modals/at-candle-modal"
 import { DerivativeSettingsModal } from "@/components/modals/derivative-settings-modal"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { createStatement, editStrategy } from "@/app/AllApiCalls"
+import { createStatement, editStrategy, createCustomComponent, validateCustomComponentCode, activateCustomComponent, listCustomComponents, createCustomStrategy, validateCustomStrategyCode, getCustomStrategyTemplate, updateCustomStrategy, listCustomStrategies, deleteCustomStrategy, getCustomStrategy } from "@/app/AllApiCalls"
 import type { JSX } from "react/jsx-runtime"
 import { PipsSettingsModal } from "@/components/modals/pips-settings-modal"
 import { SaveStrategyModal } from "@/components/modals/save-strategy-modal"
@@ -33,6 +33,13 @@ import { AboveSettingsModal } from "./modals/above-settings-modal"
 import { MovingOperatorSettingsModal } from "@/components/modals/moving-operator-settings-modal"
 import { PartialTPSettingsModal, type PartialTPSettings } from "@/components/modals/partial-tp-settings-modal"
 import { ManageExitSettingsModal, type ManageExitSettings } from "@/components/modals/manage-exit-settings-modal"
+import { VolumeDeltaSettingsModal } from "@/components/modals/volume-delta-settings-modal"
+import { HistoricalPriceLevelSettingsModal } from "@/components/modals/historical-price-level-settings-modal"
+import { CandleSizeSettingsModal } from "@/components/modals/candle-size-settings-modal"
+import { DeveloperModePage } from "@/components/developer-mode-page"
+import { CustomIndicatorSettingsModal } from "@/components/modals/custom-indicator-settings-modal"
+import { EditStrategyModal } from "@/components/edit-strategy-modal"
+import type { Algorithm } from "@/lib/types"
 
 interface StrategyBuilderProps {
   initialName?: string
@@ -183,7 +190,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   })
   const [showPartialTPModal, setShowPartialTPModal] = useState(false)
   const [showManageExitModal, setShowManageExitModal] = useState(false)
+  const [showVolumeDeltaModal, setShowVolumeDeltaModal] = useState(false)
+  const [showHistoricalPriceLevelModal, setShowHistoricalPriceLevelModal] = useState(false)
+  const [showCandleSizeModal, setShowCandleSizeModal] = useState(false)
   const [showDerivativeModal, setShowDerivativeModal] = useState(false)
+  const [showDeveloperModeModal, setShowDeveloperModeModal] = useState(false)
 
   const [showSaveStrategyModal, setShowSaveStrategyModal] = useState(false)
   const [strategyName, setStrategyName] = useState(initialName || "")
@@ -397,6 +408,96 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     }
   }, [strategyData, strategyId])
 
+  // State for custom indicators - stores custom component data by name for lookup
+  const [customIndicatorRegistry, setCustomIndicatorRegistry] = useState<Record<string, any>>({})
+
+  // Listen for component selection events from the sidebar
+  useEffect(() => {
+    const handleComponentSelected = (e: CustomEvent) => {
+      const { component, statementIndex, customComponentData } = e.detail
+      
+      // Set the active statement index first
+      setActiveStatementIndex(statementIndex)
+      
+      // If this is a custom indicator (has customComponentData), handle it directly
+      if (customComponentData) {
+        // Store in registry for future reference
+        setCustomIndicatorRegistry(prev => ({
+          ...prev,
+          [component]: customComponentData
+        }))
+        
+        // Directly add the custom indicator to the strategy
+        const newStatements = [...statements]
+        const currentStatement = newStatements[statementIndex]
+        
+        if (currentStatement && currentStatement.strategy.length > 0) {
+          const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+          const timeframe = lastCondition.timeframe || selectedTimeframe || "3h"
+          
+          // Create the custom indicator input
+          const customIndicatorInput = {
+            type: "CUSTOM_I",
+            name: customComponentData.name,
+            timeframe: timeframe,
+            input_params: customComponentData.parameters || {},
+          }
+          
+          // Check if we already have inp1 and an operator - if so, we're adding to inp2
+          if (lastCondition.inp1 && lastCondition.operator_name) {
+            lastCondition.inp2 = customIndicatorInput
+          } else {
+            // We're adding to inp1
+            lastCondition.inp1 = customIndicatorInput
+          }
+          
+          // Move timeframe to inp1/inp2 and remove from condition
+          delete lastCondition.timeframe
+          
+          setStatements(newStatements)
+        }
+        
+        // Focus the search input after adding
+        setTimeout(() => {
+          searchInputRefs.current[statementIndex]?.focus()
+        }, 100)
+      } else {
+        // For regular components, call handleAddComponent
+        handleAddComponent(statementIndex, component)
+        
+        // Focus the search input after adding
+        setTimeout(() => {
+          searchInputRefs.current[statementIndex]?.focus()
+        }, 100)
+      }
+    }
+
+    document.addEventListener("component-selected", handleComponentSelected as EventListener)
+
+    return () => {
+      document.removeEventListener("component-selected", handleComponentSelected as EventListener)
+    }
+  }, [statements, selectedTimeframe]) // Re-add event listener when statements or timeframe change
+
+  // State for editing custom component in developer mode
+  const [editingCustomComponent, setEditingCustomComponent] = useState<any>(null)
+
+  // Listen for edit-custom-component events from the sidebar
+  useEffect(() => {
+    const handleEditCustomComponent = (e: CustomEvent) => {
+      const component = e.detail
+      setEditingCustomComponent(component)
+      setCurrentComponentId(component.id)
+      setShowDeveloperModeModal(true)
+    }
+
+    document.addEventListener("edit-custom-component", handleEditCustomComponent as EventListener)
+
+    return () => {
+      document.removeEventListener("edit-custom-component", handleEditCustomComponent as EventListener)
+    }
+  }, [])
+
   // Define allowed price options as in PriceSettingsModal
   const allowedPriceOptions = [
     { id: "open", label: "Price Open" },
@@ -428,7 +529,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       return
     }
 
-    // Combine all component types for searching
+    // Combine all component types for searching, including custom indicators
+    const customIndicatorNames = Object.keys(customIndicatorRegistry)
     const allComponents = [
       ...basicComponents.map((c) => c.label),
       ...extraBasicComponents.map((c) => c.label),
@@ -437,6 +539,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       ...behaviours.map((c) => c.label),
       ...actions.map((c) => c.label),
       ...tradeManagement.map((c) => c.label),
+      ...customIndicatorNames, // Add custom indicators to search
     ]
 
     // Filter components based on search term with parent-child relationships
@@ -649,6 +752,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const indicators = [
     { id: "rsi", label: "RSI" },
     { id: "volume", label: "Volume" },
+    { id: "volume-delta", label: "Volume Delta" },
+    { id: "cumulative-volume-delta", label: "Cumulative Volume Delta" },
+    { id: "historical-price-level", label: "Historical Price Level" },
+    { id: "candle-size", label: "Candle Size" },
     { id: "high", label: "Price High" },
     { id: "low", label: "Price Low" },
     { id: "open", label: "Price Open" },
@@ -669,6 +776,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     { id: "ma", label: "MA" },
     { id: "volume-ma", label: "Volume_MA" },
     { id: "rsi-ma", label: "RSI_MA" },
+    { id: "volume-delta", label: "Volume Delta" },
+    { id: "cumulative-volume-delta", label: "Cumulative Volume Delta" },
+    { id: "historical-price-level", label: "Historical Price Level" },
+    { id: "candle-size", label: "Candle Size" },
     { id: "general-pa", label: "GENERAL PA" },
     { id: "gradient", label: "Gradient" },
     { id: "derivative", label: "Derivative" },
@@ -858,6 +969,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             setShowSuperTrendModal(true)
           } else if (condition.inp1.name === "Volume_MA") {
             setShowVolumeModal(true)
+          } else if (condition.inp1.name === "VolumeDelta" || condition.inp1.name === "CumulativeVolumeDelta") {
+            setShowVolumeDeltaModal(true)
+          } else if (condition.inp1.name === "HistoricalPriceLevel") {
+            setShowHistoricalPriceLevelModal(true)
+          } else if (condition.inp1.name === "CandleSize") {
+            setShowCandleSizeModal(true)
           } else if (condition.inp1.name === "ATR") {
             setActiveStatementIndex(statementIndex)
             setActiveConditionIndex(conditionIndex)
@@ -890,6 +1007,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             setShowSuperTrendModal(true)
           } else if (condition.inp2.name === "Volume_MA") {
             setShowVolumeModal(true)
+          } else if (condition.inp2.name === "VolumeDelta" || condition.inp2.name === "CumulativeVolumeDelta") {
+            setShowVolumeDeltaModal(true)
+          } else if (condition.inp2.name === "HistoricalPriceLevel") {
+            setShowHistoricalPriceLevelModal(true)
+          } else if (condition.inp2.name === "CandleSize") {
+            setShowCandleSizeModal(true)
           } else if (condition.inp2.name === "ATR") {
             setActiveStatementIndex(statementIndex)
             setActiveConditionIndex(conditionIndex)
@@ -1353,17 +1476,52 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       }
     } else if (
       indicators.some((c) => c.label.toLowerCase() === component.toLowerCase()) ||
-      extraIndicators.some((c) => c.label.toLowerCase() === component.toLowerCase())
+      extraIndicators.some((c) => c.label.toLowerCase() === component.toLowerCase()) ||
+      customIndicatorRegistry[component] // Check if it's a custom indicator
     ) {
-      // Adding an indicator
+      // Adding an indicator (including custom indicators)
       if (currentStatement.strategy.length > 0) {
         const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
+        // Check if this is a custom indicator
+        const customIndicatorData = customIndicatorRegistry[component]
+        
         // Special handling for "price" component - it should go to inp1 if no inp1 exists
         if (component.toLowerCase() === "price") {
           // Show the Price Settings modal - handlePriceSelection will determine inp1 vs inp2
           setShowPriceSettingsModal(true)
           setActiveStatementIndex(statementIndex)
+          return
+        }
+        
+        // Handle custom indicators - they follow the same flow as normal indicators
+        if (customIndicatorData) {
+          const timeframe = lastCondition.timeframe || selectedTimeframe
+          
+          // Create the custom indicator input
+          const customIndicatorInput = {
+            type: "CUSTOM_I",
+            name: customIndicatorData.name,
+            timeframe: timeframe,
+            input_params: customIndicatorData.parameters || {},
+          }
+          
+          // Check if we already have inp1 and an operator - if so, we're adding to inp2
+          if (lastCondition.inp1 && lastCondition.operator_name) {
+            lastCondition.inp2 = customIndicatorInput
+          } else {
+            // We're adding to inp1
+            lastCondition.inp1 = customIndicatorInput
+          }
+          
+          // Move timeframe to inp1/inp2 and remove from condition
+          delete lastCondition.timeframe
+          
+          setStatements(newStatements)
+          setActiveStatementIndex(statementIndex)
+          setSearchTerm("")
+          setSearchResults([])
+          searchInputRefs.current[statementIndex]?.focus()
           return
         }
         
@@ -1396,6 +1554,45 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             }
           } else if (component.toLowerCase() === "volume") {
             lastCondition.inp2 = createConstantInput("volume", timeframe)
+          } else if (component.toLowerCase() === "volume delta" || component.toLowerCase() === "volume-delta") {
+            lastCondition.inp2 = {
+              type: "CUSTOM_I",
+              name: "VolumeDelta",
+              timeframe: timeframe,
+              input_params: {
+                lower_timeframe: "1min",
+              },
+            }
+          } else if (component.toLowerCase() === "cumulative volume delta" || component.toLowerCase() === "cumulative-volume-delta") {
+            lastCondition.inp2 = {
+              type: "CUSTOM_I",
+              name: "CumulativeVolumeDelta",
+              timeframe: timeframe,
+              input_params: {
+                lower_timeframe: "1min",
+                reset_period: "D",
+              },
+            }
+          } else if (component.toLowerCase() === "historical price level" || component.toLowerCase() === "historical-price-level") {
+            lastCondition.inp2 = {
+              type: "CUSTOM_I",
+              name: "HistoricalPriceLevel",
+              timeframe: timeframe,
+              input_params: {
+                period: "W",
+                level: "High",
+              },
+            }
+          } else if (component.toLowerCase() === "candle size" || component.toLowerCase() === "candle-size") {
+            lastCondition.inp2 = {
+              type: "CUSTOM_I",
+              name: "CandleSize",
+              timeframe: timeframe,
+              input_params: {
+                asset_type: "gold",
+                output: "pips",
+              },
+            }
           } else if (component.toLowerCase() === "stochastic" || component.toLowerCase() === "stochastic-oscillator") {
             lastCondition.inp2 = {
               type: "CUSTOM_I",
@@ -1535,6 +1732,45 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             }
           } else if (component.toLowerCase() === "volume") {
             lastCondition.inp1 = createConstantInput("volume", timeframe)
+          } else if (component.toLowerCase() === "volume delta" || component.toLowerCase() === "volume-delta") {
+            lastCondition.inp1 = {
+              type: "CUSTOM_I",
+              name: "VolumeDelta",
+              timeframe: timeframe,
+              input_params: {
+                lower_timeframe: "1min",
+              },
+            }
+          } else if (component.toLowerCase() === "cumulative volume delta" || component.toLowerCase() === "cumulative-volume-delta") {
+            lastCondition.inp1 = {
+              type: "CUSTOM_I",
+              name: "CumulativeVolumeDelta",
+              timeframe: timeframe,
+              input_params: {
+                lower_timeframe: "1min",
+                reset_period: "D",
+              },
+            }
+          } else if (component.toLowerCase() === "historical price level" || component.toLowerCase() === "historical-price-level") {
+            lastCondition.inp1 = {
+              type: "CUSTOM_I",
+              name: "HistoricalPriceLevel",
+              timeframe: timeframe,
+              input_params: {
+                period: "W",
+                level: "High",
+              },
+            }
+          } else if (component.toLowerCase() === "candle size" || component.toLowerCase() === "candle-size") {
+            lastCondition.inp1 = {
+              type: "CUSTOM_I",
+              name: "CandleSize",
+              timeframe: timeframe,
+              input_params: {
+                asset_type: "gold",
+                output: "pips",
+              },
+            }
           } else if (component.toLowerCase() === "stochastic" || component.toLowerCase() === "stochastic-oscillator") {
             lastCondition.inp1 = {
               type: "CUSTOM_I",
@@ -1735,6 +1971,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             setShowBollingerModal(true)
           } else if (component.toLowerCase() === "volume") {
             setShowVolumeModal(true)
+          } else if (component.toLowerCase() === "volume delta" || component.toLowerCase() === "volume-delta" || 
+                     component.toLowerCase() === "cumulative volume delta" || component.toLowerCase() === "cumulative-volume-delta") {
+            setShowVolumeDeltaModal(true)
+          } else if (component.toLowerCase() === "historical price level" || component.toLowerCase() === "historical-price-level") {
+            setShowHistoricalPriceLevelModal(true)
+          } else if (component.toLowerCase() === "candle size" || component.toLowerCase() === "candle-size") {
+            setShowCandleSizeModal(true)
           } else if (component === "ATR" || component.toLowerCase() === "atr") {
             const conditionIndex = currentStatement.strategy.length - 1
             const targetInput = lastCondition.operator_name && lastCondition.inp2 ? "inp2" : "inp1"
@@ -2024,6 +2267,41 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
             },
           }
+        } else if (inp1.name === "VolumeDelta") {
+          return {
+            title: "Volume Delta",
+            details: {
+              lower_timeframe: inp1.input_params?.lower_timeframe || "1min",
+              ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
+            },
+          }
+        } else if (inp1.name === "CumulativeVolumeDelta") {
+          return {
+            title: "Cumulative Volume Delta",
+            details: {
+              lower_timeframe: inp1.input_params?.lower_timeframe || "1min",
+              reset_period: inp1.input_params?.reset_period || "D",
+              ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
+            },
+          }
+        } else if (inp1.name === "HistoricalPriceLevel") {
+          return {
+            title: "Historical Price Level",
+            details: {
+              period: inp1.input_params?.period || "W",
+              level: inp1.input_params?.level || "High",
+              ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
+            },
+          }
+        } else if (inp1.name === "CandleSize") {
+          return {
+            title: "Candle Size",
+            details: {
+              asset_type: inp1.input_params?.asset_type || "gold",
+              output: inp1.input_params?.output || "pips",
+              ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
+            },
+          }
         } else if (inp1.name === "GENERAL_PA") {
           return {
             title: "General PA",
@@ -2089,6 +2367,41 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           title: "Volume MA",
           details: {
             ma_length: inp2.input_params?.ma_length || 20,
+            ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
+          },
+        }
+      } else if ("name" in inp2 && inp2.name === "VolumeDelta") {
+        return {
+          title: "Volume Delta",
+          details: {
+            lower_timeframe: inp2.input_params?.lower_timeframe || "1min",
+            ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
+          },
+        }
+      } else if ("name" in inp2 && inp2.name === "CumulativeVolumeDelta") {
+        return {
+          title: "Cumulative Volume Delta",
+          details: {
+            lower_timeframe: inp2.input_params?.lower_timeframe || "1min",
+            reset_period: inp2.input_params?.reset_period || "D",
+            ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
+          },
+        }
+      } else if ("name" in inp2 && inp2.name === "HistoricalPriceLevel") {
+        return {
+          title: "Historical Price Level",
+          details: {
+            period: inp2.input_params?.period || "W",
+            level: inp2.input_params?.level || "High",
+            ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
+          },
+        }
+      } else if ("name" in inp2 && inp2.name === "CandleSize") {
+        return {
+          title: "Candle Size",
+          details: {
+            asset_type: inp2.input_params?.asset_type || "gold",
+            output: inp2.input_params?.output || "pips",
             ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
           },
         }
@@ -2437,6 +2750,408 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     setShowSaveStrategyModal(true)
   }
 
+  // Interface types for Developer Mode
+  interface CompileData {
+    code: string
+    codeType: "component" | "strategy"
+    language: string
+    componentName?: string
+    strategyName?: string
+    componentType?: "indicator" | "behavior" | "trade_management"
+    parameters?: { name: string; defaultValue: string; type: "number" | "string" | "boolean" }[]
+  }
+
+  interface CompileError {
+    line?: number
+    column?: number
+    message: string
+    type: "error" | "warning"
+  }
+
+  interface CompileResult {
+    success: boolean
+    message: string
+    errors?: CompileError[]
+    warnings?: string[]
+    strategyId?: number
+  }
+
+  // State to track the current component being edited
+  const [currentComponentId, setCurrentComponentId] = useState<number | null>(null)
+  
+  // State to track the current strategy being edited
+  const [currentStrategyId, setCurrentStrategyId] = useState<number | null>(null)
+
+  // Helper function to handle Complete Strategy compilation
+  const handleStrategyCompile = async (data: CompileData): Promise<CompileResult> => {
+    try {
+      // Create or update the strategy
+      let strategyId = currentStrategyId
+      
+      if (!strategyId) {
+        // Create a new strategy - use provided name or generate one
+        const strategyName = data.strategyName || `custom_strategy_${Date.now()}`
+        const createResult = await createCustomStrategy({
+          name: strategyName,
+          code: data.code,
+        })
+        strategyId = createResult.id
+        setCurrentStrategyId(strategyId)
+        console.log("Created custom strategy:", createResult)
+      }
+
+      // Validate the strategy code
+      const validationResult = await validateCustomStrategyCode({
+        code: data.code,
+        component_id: strategyId,
+      })
+
+      console.log("Strategy validation result:", validationResult)
+
+      if (!validationResult.is_valid) {
+        const errors: CompileError[] = []
+        
+        // Parse syntax errors
+        if (validationResult.syntax_errors?.length > 0) {
+          validationResult.syntax_errors.forEach((err: string) => {
+            const lineMatch = err.match(/(?:at\s+)?line\s+(\d+)/i)
+            errors.push({
+              line: lineMatch ? parseInt(lineMatch[1]) : undefined,
+              message: err,
+              type: "error",
+            })
+          })
+        }
+        
+        // Parse security errors
+        if (validationResult.security_errors?.length > 0) {
+          validationResult.security_errors.forEach((err: string) => {
+            const lineMatch = err.match(/\(?line\s+(\d+)\)?/i)
+            errors.push({
+              line: lineMatch ? parseInt(lineMatch[1]) : undefined,
+              message: err,
+              type: "error",
+            })
+          })
+        }
+        
+        // Parse contract errors
+        if (validationResult.contract_errors?.length > 0) {
+          validationResult.contract_errors.forEach((err: string) => {
+            errors.push({
+              message: err,
+              type: "error",
+            })
+          })
+        }
+
+        return {
+          success: false,
+          message: "Strategy compilation failed - see errors below",
+          errors: errors.length > 0 ? errors : [{ message: "Strategy validation failed", type: "error" }],
+        }
+      }
+
+      // Strategy compiled successfully
+      return {
+        success: true,
+        message: `Strategy compiled successfully! You can now run backtests on this strategy.`,
+        strategyId: strategyId,
+      }
+    } catch (error: any) {
+      console.error("Strategy compile error:", error)
+      return {
+        success: false,
+        message: "Strategy compilation failed",
+        errors: [{ message: error.message || String(error), type: "error" }],
+      }
+    }
+  }
+
+  // Handler for Developer Mode code compilation
+  const handleDeveloperModeCompile = async (data: CompileData): Promise<CompileResult> => {
+    try {
+      // Basic validation checks first
+      if (!data.code.trim()) {
+        return {
+          success: false,
+          message: "No code provided",
+          errors: [{ message: "Please enter some code to compile", type: "error" }],
+        }
+      }
+
+      // Handle Complete Strategy compilation separately
+      if (data.codeType === "strategy") {
+        return await handleStrategyCompile(data)
+      }
+
+      // Handle Component compilation
+      if (!data.componentName?.trim()) {
+        return {
+          success: false,
+          message: "Component name required",
+          errors: [{ message: "Please enter a component name", type: "error" }],
+        }
+      }
+
+      // Convert parameters to simple format: {"name": value}
+      const parametersObj: Record<string, any> = {}
+      if (data.parameters) {
+        data.parameters.forEach((param) => {
+          if (param.name) {
+            parametersObj[param.name] =
+              param.type === "number"
+                ? Number(param.defaultValue) || 0
+                : param.type === "boolean"
+                  ? param.defaultValue === "true"
+                  : param.defaultValue
+          }
+        })
+      }
+
+      // If we have a component ID, validate and update the existing component
+      if (currentComponentId) {
+        // Validate code and update the component
+        const validationResult = await validateCustomComponentCode({
+          code: data.code,
+          component_id: currentComponentId,
+        })
+
+        console.log("Validation result:", validationResult)
+
+        if (!validationResult.is_valid) {
+          const errors: CompileError[] = []
+          
+          // Parse syntax errors - match formats like "Syntax error at line 3:" or "line 3"
+          if (validationResult.syntax_errors?.length > 0) {
+            validationResult.syntax_errors.forEach((err: string) => {
+              const lineMatch = err.match(/(?:at\s+)?line\s+(\d+)/i)
+              errors.push({
+                line: lineMatch ? parseInt(lineMatch[1]) : undefined,
+                message: err,
+                type: "error",
+              })
+            })
+          }
+          
+          // Parse security errors - match formats like "(line 3)" or "line 3"
+          if (validationResult.security_errors?.length > 0) {
+            validationResult.security_errors.forEach((err: string) => {
+              const lineMatch = err.match(/\(?line\s+(\d+)\)?/i)
+              errors.push({
+                line: lineMatch ? parseInt(lineMatch[1]) : undefined,
+                message: err,
+                type: "error",
+              })
+            })
+          }
+          
+          // Parse contract errors
+          if (validationResult.contract_errors?.length > 0) {
+            validationResult.contract_errors.forEach((err: string) => {
+              errors.push({
+                message: err,
+                type: "error",
+              })
+            })
+          }
+
+          return {
+            success: false,
+            message: "Compilation failed - see errors below",
+            errors: errors.length > 0 ? errors : [{ message: "Code validation failed", type: "error" }],
+          }
+        }
+
+        // If validation passed and component was updated, try to activate it
+        if (validationResult.component_status === "compiled") {
+          try {
+            await activateCustomComponent(currentComponentId)
+            return {
+              success: true,
+              message: `Compilation successful! Your custom component '${data.componentName}' is now active and available in the strategy builder.`,
+            }
+          } catch (activateError) {
+            return {
+              success: true,
+              message: `Code compiled successfully! Component '${data.componentName}' is ready but needs manual activation.`,
+              warnings: ["Component compiled but activation failed. You can activate it later."],
+            }
+          }
+        }
+
+        return {
+          success: true,
+          message: `Code validated successfully for '${data.componentName}'.`,
+        }
+      } else {
+        // Create a new component
+        console.log("Creating custom component with parameters:", parametersObj)
+        const createResult = await createCustomComponent({
+          name: data.componentName || "Custom Component",
+          type: data.componentType || "indicator",
+          language: data.language,
+          code: data.code,
+          parameters: parametersObj,
+        })
+
+        // Store the component ID for future updates
+        setCurrentComponentId(createResult.id)
+
+        // Now validate the code
+        const validationResult = await validateCustomComponentCode({
+          code: data.code,
+          component_id: createResult.id,
+        })
+
+        console.log("Validation result for new component:", validationResult)
+
+        if (!validationResult.is_valid) {
+          const errors: CompileError[] = []
+          
+          // Parse syntax errors - match formats like "Syntax error at line 3:" or "line 3"
+          if (validationResult.syntax_errors?.length > 0) {
+            validationResult.syntax_errors.forEach((err: string) => {
+              const lineMatch = err.match(/(?:at\s+)?line\s+(\d+)/i)
+              errors.push({
+                line: lineMatch ? parseInt(lineMatch[1]) : undefined,
+                message: err,
+                type: "error",
+              })
+            })
+          }
+          
+          // Parse security errors - match formats like "(line 3)" or "line 3"
+          if (validationResult.security_errors?.length > 0) {
+            validationResult.security_errors.forEach((err: string) => {
+              const lineMatch = err.match(/\(?line\s+(\d+)\)?/i)
+              errors.push({
+                line: lineMatch ? parseInt(lineMatch[1]) : undefined,
+                message: err,
+                type: "error",
+              })
+            })
+          }
+          
+          // Parse contract errors
+          if (validationResult.contract_errors?.length > 0) {
+            validationResult.contract_errors.forEach((err: string) => {
+              errors.push({
+                message: err,
+                type: "error",
+              })
+            })
+          }
+
+          return {
+            success: false,
+            message: "Compilation failed - see errors below",
+            errors: errors.length > 0 ? errors : [{ message: "Code validation failed", type: "error" }],
+          }
+        }
+
+        // If validation passed, activate the component
+        if (validationResult.component_status === "compiled") {
+          try {
+            await activateCustomComponent(createResult.id)
+            return {
+              success: true,
+              message: `Compilation successful! Your custom component '${data.componentName}' is now active and available in the strategy builder.`,
+            }
+          } catch (activateError) {
+            return {
+              success: true,
+              message: `Component '${data.componentName}' created and compiled successfully!`,
+              warnings: ["Component is compiled but needs manual activation to use in strategies."],
+            }
+          }
+        }
+
+        return {
+          success: true,
+          message: `Component '${data.componentName}' created successfully!`,
+        }
+      }
+    } catch (error: any) {
+      console.error("Developer Mode compile error:", error)
+      return {
+        success: false,
+        message: "Compilation failed",
+        errors: [{ message: error.message || String(error), type: "error" }],
+      }
+    }
+  }
+
+  // Handler for Developer Mode save (draft)
+  const handleDeveloperModeSave = async (data: CompileData & { isDraft: boolean }): Promise<void> => {
+    try {
+      // Handle Complete Strategy save separately
+      if (data.codeType === "strategy") {
+        if (currentStrategyId) {
+          // Update existing strategy
+          await updateCustomStrategy(currentStrategyId, {
+            code: data.code,
+          })
+          console.log("Updated custom strategy:", currentStrategyId)
+        } else {
+          // Create a new strategy as draft - use provided name or generate one
+          const strategyName = data.strategyName || `custom_strategy_${Date.now()}`
+          const createResult = await createCustomStrategy({
+            name: strategyName,
+            code: data.code,
+          })
+          setCurrentStrategyId(createResult.id)
+          console.log("Created custom strategy draft:", createResult)
+        }
+        console.log("Saved developer mode strategy:", data)
+        return
+      }
+
+      // Handle Component save
+      // Convert parameters to simple format: {"name": value}
+      const parametersObj: Record<string, any> = {}
+      if (data.parameters) {
+        data.parameters.forEach((param) => {
+          if (param.name) {
+            parametersObj[param.name] =
+              param.type === "number"
+                ? Number(param.defaultValue) || 0
+                : param.type === "boolean"
+                  ? param.defaultValue === "true"
+                  : param.defaultValue
+          }
+        })
+      }
+
+      if (currentComponentId) {
+        // Update existing component (just save, don't validate)
+        // Note: The API resets status to "draft" when updating code
+        await validateCustomComponentCode({
+          code: data.code,
+          component_id: currentComponentId,
+        })
+      } else {
+        // Create a new component as draft
+        console.log("Saving custom component with parameters:", parametersObj)
+        const createResult = await createCustomComponent({
+          name: data.componentName || "Custom Component",
+          type: data.componentType || "indicator",
+          language: data.language,
+          code: data.code,
+          parameters: parametersObj,
+        })
+        
+        // Store the component ID for future updates
+        setCurrentComponentId(createResult.id)
+      }
+      
+      console.log("Saved developer mode code:", data)
+    } catch (error: any) {
+      console.error("Developer Mode save error:", error)
+      throw new Error(error.message || "Failed to save")
+    }
+  }
+
   const handleProceedToTesting = async (name: string) => {
     try {
       setIsProceeding(true)
@@ -2577,6 +3292,52 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     } catch (error) {
       console.error("Error processing strategy:", error)
       setIsProceeding(false)
+    }
+  }
+
+  const handleEditStrategyName = async (newName: string) => {
+    try {
+      // Get strategy ID from localStorage if not in URL
+      let id = strategyId
+      if (!id) {
+        id = localStorage.getItem("strategy_id")
+      }
+
+      if (!id) {
+        console.error("No strategy ID available for editing")
+        return
+      }
+
+      const currentStatement = statements[0]
+      const cleanedStrategy = currentStatement.strategy.map((condition: any) => ({
+        ...condition,
+        inp1: cleanupVolumeMAIndicator(condition.inp1),
+        inp2: cleanupVolumeMAIndicator(condition.inp2),
+      }))
+
+      const apiStatement: any = {
+        name: newName,
+        side: currentStatement.side,
+        saveresult: currentStatement.saveresult || "Statement 1",
+        strategy: cleanedStrategy,
+        Equity: currentStatement.Equity || [],
+        instrument: initialInstrument,
+        TradingType: currentStatement.TradingType || {
+          NewTrade: "MTOOTAAT",
+          commission: 0.00007,
+          margin: 1,
+          lot: "mini",
+          cash: 100000,
+          nTrade_max: 1,
+        },
+        ...(currentStatement.TradingSession && { TradingSession: currentStatement.TradingSession }),
+      }
+
+      await editStrategy(id, apiStatement)
+      setStrategyName(newName)
+      setShowEditNameModal(false)
+    } catch (error) {
+      console.error("Error editing strategy name:", error)
     }
   }
 
@@ -3512,6 +4273,14 @@ if (
   }
 
   // Function to render equity rules
+  // Convert pips to points for display (1 pip = 0.1 points)
+  const pipsToPointsDisplay = (text: string): string => {
+    return text.replace(/(\d+)pips/g, (match, num) => {
+      const points = parseInt(num) * 0.1
+      return `${points}points`
+    })
+  }
+
   const renderEquityRules = (statement: StrategyStatement) => {
     if (!statement.Equity || statement.Equity.length === 0) {
       return null
@@ -3529,7 +4298,7 @@ if (
               ? `Partial TP (${rule.inp1?.partial_tp_list?.length || 0})`
               : isManageExit
                 ? `Manage Exit (${(rule.inp1 as any).manage_exit_list?.length || 0})`
-                : (rule.operator || "Equity Rule")
+                : pipsToPointsDisplay(rule.operator || "Equity Rule")
 
             return (
               <div 
@@ -3556,14 +4325,14 @@ if (
 
                     if (isPartialTP && rule.inp1?.partial_tp_list) {
                       rule.inp1.partial_tp_list.forEach((lvl, i) => {
-                        details[`Level ${i + 1}`] = `${lvl.Price} | Close: ${lvl.Close}${lvl.Action ? ` | Action: ${lvl.Action}` : ""}`
+                        details[`Level ${i + 1}`] = `${pipsToPointsDisplay(lvl.Price)} | Close: ${lvl.Close}${lvl.Action ? ` | Action: ${pipsToPointsDisplay(lvl.Action)}` : ""}`
                       })
                     }
 
                     if (isManageExit && (rule.inp1 as any).manage_exit_list) {
                       const list = (rule.inp1 as any).manage_exit_list as Array<{ Price: string; Action: string }>
                       list.forEach((it, i) => {
-                        details[`Rule ${i + 1}`] = `${it.Price} | ${it.Action}`
+                        details[`Rule ${i + 1}`] = `${pipsToPointsDisplay(it.Price)} | ${pipsToPointsDisplay(it.Action)}`
                       })
                     }
 
@@ -3642,19 +4411,8 @@ if (
     }
   }
 
-  // Listen for component selection events from the sidebar
-  useEffect(() => {
-    const handleComponentSelected = (e: CustomEvent) => {
-      const { component, statementIndex } = e.detail
-      handleAddComponent(statementIndex, component)
-    }
-
-    document.addEventListener("component-selected", handleComponentSelected as EventListener)
-
-    return () => {
-      document.removeEventListener("component-selected", handleComponentSelected as EventListener)
-    }
-  }, [statements]) // Re-add event listener when statements change
+  // Legacy state for custom indicator modal (kept for backward compatibility)
+  const [pendingCustomIndicator, setPendingCustomIndicator] = useState<any>(null)
 
   // Track wait status for each input (inp1 and inp2) separately
   const [waitStatus, setWaitStatus] = useState<Record<number, { inp1: boolean; inp2: boolean }>>({})
@@ -3758,6 +4516,7 @@ if (
     inputType: "inp1" | "inp2"
     timeframeOverride?: string
   } | null>(null)
+  const [showEditNameModal, setShowEditNameModal] = useState(false)
 
   return (
     <div className="flex-1 flex flex-col">
@@ -3771,12 +4530,25 @@ if (
                 ? `Editing Strategy: ${initialInstrument || strategyId}`
                 : `Building algorithm for ${initialInstrument || "XAU/USD"}`}
             </h1>
-            <button className="ml-2 p-1 hover:bg-gray-700 rounded-full">
-              <Edit className="w-5 h-5" />
-            </button>
+            {strategyId && (
+              <button 
+                onClick={() => setShowEditNameModal(true)}
+                className="ml-2 p-1 hover:bg-gray-700 rounded-full"
+                title="Edit strategy name"
+              >
+                <Edit className="w-5 h-5" />
+              </button>
+            )}
           </div>
           <div className="flex gap-3">
             {/* Buy/Sell selector */}
+            <button 
+              onClick={() => setShowDeveloperModeModal(true)}
+              className="px-4 py-2 bg-[#151718] rounded-full text-white hover:bg-gray-700 flex items-center gap-2"
+            >
+              <Code className="w-4 h-4" />
+              Developer Mode
+            </button>
             <button className="px-4 py-2 bg-[#151718] rounded-full text-white hover:bg-gray-700">Add Setup</button>
             <button className="px-4 py-2 bg-[#151718] rounded-full text-white hover:bg-gray-700" onClick={addStatement}>
               Add Statement
@@ -5607,6 +6379,209 @@ if (
           }}
         />
       )}
+      {showVolumeDeltaModal && (
+        <VolumeDeltaSettingsModal
+          onClose={() => {
+            setShowVolumeDeltaModal(false)
+            setEditingComponent(null)
+          }}
+          onSave={(settings) => {
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+
+            if (editingComponent) {
+              const condition = currentStatement.strategy[editingComponent.conditionIndex]
+              const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
+
+              if (targetIndicator && "timeframe" in targetIndicator) {
+                const indicatorName = settings.indicatorType === "cumulative-volume-delta" 
+                  ? "CumulativeVolumeDelta" 
+                  : "VolumeDelta"
+                
+                const updatedIndicator: any = {
+                  type: "CUSTOM_I",
+                  name: indicatorName,
+                  timeframe: targetIndicator.timeframe,
+                  input_params: {
+                    lower_timeframe: settings.lowerTimeframe,
+                  },
+                }
+
+                if (settings.indicatorType === "cumulative-volume-delta" && settings.resetPeriod) {
+                  updatedIndicator.input_params.reset_period = settings.resetPeriod
+                }
+
+                if (editingComponent.componentType === "inp1") {
+                  condition.inp1 = updatedIndicator
+                } else {
+                  condition.inp2 = updatedIndicator
+                }
+              }
+            } else {
+              // Adding new indicator
+              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+              const timeframe = lastCondition.inp1?.timeframe || selectedTimeframe
+              
+              const indicatorName = settings.indicatorType === "cumulative-volume-delta" 
+                ? "CumulativeVolumeDelta" 
+                : "VolumeDelta"
+
+              const newIndicator: any = {
+                type: "CUSTOM_I",
+                name: indicatorName,
+                timeframe: timeframe,
+                input_params: {
+                  lower_timeframe: settings.lowerTimeframe,
+                },
+              }
+
+              if (settings.indicatorType === "cumulative-volume-delta" && settings.resetPeriod) {
+                newIndicator.input_params.reset_period = settings.resetPeriod
+              }
+
+              // Determine if we're adding to inp1 or inp2
+              if (lastCondition.inp1 && lastCondition.operator_name) {
+                lastCondition.inp2 = newIndicator
+              } else {
+                lastCondition.inp1 = newIndicator
+              }
+            }
+
+            setStatements(newStatements)
+            setShowVolumeDeltaModal(false)
+            setEditingComponent(null)
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
+          }}
+        />
+      )}
+      {showHistoricalPriceLevelModal && (
+        <HistoricalPriceLevelSettingsModal
+          onClose={() => {
+            setShowHistoricalPriceLevelModal(false)
+            setEditingComponent(null)
+          }}
+          onSave={(settings) => {
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+
+            if (editingComponent) {
+              const condition = currentStatement.strategy[editingComponent.conditionIndex]
+              const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
+
+              if (targetIndicator && "timeframe" in targetIndicator) {
+                const updatedIndicator: any = {
+                  type: "CUSTOM_I",
+                  name: "HistoricalPriceLevel",
+                  timeframe: targetIndicator.timeframe,
+                  input_params: {
+                    period: settings.period,
+                    level: settings.level,
+                  },
+                }
+
+                if (editingComponent.componentType === "inp1") {
+                  condition.inp1 = updatedIndicator
+                } else {
+                  condition.inp2 = updatedIndicator
+                }
+              }
+            } else {
+              // Adding new indicator
+              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+              const timeframe = lastCondition.inp1?.timeframe || selectedTimeframe
+
+              const newIndicator: any = {
+                type: "CUSTOM_I",
+                name: "HistoricalPriceLevel",
+                timeframe: timeframe,
+                input_params: {
+                  period: settings.period,
+                  level: settings.level,
+                },
+              }
+
+              // Determine if we're adding to inp1 or inp2
+              if (lastCondition.inp1 && lastCondition.operator_name) {
+                lastCondition.inp2 = newIndicator
+              } else {
+                lastCondition.inp1 = newIndicator
+              }
+            }
+
+            setStatements(newStatements)
+            setShowHistoricalPriceLevelModal(false)
+            setEditingComponent(null)
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
+          }}
+        />
+      )}
+      {showCandleSizeModal && (
+        <CandleSizeSettingsModal
+          onClose={() => {
+            setShowCandleSizeModal(false)
+            setEditingComponent(null)
+          }}
+          onSave={(settings) => {
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+
+            if (editingComponent) {
+              const condition = currentStatement.strategy[editingComponent.conditionIndex]
+              const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
+
+              if (targetIndicator && "timeframe" in targetIndicator) {
+                const updatedIndicator: any = {
+                  type: "CUSTOM_I",
+                  name: "CandleSize",
+                  timeframe: targetIndicator.timeframe,
+                  input_params: {
+                    asset_type: settings.assetType,
+                    output: settings.output,
+                  },
+                }
+
+                if (editingComponent.componentType === "inp1") {
+                  condition.inp1 = updatedIndicator
+                } else {
+                  condition.inp2 = updatedIndicator
+                }
+              }
+            } else {
+              // Adding new indicator
+              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+              const timeframe = lastCondition.inp1?.timeframe || selectedTimeframe
+
+              const newIndicator: any = {
+                type: "CUSTOM_I",
+                name: "CandleSize",
+                timeframe: timeframe,
+                input_params: {
+                  asset_type: settings.assetType,
+                  output: settings.output,
+                },
+              }
+
+              // Determine if we're adding to inp1 or inp2
+              if (lastCondition.inp1 && lastCondition.operator_name) {
+                lastCondition.inp2 = newIndicator
+              } else {
+                lastCondition.inp1 = newIndicator
+              }
+            }
+
+            setStatements(newStatements)
+            setShowCandleSizeModal(false)
+            setEditingComponent(null)
+            setTimeout(() => {
+              searchInputRefs.current[activeStatementIndex]?.focus()
+            }, 100)
+          }}
+        />
+      )}
       {showAtrModal && (
         <AtrSettingsModal
           onClose={() => {
@@ -6660,7 +7635,70 @@ if (
         />
       )}
 
+      {/* Edit Strategy Name Modal */}
+      {showEditNameModal && (
+        <EditStrategyModal
+          strategy={{
+            id: strategyId || localStorage.getItem("strategy_id") || "0",
+            name: strategyName,
+            instrument: initialInstrument || "XAU/USD",
+            side: statements[0]?.side || "S",
+            strategy: statements[0]?.strategy || [],
+            equity: statements[0]?.Equity || [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }}
+          isEdit={true}
+          onClose={() => setShowEditNameModal(false)}
+          onSave={handleEditStrategyName}
+        />
+      )}
 
+      {/* Developer Mode Full Page */}
+      {showDeveloperModeModal && (
+        <div className="fixed inset-0 z-50 bg-[#141721]">
+          <DeveloperModePage
+            onBack={async () => {
+              setShowDeveloperModeModal(false)
+              setEditingCustomComponent(null)
+              setCurrentComponentId(null)
+              // Refresh custom components list when returning from developer mode
+              try {
+                const components = await listCustomComponents()
+                // Dispatch event to notify sidebar to refresh
+                window.dispatchEvent(new CustomEvent('refresh-custom-components', { detail: components }))
+              } catch (error) {
+                console.error('Failed to refresh custom components:', error)
+              }
+            }}
+            onCompile={handleDeveloperModeCompile}
+            onSave={handleDeveloperModeSave}
+            onGoToBacktest={(strategyId) => {
+              // Close developer mode and navigate to backtesting
+              setShowDeveloperModeModal(false)
+              setEditingCustomComponent(null)
+              setCurrentComponentId(null)
+              // Navigate to strategy testing page with the custom strategy ID
+              router.push(`/strategy-testing?id=${strategyId}&custom=true`)
+            }}
+            onLoadStrategies={async () => {
+              // Load custom strategies list
+              const strategies = await listCustomStrategies()
+              return strategies
+            }}
+            onDeleteStrategy={async (strategyId) => {
+              // Delete a custom strategy
+              await deleteCustomStrategy(strategyId)
+            }}
+            onLoadStrategy={async (strategyId) => {
+              // Load a specific custom strategy for editing
+              const strategy = await getCustomStrategy(strategyId)
+              return { code: strategy.code || strategy.compiled_code || "", name: strategy.name }
+            }}
+            editingComponent={editingCustomComponent}
+          />
+        </div>
+      )}
     </div>
   )
 }

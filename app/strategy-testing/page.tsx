@@ -34,6 +34,9 @@ import {
   getSymbolTimeframes,
   getAllBrokerSymbols,
   findSymbolsWithTimeframe,
+  // Custom strategy API
+  getCustomStrategy,
+  runCustomStrategyBacktest,
 } from "../AllApiCalls" // Import new functions
 import { X, ArrowLeft } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
@@ -56,6 +59,8 @@ import { OptimizationErrorDisplay } from "@/components/optimization-error-displa
 import { BacktestHistoryList } from "@/components/BacktestHistoryList"
 // MetaAPI debugging
 import { MetaAPIDebugModal } from "@/components/metaapi-debug-modal"
+// Custom strategy backtest results
+import { CustomStrategyBacktestResults } from "@/components/custom-strategy-backtest-results"
 
 export default function StrategyTestingPage() {
   const router = useRouter()
@@ -171,6 +176,10 @@ export default function StrategyTestingPage() {
   // MetaAPI Debug Modal states
   const [showMetaAPIDebugModal, setShowMetaAPIDebugModal] = useState(false);
   const [metaAPIError, setMetaAPIError] = useState<any>(null);
+
+  // Custom strategy backtest results state
+  const [showCustomStrategyBacktestResults, setShowCustomStrategyBacktestResults] = useState(false);
+  const [customStrategyBacktestResult, setCustomStrategyBacktestResult] = useState<any>(null);
 
   // Add progress bar states
   const [progress, setProgress] = useState(0); // For backtest
@@ -382,6 +391,8 @@ export default function StrategyTestingPage() {
       if (typeof window !== "undefined") {
         const urlParams = new URLSearchParams(window.location.search)
         let id = urlParams.get("id")
+        const isCustomStrategy = urlParams.get("custom") === "true"
+        
         if (!id) {
           try {
             id = localStorage.getItem("strategy_id")
@@ -390,12 +401,53 @@ export default function StrategyTestingPage() {
 
         if (id) {
           try {
-            const strategyData = await fetchStatementDetail(id)
+            let strategyData
+            
+            if (isCustomStrategy) {
+              // Fetch custom strategy from CustomComponent model
+              const customStrategy = await getCustomStrategy(Number(id))
+              console.log("🔍 Loaded custom strategy:", customStrategy)
+              
+              // Transform custom strategy data to match expected format
+              strategyData = {
+                id: customStrategy.id,
+                name: customStrategy.name,
+                code: customStrategy.code,
+                compiled_code: customStrategy.compiled_code,
+                parameters: customStrategy.parameters,
+                status: customStrategy.status,
+                type: "custom_strategy",
+                // Set default values for backtesting
+                side: "buy",
+                saveresult: "true",
+                strategy: [], // Custom strategies don't use the visual builder format
+                instrument: "XAUUSD",
+                TradingType: {
+                  NewTrade: "MTOOTAAT",
+                  commission: 0.00007,
+                  margin: 1,
+                  lot: "mini",
+                  cash: 100000,
+                  nTrade_max: 1,
+                },
+                // Mark as custom strategy for backtest handling
+                is_custom_strategy: true,
+                custom_strategy_id: customStrategy.id,
+              }
+            } else {
+              // Fetch regular strategy
+              strategyData = await fetchStatementDetail(id)
+            }
 
             // Store the fetched data in localStorage
             localStorage.setItem("savedStrategy", JSON.stringify(strategyData))
             // Ensure the id is persisted for future back/forward flows
             localStorage.setItem("strategy_id", String(id))
+            if (isCustomStrategy) {
+              localStorage.setItem("is_custom_strategy", "true")
+            } else {
+              localStorage.removeItem("is_custom_strategy")
+            }
 
             // Check if timeframes_required exists in the response and store it
             if (strategyData.timeframes_required) {
@@ -702,9 +754,78 @@ export default function StrategyTestingPage() {
     try {
       setIsLoading(true)
 
-      let result
+      let result: any
 
-      if (useMetaAPI) {
+      // Check if this is a custom strategy
+      const isCustomStrategy = parsedStatement?.is_custom_strategy || 
+        localStorage.getItem("is_custom_strategy") === "true"
+
+      if (isCustomStrategy) {
+        // Use custom strategy backtest API
+        const customStrategyId = parsedStatement?.custom_strategy_id || parsedStatement?.id
+        const symbol = metaAPIConfig?.symbol || "XAUUSD"
+        
+        console.log("🔍 Running custom strategy backtest:", {
+          customStrategyId,
+          symbol,
+          isCustomStrategy
+        })
+
+        result = await runCustomStrategyBacktest({
+          strategy_id: customStrategyId,
+          params: parsedStatement?.parameters || {},
+          initial_equity: Number(accountDeposit.replace(/,/g, "")) || 10000,
+          symbol: symbol
+        })
+
+        console.log("Custom strategy backtest result:", result)
+
+        // Handle custom strategy backtest result
+        if (result) {
+          // Normalize the response to match expected format
+          const normalizedResult = {
+            message: result.message || "Custom strategy backtest completed.",
+            custom_strategy_id: result.custom_strategy_id || customStrategyId,
+            custom_strategy_name: result.custom_strategy_name || parsedStatement?.name || "Custom Strategy",
+            data_source: result.data_source || result.metadata?.data_source || "custom",
+            symbol: result.symbol || result.metadata?.symbol || symbol,
+            initial_equity: result.initial_equity || Number(accountDeposit.replace(/,/g, "")) || 10000,
+            final_equity: result.final_equity || 0,
+            return_percent: result.return_percent ?? result.total_return ?? 0,
+            num_trades: result.num_trades || 0,
+            win_rate_percent: result.win_rate_percent ?? result.win_rate ?? 0,
+            max_drawdown_percent: result.max_drawdown_percent ?? result.max_drawdown ?? 0,
+            sharpe_ratio: result.sharpe_ratio || 0,
+            equity_curve: result.equity_curve || [],
+            trades: result.trades || [],
+            statistics: result.statistics || {
+              win_rate: result.win_rate ?? result.win_rate_percent ?? 0,
+              max_drawdown: result.max_drawdown ?? result.max_drawdown_percent ?? 0,
+              sharpe_ratio: result.sharpe_ratio || 0,
+              total_trades: result.num_trades || 0,
+              total_return: result.total_return ?? result.return_percent ?? 0,
+              profit_factor: result.profit_factor || 0
+            },
+            plot_html: result.plot_html || null,
+            csv_url: result.csv_url || null,
+            metadata: result.metadata || {}
+          }
+
+          // Store the result in sessionStorage for the results page
+          sessionStorage.setItem('customBacktestResult', JSON.stringify(normalizedResult))
+          
+          // Store the result for display in modal
+          setCustomStrategyBacktestResult(normalizedResult)
+          setShowCustomStrategyBacktestResults(true)
+
+          // Also set plot HTML if available
+          if (normalizedResult.plot_html) {
+            setPlotHtml(normalizedResult.plot_html)
+          }
+
+          showToast("Custom strategy backtest completed!", 'success')
+        }
+      } else if (useMetaAPI) {
         // Removed MetaAPI pre-validation per request
 
         // Use MetaAPI for backtesting with environment variables
@@ -726,6 +847,62 @@ export default function StrategyTestingPage() {
           accountId,
           symbol
         )
+
+        console.log("Backtest result:", result)
+
+        // Handle plot HTML
+        if (result?.plot_html) {
+          setPlotHtml(result.plot_html)
+        }
+
+        // Handle trades CSV data
+        if (result?.trades_csv) {
+          setTradesData({
+            tradesCsv: result.trades_csv,
+            tradesCsvFilename: result.trades_csv_filename || 'trades.csv',
+            tradesCsvDownloadUrl: result.trades_csv_download_url || '',
+            stdout: result.stdout || '',
+            stderr: result.stderr || ''
+          })
+          setShowTradesSummary(true)
+          
+          // Check if trades CSV has actual data
+          const csvLines = result.trades_csv.trim().split('\n')
+          if (csvLines.length >= 2) {
+            showToast("Backtest completed! Redirecting to results...", 'success')
+            // Navigate to backtest results page if we have a backtest ID
+            if (result.backtest_id) {
+              setTimeout(() => {
+                router.push(`/backtest-results?id=${result.backtest_id}`)
+              }, 1000)
+            }
+          } else {
+            showToast("Backtest completed but no trades were executed.", 'warning')
+          }
+        } else {
+          // No trades CSV data
+          setTradesData({
+            tradesCsv: '',
+            tradesCsvFilename: '',
+            tradesCsvDownloadUrl: '',
+            stdout: result?.stdout || '',
+            stderr: result?.stderr || ''
+          })
+          setShowTradesSummary(true)
+          showToast("Backtest completed but no trades data available.", 'warning')
+        }
+
+        // Handle stdout/stderr
+        if (result?.stdout) {
+          console.log("Backtest stdout:", result.stdout)
+        }
+        if (result?.stderr) {
+          console.log("Backtest stderr:", result.stderr)
+        }
+
+        if (!result?.plot_html && !result?.trades_csv) {
+          showToast("Backtest completed but no data returned", 'error')
+        }
       } else {
         // Use traditional file upload method
         const timeframeFiles: Record<string, File> = {}
@@ -750,62 +927,62 @@ export default function StrategyTestingPage() {
           statement: parsedStatement,
           files: timeframeFiles,
         })
-      }
 
-      console.log("Backtest result:", result)
+        console.log("Backtest result:", result)
 
-      // Handle plot HTML
-      if (result?.plot_html) {
-        setPlotHtml(result.plot_html)
-      }
+        // Handle plot HTML
+        if (result?.plot_html) {
+          setPlotHtml(result.plot_html)
+        }
 
-      // Handle trades CSV data
-      if (result?.trades_csv) {
-        setTradesData({
-          tradesCsv: result.trades_csv,
-          tradesCsvFilename: result.trades_csv_filename || 'trades.csv',
-          tradesCsvDownloadUrl: result.trades_csv_download_url || '',
-          stdout: result.stdout || '',
-          stderr: result.stderr || ''
-        })
-        setShowTradesSummary(true)
-        
-        // Check if trades CSV has actual data
-        const csvLines = result.trades_csv.trim().split('\n')
-        if (csvLines.length >= 2) {
-          showToast("Backtest completed! Redirecting to results...", 'success')
-          // Navigate to backtest results page if we have a backtest ID
-          if (result.backtest_id) {
-            setTimeout(() => {
-              router.push(`/backtest-results?id=${result.backtest_id}`)
-            }, 1000)
+        // Handle trades CSV data
+        if (result?.trades_csv) {
+          setTradesData({
+            tradesCsv: result.trades_csv,
+            tradesCsvFilename: result.trades_csv_filename || 'trades.csv',
+            tradesCsvDownloadUrl: result.trades_csv_download_url || '',
+            stdout: result.stdout || '',
+            stderr: result.stderr || ''
+          })
+          setShowTradesSummary(true)
+          
+          // Check if trades CSV has actual data
+          const csvLines = result.trades_csv.trim().split('\n')
+          if (csvLines.length >= 2) {
+            showToast("Backtest completed! Redirecting to results...", 'success')
+            // Navigate to backtest results page if we have a backtest ID
+            if (result.backtest_id) {
+              setTimeout(() => {
+                router.push(`/backtest-results?id=${result.backtest_id}`)
+              }, 1000)
+            }
+          } else {
+            showToast("Backtest completed but no trades were executed.", 'warning')
           }
         } else {
-          showToast("Backtest completed but no trades were executed.", 'warning')
+          // No trades CSV data
+          setTradesData({
+            tradesCsv: '',
+            tradesCsvFilename: '',
+            tradesCsvDownloadUrl: '',
+            stdout: result?.stdout || '',
+            stderr: result?.stderr || ''
+          })
+          setShowTradesSummary(true)
+          showToast("Backtest completed but no trades data available.", 'warning')
         }
-      } else {
-        // No trades CSV data
-        setTradesData({
-          tradesCsv: '',
-          tradesCsvFilename: '',
-          tradesCsvDownloadUrl: '',
-          stdout: result?.stdout || '',
-          stderr: result?.stderr || ''
-        })
-        setShowTradesSummary(true)
-        showToast("Backtest completed but no trades data available.", 'warning')
-      }
 
-      // Handle stdout/stderr
-      if (result?.stdout) {
-        console.log("Backtest stdout:", result.stdout)
-      }
-      if (result?.stderr) {
-        console.log("Backtest stderr:", result.stderr)
-      }
+        // Handle stdout/stderr
+        if (result?.stdout) {
+          console.log("Backtest stdout:", result.stdout)
+        }
+        if (result?.stderr) {
+          console.log("Backtest stderr:", result.stderr)
+        }
 
-      if (!result?.plot_html && !result?.trades_csv) {
-        showToast("Backtest completed but no data returned", 'error')
+        if (!result?.plot_html && !result?.trades_csv) {
+          showToast("Backtest completed but no data returned", 'error')
+        }
       }
     } catch (error: any) {
       console.error("Backtest Error:", error)
@@ -3297,6 +3474,21 @@ export default function StrategyTestingPage() {
             result={walkForwardDetailResult}
             onClose={() => setWalkForwardDetailResult(null)}
             isFullScreen={true}
+          />
+        )}
+
+        {/* Custom Strategy Backtest Results Modal */}
+        {showCustomStrategyBacktestResults && customStrategyBacktestResult && (
+          <CustomStrategyBacktestResults
+            result={customStrategyBacktestResult}
+            onClose={() => {
+              setShowCustomStrategyBacktestResults(false)
+              setCustomStrategyBacktestResult(null)
+            }}
+            onViewFullResults={() => {
+              setShowCustomStrategyBacktestResults(false)
+              router.push('/custom-backtest-results')
+            }}
           />
         )}
 

@@ -29,7 +29,10 @@ export const Fetch = async (endPoint, config, headerKey) => {
 
     return response
   } catch (error) {
-    console.error("Fetch Error: ", error.message || error)
+    // Only log non-404 errors to avoid noise from optional endpoints
+    if (error.message !== "Not Found") {
+      console.error("Fetch Error: ", error.message || error)
+    }
     throw error
   }
 }
