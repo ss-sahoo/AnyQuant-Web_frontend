@@ -43,6 +43,7 @@ interface CompileData {
   strategyName?: string
   componentType?: "indicator" | "behavior" | "trade_management"
   parameters?: Parameter[]
+  componentId?: number  // For editing existing components
 }
 
 interface SaveData extends CompileData {
@@ -786,7 +787,8 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
 
   // Update component template when language or component type changes (only for component code)
   useEffect(() => {
-    if (!isEditing && codeType === "component") {
+    // Don't load template if we're editing an existing component
+    if (!isEditing && !editingComponent && codeType === "component") {
       if (language === "python") {
         // Select template based on component type
         if (componentType === "indicator") {
@@ -800,18 +802,19 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
         setCode(PINESCRIPT_COMPONENT_TEMPLATE)
       }
     }
-  }, [language, componentType, isEditing, codeType])
+  }, [language, componentType, isEditing, codeType, editingComponent])
 
   // Update strategy template when language changes (only for strategy code)
   useEffect(() => {
-    if (!isEditing && codeType === "strategy") {
+    // Don't load template if we're editing an existing component
+    if (!isEditing && !editingComponent && codeType === "strategy") {
       if (language === "python") {
         setCode(PYTHON_STRATEGY_TEMPLATE)
       } else {
         setCode(PINESCRIPT_STRATEGY_TEMPLATE)
       }
     }
-  }, [language, isEditing, codeType])
+  }, [language, isEditing, codeType, editingComponent])
 
   const handleCompile = async () => {
     if (!code.trim()) {
@@ -866,7 +869,8 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
         componentName: codeType === "component" ? componentName : undefined,
         strategyName: codeType === "strategy" ? strategyName : undefined,
         componentType: codeType === "component" ? componentType : undefined,
-        parameters: codeType === "component" ? parameters : undefined
+        parameters: codeType === "component" ? parameters : undefined,
+        componentId: isEditing && editingComponent ? editingComponent.id : undefined  // Pass ID when editing
       })
       setCompileResult(result)
       
@@ -896,12 +900,13 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
         strategyName: codeType === "strategy" ? strategyName : undefined,
         componentType: codeType === "component" ? componentType : undefined,
         parameters: codeType === "component" ? parameters : undefined,
+        componentId: isEditing && editingComponent ? editingComponent.id : undefined,  // Pass ID when editing
         isDraft
       })
       if (isDraft) {
         setCompileResult({
           success: true,
-          message: "Draft saved successfully!"
+          message: isEditing ? "Component updated successfully!" : "Draft saved successfully!"
         })
       }
     } catch (error) {

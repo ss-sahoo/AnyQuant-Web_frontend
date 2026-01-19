@@ -20,7 +20,7 @@ import { AtCandleModal } from "@/components/modals/at-candle-modal"
 import { DerivativeSettingsModal } from "@/components/modals/derivative-settings-modal"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { createStatement, editStrategy, createCustomComponent, validateCustomComponentCode, activateCustomComponent, listCustomComponents, createCustomStrategy, validateCustomStrategyCode, getCustomStrategyTemplate, updateCustomStrategy, listCustomStrategies, deleteCustomStrategy, getCustomStrategy } from "@/app/AllApiCalls"
+import { createStatement, editStrategy, createCustomComponent, validateCustomComponentCode, activateCustomComponent, listCustomComponents, createCustomStrategy, validateCustomStrategyCode, getCustomStrategyTemplate, updateCustomStrategy, listCustomStrategies, deleteCustomStrategy, getCustomStrategy, updateCustomComponent } from "@/app/AllApiCalls"
 import type { JSX } from "react/jsx-runtime"
 import { PipsSettingsModal } from "@/components/modals/pips-settings-modal"
 import { SaveStrategyModal } from "@/components/modals/save-strategy-modal"
@@ -2759,6 +2759,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     strategyName?: string
     componentType?: "indicator" | "behavior" | "trade_management"
     parameters?: { name: string; defaultValue: string; type: "number" | "string" | "boolean" }[]
+    componentId?: number  // For editing existing components
   }
 
   interface CompileError {
@@ -2909,12 +2910,22 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         })
       }
 
-      // If we have a component ID, validate and update the existing component
-      if (currentComponentId) {
-        // Validate code and update the component
+      // If we have a component ID (from editing or from state), update and validate the existing component
+      const componentId = data.componentId || currentComponentId
+      if (componentId) {
+        // First, update the component with new data (name, type, language, parameters, code)
+        await updateCustomComponent(componentId, {
+          name: data.componentName || "Custom Component",
+          type: data.componentType || "indicator",
+          language: data.language,
+          code: data.code,
+          parameters: parametersObj,
+        })
+        
+        // Then validate the code
         const validationResult = await validateCustomComponentCode({
           code: data.code,
-          component_id: currentComponentId,
+          component_id: componentId,
         })
 
         console.log("Validation result:", validationResult)
@@ -2966,7 +2977,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         // If validation passed and component was updated, try to activate it
         if (validationResult.component_status === "compiled") {
           try {
-            await activateCustomComponent(currentComponentId)
+            await activateCustomComponent(componentId)
             return {
               success: true,
               message: `Compilation successful! Your custom component '${data.componentName}' is now active and available in the strategy builder.`,
@@ -3123,12 +3134,15 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         })
       }
 
-      if (currentComponentId) {
-        // Update existing component (just save, don't validate)
-        // Note: The API resets status to "draft" when updating code
-        await validateCustomComponentCode({
+      const componentId = data.componentId || currentComponentId
+      if (componentId) {
+        // Update existing component with all fields
+        await updateCustomComponent(componentId, {
+          name: data.componentName || "Custom Component",
+          type: data.componentType || "indicator",
+          language: data.language,
           code: data.code,
-          component_id: currentComponentId,
+          parameters: parametersObj,
         })
       } else {
         // Create a new component as draft
