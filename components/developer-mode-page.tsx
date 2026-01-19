@@ -763,6 +763,7 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
   useEffect(() => {
     if (editingComponent) {
       setIsEditing(true)
+      setCodeType("component")  // Ensure we're in component mode
       setComponentName(editingComponent.name)
       setLanguage(editingComponent.language as "python" | "pinescript")
       setComponentType(editingComponent.type as "indicator" | "behavior" | "trade_management")
@@ -777,6 +778,9 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
         }))
         setParameters(params.length > 0 ? params : [{ name: "period", defaultValue: "14", type: "number" }])
       }
+    } else {
+      // Reset editing state when no component is being edited
+      setIsEditing(false)
     }
   }, [editingComponent])
 
