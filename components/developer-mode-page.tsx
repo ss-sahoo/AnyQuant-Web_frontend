@@ -215,6 +215,289 @@ def calculate(data, **kwargs):
 # ============================================================================
 `
 
+const PYTHON_BEHAVIOR_TEMPLATE = `# ============================================================================
+# ⚠️ CRITICAL: CUSTOM BEHAVIOR - Required Structure
+# ============================================================================
+#
+# ALL custom behavior code MUST inherit from CustomBehaviorBase and implement
+# required methods. This defines how your strategy enters and manages trades.
+#
+# ============================================================================
+# CORE RULES FOR WRITING CUSTOM BEHAVIORS:
+# ============================================================================
+#
+# Rule 1: Required Base Class
+#   - MUST inherit from CustomBehaviorBase
+#   - MUST import: from AnyQuantDiracAI.helper.custom_behavior_base import CustomBehaviorBase
+#
+# Rule 2: Required Methods (MUST IMPLEMENT)
+#   - get_trade_config(self, price, equity, volatility=None) -> dict
+#   - should_enter_trade(self, signal, price, indicators) -> bool
+#
+# Rule 3: Optional Methods (CAN OVERRIDE)
+#   - should_exit_trade(self, position, price, indicators) -> bool
+#   - calculate_position_size(self, equity, risk_pct, stop_distance) -> float
+#   - get_behavior_config(self) -> BehaviorConfig
+#   - And 5 more optional methods...
+#
+# Rule 4: Parameters
+#   - Define as class variables (e.g., risk_per_trade = 2.0)
+#   - Can be optimized during backtesting
+#
+# ============================================================================
+
+from AnyQuantDiracAI.helper.custom_behavior_base import CustomBehaviorBase
+
+class MyBehavior(CustomBehaviorBase):
+    """
+    Custom behavior for trade entry and management.
+    
+    Define class attributes as parameters that can be optimized:
+    - risk_per_trade = 2.0
+    - base_sl_pips = 50
+    - base_tp_pips = 100
+    """
+    
+    # Parameters (can be optimized)
+    risk_per_trade = 2.0
+    base_sl_pips = 50
+    base_tp_pips = 100
+    
+    def get_trade_config(self, price, equity, volatility=None):
+        """
+        REQUIRED METHOD - Return trade configuration.
+        
+        Args:
+            price: Current market price
+            equity: Current account equity
+            volatility: Optional volatility measure
+        
+        Returns:
+            Dictionary with trade configuration:
+            {
+                'stop_loss_pips': 50,
+                'take_profit_pips': 100,
+                'position_size': 1.0,
+                'trailing_stop_pips': 30,  # Optional
+                'breakeven_pips': 20        # Optional
+            }
+        """
+        # Dynamic SL/TP based on volatility
+        if volatility and volatility > 0.02:
+            sl_pips = self.base_sl_pips * 2
+            tp_pips = self.base_tp_pips * 2
+        else:
+            sl_pips = self.base_sl_pips
+            tp_pips = self.base_tp_pips
+        
+        return {
+            'stop_loss_pips': sl_pips,
+            'take_profit_pips': tp_pips,
+            'position_size': 1.0
+        }
+    
+    def should_enter_trade(self, signal, price, indicators):
+        """
+        REQUIRED METHOD - Determine if trade should be entered.
+        
+        Args:
+            signal: Trade signal ('BUY' or 'SELL')
+            price: Current market price
+            indicators: Dictionary of indicator values
+        
+        Returns:
+            Boolean - True to enter trade, False to skip
+        """
+        if signal != 'BUY':
+            return False
+        
+        # Check RSI confirmation
+        rsi = indicators.get('rsi', 50)
+        if rsi > 70 or rsi < 30:
+            return False
+        
+        return True
+    
+    # ========================================================================
+    # OPTIONAL METHODS (Can override for advanced features)
+    # ========================================================================
+    
+    def should_exit_trade(self, position, price, indicators):
+        """
+        OPTIONAL - Custom exit logic.
+        
+        Args:
+            position: Current position object
+            price: Current market price
+            indicators: Dictionary of indicator values
+        
+        Returns:
+            Boolean - True to exit, False to hold
+        """
+        # Exit if RSI becomes extreme
+        rsi = indicators.get('rsi', 50)
+        return rsi > 80 or rsi < 20
+
+
+# ============================================================================
+# MINIMAL EXAMPLE (Only Required Methods):
+# ============================================================================
+#
+# from AnyQuantDiracAI.helper.custom_behavior_base import CustomBehaviorBase
+#
+# class SimpleBehavior(CustomBehaviorBase):
+#     def get_trade_config(self, price, equity, volatility=None):
+#         return {
+#             'stop_loss_pips': 50,
+#             'take_profit_pips': 100,
+#             'position_size': 1.0
+#         }
+#     
+#     def should_enter_trade(self, signal, price, indicators):
+#         return signal == 'BUY'
+#
+# ============================================================================
+`
+
+const PYTHON_TRADE_MANAGEMENT_TEMPLATE = `# ============================================================================
+# ⚠️ CRITICAL: CUSTOM TRADE MANAGEMENT - Required Structure
+# ============================================================================
+#
+# ALL custom trade management code MUST inherit from CustomBehaviorBase and
+# implement required methods. This defines how your trades are managed.
+#
+# ============================================================================
+# CORE RULES FOR WRITING CUSTOM TRADE MANAGEMENT:
+# ============================================================================
+#
+# Rule 1: Required Base Class
+#   - MUST inherit from CustomBehaviorBase
+#   - MUST import: from AnyQuantDiracAI.helper.custom_behavior_base import CustomBehaviorBase
+#
+# Rule 2: Required Method (MUST IMPLEMENT)
+#   - get_trade_config(self, price, equity, volatility=None) -> dict
+#
+# Rule 3: Optional Methods (CAN OVERRIDE)
+#   - should_apply_trailing_stop(self, position, price, profit_pct) -> bool
+#   - should_apply_breakeven(self, position, price, profit_pct) -> bool
+#   - should_exit_trade(self, position, price, indicators) -> bool
+#   - And 6 more optional methods...
+#
+# Rule 4: Parameters
+#   - Define as class variables (e.g., trailing_stop_pips = 30)
+#   - Can be optimized during backtesting
+#
+# ============================================================================
+
+from AnyQuantDiracAI.helper.custom_behavior_base import CustomBehaviorBase
+
+class MyTradeManagement(CustomBehaviorBase):
+    """
+    Custom trade management for position handling.
+    
+    Define class attributes as parameters that can be optimized:
+    - trailing_stop_pips = 30
+    - breakeven_pips = 20
+    - partial_tp_pct = 50
+    """
+    
+    # Parameters (can be optimized)
+    trailing_stop_pips = 30
+    breakeven_pips = 20
+    partial_tp_pct = 50
+    
+    def get_trade_config(self, price, equity, volatility=None):
+        """
+        REQUIRED METHOD - Return trade configuration.
+        
+        Args:
+            price: Current market price
+            equity: Current account equity
+            volatility: Optional volatility measure
+        
+        Returns:
+            Dictionary with trade configuration:
+            {
+                'stop_loss_pips': 30,
+                'take_profit_pips': 90,
+                'trailing_stop_pips': 20,
+                'breakeven_pips': 15
+            }
+        """
+        return {
+            'stop_loss_pips': 30,
+            'take_profit_pips': 90,
+            'trailing_stop_pips': self.trailing_stop_pips,
+            'breakeven_pips': self.breakeven_pips
+        }
+    
+    # ========================================================================
+    # OPTIONAL METHODS (Can override for advanced features)
+    # ========================================================================
+    
+    def should_apply_trailing_stop(self, position, price, profit_pct):
+        """
+        OPTIONAL - Determine when to apply trailing stop.
+        
+        Args:
+            position: Current position object
+            price: Current market price
+            profit_pct: Current profit percentage
+        
+        Returns:
+            Boolean - True to apply trailing stop
+        """
+        # Apply trailing stop when profit > 1%
+        return profit_pct > 1.0
+    
+    def should_apply_breakeven(self, position, price, profit_pct):
+        """
+        OPTIONAL - Determine when to move stop to breakeven.
+        
+        Args:
+            position: Current position object
+            price: Current market price
+            profit_pct: Current profit percentage
+        
+        Returns:
+            Boolean - True to move to breakeven
+        """
+        # Move to breakeven at 2% profit
+        return profit_pct >= 2.0
+    
+    def should_exit_trade(self, position, price, indicators):
+        """
+        OPTIONAL - Custom exit logic.
+        
+        Args:
+            position: Current position object
+            price: Current market price
+            indicators: Dictionary of indicator values
+        
+        Returns:
+            Boolean - True to exit, False to hold
+        """
+        # Exit if profit exceeds 5%
+        return position.profit_pct > 5.0
+
+
+# ============================================================================
+# MINIMAL EXAMPLE (Only Required Method):
+# ============================================================================
+#
+# from AnyQuantDiracAI.helper.custom_behavior_base import CustomBehaviorBase
+#
+# class SimpleTradeManagement(CustomBehaviorBase):
+#     def get_trade_config(self, price, equity, volatility=None):
+#         return {
+#             'stop_loss_pips': 30,
+#             'take_profit_pips': 90,
+#             'trailing_stop_pips': 20
+#         }
+#
+# ============================================================================
+`
+
 const PYTHON_STRATEGY_TEMPLATE = `# ============================================================================
 # CUSTOM STRATEGY TEMPLATE - Complete Trading Strategy
 # ============================================================================
@@ -497,16 +780,23 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
     }
   }, [editingComponent])
 
-  // Update component template when language changes (only for component code)
+  // Update component template when language or component type changes (only for component code)
   useEffect(() => {
     if (!isEditing && codeType === "component") {
       if (language === "python") {
-        setCode(PYTHON_COMPONENT_TEMPLATE)
+        // Select template based on component type
+        if (componentType === "indicator") {
+          setCode(PYTHON_COMPONENT_TEMPLATE)
+        } else if (componentType === "behavior") {
+          setCode(PYTHON_BEHAVIOR_TEMPLATE)
+        } else if (componentType === "trade_management") {
+          setCode(PYTHON_TRADE_MANAGEMENT_TEMPLATE)
+        }
       } else {
         setCode(PINESCRIPT_COMPONENT_TEMPLATE)
       }
     }
-  }, [language, isEditing, codeType])
+  }, [language, componentType, isEditing, codeType])
 
   // Update strategy template when language changes (only for strategy code)
   useEffect(() => {

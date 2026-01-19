@@ -1550,10 +1550,18 @@ export const getShortlistedStrategies = async (params = {}) => {
 
 /**
  * List all custom components owned by the authenticated user
+ * @param {string} [type] - Optional filter by type: "indicator" | "behavior" | "trade_management" | "strategy"
  * @returns {Promise} Promise with array of custom components
  */
-export const listCustomComponents = async () => {
-  const response = await Fetch("/api/custom-components/", {
+export const listCustomComponents = async (type = null) => {
+  let url = "/api/custom-components/";
+  
+  // Add type filter if provided
+  if (type) {
+    url += `?type=${type}`;
+  }
+  
+  const response = await Fetch(url, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",

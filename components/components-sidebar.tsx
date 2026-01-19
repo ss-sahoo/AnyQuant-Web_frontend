@@ -35,23 +35,33 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
   const [customIndicatorSearch, setCustomIndicatorSearch] = useState("")
 
   // Custom components state
-  const [customComponents, setCustomComponents] = useState<CustomComponent[]>([])
+  const [customIndicators, setCustomIndicators] = useState<CustomComponent[]>([])
+  const [customBehaviors, setCustomBehaviors] = useState<CustomComponent[]>([])
+  const [customTradeManagement, setCustomTradeManagement] = useState<CustomComponent[]>([])
   const [isLoadingCustom, setIsLoadingCustom] = useState(false)
   const [customError, setCustomError] = useState<string | null>(null)
 
-  // Function to fetch custom components
+  // Function to fetch custom components by type
   const fetchCustomComponents = async () => {
     setIsLoadingCustom(true)
     setCustomError(null)
     try {
-      const components = await listCustomComponents()
-      // Only show active components
-      const activeComponents = components.filter((c: CustomComponent) => c.status === "active")
-      setCustomComponents(activeComponents)
+      // Fetch each type separately using query parameters
+      const [indicators, behaviors, tradeManagement] = await Promise.all([
+        listCustomComponents("indicator"),
+        listCustomComponents("behavior"),
+        listCustomComponents("trade_management")
+      ])
+      
+      // Filter only active components
+      setCustomIndicators(indicators.filter((c: CustomComponent) => c.status === "active"))
+      setCustomBehaviors(behaviors.filter((c: CustomComponent) => c.status === "active"))
+      setCustomTradeManagement(tradeManagement.filter((c: CustomComponent) => c.status === "active"))
     } catch (error: any) {
       // Silently fail if custom components endpoint doesn't exist
-      // This is expected if the backend doesn't have this feature yet
-      setCustomComponents([])
+      setCustomIndicators([])
+      setCustomBehaviors([])
+      setCustomTradeManagement([])
     } finally {
       setIsLoadingCustom(false)
     }
@@ -64,15 +74,9 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
 
   // Listen for refresh event from developer mode
   useEffect(() => {
-    const handleRefresh = (e: CustomEvent) => {
-      // If components are passed in the event, use them directly
-      if (e.detail) {
-        const activeComponents = e.detail.filter((c: CustomComponent) => c.status === "active")
-        setCustomComponents(activeComponents)
-      } else {
-        // Otherwise fetch fresh
-        fetchCustomComponents()
-      }
+    const handleRefresh = () => {
+      // Fetch fresh data from API
+      fetchCustomComponents()
     }
 
     window.addEventListener('refresh-custom-components', handleRefresh as EventListener)
@@ -82,15 +86,9 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
   }, [])
 
   // Filter custom indicators based on search
-  const filteredCustomIndicators = customComponents.filter((component) =>
-    component.type === "indicator" && component.name.toLowerCase().includes(customIndicatorSearch.toLowerCase())
+  const filteredCustomIndicators = customIndicators.filter((component) =>
+    component.name.toLowerCase().includes(customIndicatorSearch.toLowerCase())
   )
-
-  // Filter custom behaviors
-  const customBehaviors = customComponents.filter((component) => component.type === "behavior")
-  
-  // Filter custom trade management
-  const customTradeManagement = customComponents.filter((component) => component.type === "trade_management")
 
   // State for showing all custom behaviors and trade management
   const [showAllCustomBehaviors, setShowAllCustomBehaviors] = useState(false)
@@ -105,9 +103,6 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
   const filteredCustomTradeManagement = customTradeManagement.filter((component) =>
     component.name.toLowerCase().includes(customTradeManagementSearch.toLowerCase())
   )
-
-  // Custom indicators only
-  const customIndicators = customComponents.filter((component) => component.type === "indicator")
 
   // Complete list of basic components
   const allBasicComponents = [
@@ -414,7 +409,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
                           setDeletingId(component.id)
                           try {
                             await deleteCustomComponent(component.id)
-                            setCustomComponents(prev => prev.filter(c => c.id !== component.id))
+                            setCustomIndicators(prev => prev.filter(c => c.id !== component.id))
                           } catch (error) {
                             console.error("Failed to delete component:", error)
                           } finally {
@@ -448,7 +443,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
         </div>
 
         {/* Custom Behaviors */}
-        {/* <div className="mb-6 bg-black p-4 rounded-lg">
+        <div className="mb-6 bg-black p-4 rounded-lg">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-medium">Custom Behaviors</h3>
           </div>
@@ -526,7 +521,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
                           setDeletingId(component.id)
                           try {
                             await deleteCustomComponent(component.id)
-                            setCustomComponents(prev => prev.filter(c => c.id !== component.id))
+                            setCustomBehaviors(prev => prev.filter(c => c.id !== component.id))
                           } catch (error) {
                             console.error("Failed to delete component:", error)
                           } finally {
@@ -557,10 +552,10 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
               </div>
             </>
           )}
-        </div> */}
+        </div>
 
         {/* Custom Trade Management */}
-        {/* <div className="mb-6 bg-black p-4 rounded-lg">
+        <div className="mb-6 bg-black p-4 rounded-lg">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-medium">Custom Trade Management</h3>
           </div>
@@ -638,7 +633,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
                           setDeletingId(component.id)
                           try {
                             await deleteCustomComponent(component.id)
-                            setCustomComponents(prev => prev.filter(c => c.id !== component.id))
+                            setCustomTradeManagement(prev => prev.filter(c => c.id !== component.id))
                           } catch (error) {
                             console.error("Failed to delete component:", error)
                           } finally {
@@ -669,7 +664,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
               </div>
             </>
           )}
-        </div> */}
+        </div>
 
         {/* Behaviours */}
         <div className="mb-6 bg-black p-4 rounded-lg">
