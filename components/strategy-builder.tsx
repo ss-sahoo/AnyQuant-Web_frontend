@@ -410,6 +410,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
   // State for custom indicators - stores custom component data by name for lookup
   const [customIndicatorRegistry, setCustomIndicatorRegistry] = useState<Record<string, any>>({})
+  
+  // State for custom behaviors - stores custom behavior data by name for lookup
+  const [customBehaviorRegistry, setCustomBehaviorRegistry] = useState<Record<string, any>>({})
 
   // Listen for component selection events from the sidebar
   useEffect(() => {
@@ -419,42 +422,96 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       // Set the active statement index first
       setActiveStatementIndex(statementIndex)
       
-      // If this is a custom indicator (has customComponentData), handle it directly
+      // If this is a custom component (has customComponentData), handle it based on type
       if (customComponentData) {
-        // Store in registry for future reference
-        setCustomIndicatorRegistry(prev => ({
-          ...prev,
-          [component]: customComponentData
-        }))
+        const componentType = customComponentData.type
         
-        // Directly add the custom indicator to the strategy
-        const newStatements = [...statements]
-        const currentStatement = newStatements[statementIndex]
-        
-        if (currentStatement && currentStatement.strategy.length > 0) {
-          const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-          const timeframe = lastCondition.timeframe || selectedTimeframe || "3h"
+        // Handle custom indicators
+        if (componentType === "indicator") {
+          // Store in registry for future reference
+          setCustomIndicatorRegistry(prev => ({
+            ...prev,
+            [component]: customComponentData
+          }))
           
-          // Create the custom indicator input
-          const customIndicatorInput = {
-            type: "CUSTOM_I",
-            name: customComponentData.name,
-            timeframe: timeframe,
-            input_params: customComponentData.parameters || {},
+          // Directly add the custom indicator to the strategy
+          const newStatements = [...statements]
+          const currentStatement = newStatements[statementIndex]
+          
+          if (currentStatement && currentStatement.strategy.length > 0) {
+            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+            const timeframe = lastCondition.timeframe || selectedTimeframe || "3h"
+            
+            // Create the custom indicator input
+            const customIndicatorInput = {
+              type: "CUSTOM_I",
+              name: customComponentData.name,
+              timeframe: timeframe,
+              input_params: customComponentData.parameters || {},
+            }
+            
+            // Check if we already have inp1 and an operator - if so, we're adding to inp2
+            if (lastCondition.inp1 && lastCondition.operator_name) {
+              lastCondition.inp2 = customIndicatorInput
+            } else {
+              // We're adding to inp1
+              lastCondition.inp1 = customIndicatorInput
+            }
+            
+            // Move timeframe to inp1/inp2 and remove from condition
+            delete lastCondition.timeframe
+            
+            setStatements(newStatements)
           }
+        }
+        // Handle custom behaviors
+        else if (componentType === "behavior") {
+          // Store in registry for future reference
+          setCustomBehaviorRegistry(prev => ({
+            ...prev,
+            [component]: customComponentData
+          }))
           
-          // Check if we already have inp1 and an operator - if so, we're adding to inp2
-          if (lastCondition.inp1 && lastCondition.operator_name) {
-            lastCondition.inp2 = customIndicatorInput
-          } else {
-            // We're adding to inp1
-            lastCondition.inp1 = customIndicatorInput
-          }
-          
-          // Move timeframe to inp1/inp2 and remove from condition
-          delete lastCondition.timeframe
-          
-          setStatements(newStatements)
+          // Add the custom behavior as an operator
+          setStatements(prevStatements => {
+            const newStatements = [...prevStatements]
+            const currentStatement = { ...newStatements[statementIndex] }
+            const strategy = [...currentStatement.strategy]
+            
+            if (strategy.length > 0) {
+              const lastConditionIndex = strategy.length - 1
+              const lastCondition = { ...strategy[lastConditionIndex] }
+              
+              // Only add operator if inp1 exists (indicator must be added first)
+              if (lastCondition.inp1) {
+                // Preserve inp1 by creating a copy
+                const preservedInp1 = lastCondition.inp1
+                
+                // Add the custom behavior as operator
+                lastCondition.operator_name = `CUSTOM_B:${customComponentData.name}`
+                lastCondition.operator_display = customComponentData.name
+                
+                // Store the behavior parameters
+                lastCondition.Operator = {
+                  type: "CUSTOM_B",
+                  name: customComponentData.name,
+                  params: customComponentData.parameters || {}
+                }
+                
+                // Ensure inp1 is preserved
+                lastCondition.inp1 = preservedInp1
+                
+                // Update the condition in the strategy array
+                strategy[lastConditionIndex] = lastCondition
+                currentStatement.strategy = strategy
+                newStatements[statementIndex] = currentStatement
+              } else {
+                console.warn("Please add an indicator first before adding a behavior")
+              }
+            }
+            
+            return newStatements
+          })
         }
         
         // Focus the search input after adding
@@ -529,8 +586,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       return
     }
 
-    // Combine all component types for searching, including custom indicators
+    // Combine all component types for searching, including custom indicators and behaviors
     const customIndicatorNames = Object.keys(customIndicatorRegistry)
+    const customBehaviorNames = Object.keys(customBehaviorRegistry)
     const allComponents = [
       ...basicComponents.map((c) => c.label),
       ...extraBasicComponents.map((c) => c.label),
@@ -540,6 +598,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       ...actions.map((c) => c.label),
       ...tradeManagement.map((c) => c.label),
       ...customIndicatorNames, // Add custom indicators to search
+      ...customBehaviorNames, // Add custom behaviors to search
     ]
 
     // Filter components based on search term with parent-child relationships
@@ -2008,6 +2067,38 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           console.warn("Please select a behavior first before adding a then condition")
         }
       }
+    } else if (customBehaviorRegistry[component]) {
+      // Adding a custom behavior
+      if (currentStatement.strategy.length > 0) {
+        const lastConditionIndex = currentStatement.strategy.length - 1
+        const lastCondition = { ...currentStatement.strategy[lastConditionIndex] }
+        const customBehaviorData = customBehaviorRegistry[component]
+
+        // Only add operator if inp1 exists (indicator must be added first)
+        if (lastCondition.inp1) {
+          // Preserve inp1 by creating a reference
+          const preservedInp1 = lastCondition.inp1
+          
+          // Add the custom behavior as operator
+          lastCondition.operator_name = `CUSTOM_B:${customBehaviorData.name}`
+          lastCondition.operator_display = customBehaviorData.name
+          
+          // Store the behavior parameters
+          lastCondition.Operator = {
+            type: "CUSTOM_B",
+            name: customBehaviorData.name,
+            params: customBehaviorData.parameters || {}
+          }
+          
+          // Ensure inp1 is preserved
+          lastCondition.inp1 = preservedInp1
+          
+          // Update the condition in the strategy array
+          currentStatement.strategy[lastConditionIndex] = lastCondition
+        } else {
+          console.warn("Please add an indicator first before adding a behavior")
+        }
+      }
     } else if (
       // Important: treat "Accumulator" via the dedicated accumulator handler below,
       // not as a generic behaviour. Otherwise the accumulator modal won't open
@@ -2522,6 +2613,19 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         },
       }
     }
+    
+    // Handle custom behaviors
+    if (
+      componentType === "operator" &&
+      condition.operator_name?.startsWith("CUSTOM_B:") &&
+      condition.Operator
+    ) {
+      return {
+        title: condition.operator_display || "Custom Behavior",
+        details: condition.Operator.params || {},
+      }
+    }
+    
     if (componentType === "accumulate" && condition.Accumulate?.forPeriod) {
       return {
         title: "Accumulate Condition",
@@ -3944,8 +4048,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         // Behaviors with light gray background
         let operatorDisplay = condition.operator_display || condition.operator_name.replace("_", " ")
         
+        // Handle custom behaviors
+        if (condition.operator_name.startsWith("CUSTOM_B:")) {
+          operatorDisplay = condition.operator_display || condition.operator_name.replace("CUSTOM_B:", "")
+        }
         // For moving operators with new structure, show the full configuration
-        if (condition.Operator && (condition.operator_name === "moving_up" || condition.operator_name === "moving_down")) {
+        else if (condition.Operator && (condition.operator_name === "moving_up" || condition.operator_name === "moving_down")) {
           const params = condition.Operator.params
           operatorDisplay = `${condition.Operator.operator_name.replace("_", " ")} ${params.logical_operator} ${params.value}${params.unit}`
         }

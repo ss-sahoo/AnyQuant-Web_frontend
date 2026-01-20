@@ -729,6 +729,7 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
     if (!onLoadStrategy) return
     try {
       const strategy = await onLoadStrategy(strategyId)
+      setCodeType("strategy")  // Set code type to strategy
       setCode(strategy.code)
       setStrategyName(strategy.name)
       setEditingStrategyId(strategyId)
