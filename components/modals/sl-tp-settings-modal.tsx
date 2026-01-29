@@ -38,19 +38,17 @@ export interface SLTPSettings {
   formatType?: "simple" | "advanced" | "trailing" | "indicator" | "partial" | "fixed"
 }
 
-// Convert pips to points (1 pip = 0.1 points for display)
+// Convert pips to points (display exact value - 1 pip = 1 point)
 const pipsToPoints = (text: string): string => {
   return text.replace(/(\d+)pips/g, (match, num) => {
-    const points = parseInt(num) * 0.1
-    return `${points}points`
+    return `${num}points`
   })
 }
 
-// Convert points back to pips (1 point = 10 pips for backend)
+// Convert points back to pips (1 point = 1 pip for backend)
 const pointsToPips = (text: string): string => {
   return text.replace(/(\d+(?:\.\d+)?)points/g, (match, num) => {
-    const pips = Math.round(parseFloat(num) * 10)
-    return `${pips}pips`
+    return `${Math.round(parseFloat(num))}pips`
   })
 }
 
@@ -145,33 +143,29 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
             <label className="block text-sm font-medium mb-1">Format</label>
             <div className="flex flex-wrap gap-2">
               <button
-                className={`px-3 py-1 rounded-md ${
-                  formatType === "simple" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
-                }`}
+                className={`px-3 py-1 rounded-md ${formatType === "simple" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
+                  }`}
                 onClick={() => setFormatType("simple")}
               >
                 Simple
               </button>
               <button
-                className={`px-3 py-1 rounded-md ${
-                  formatType === "advanced" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
-                }`}
+                className={`px-3 py-1 rounded-md ${formatType === "advanced" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
+                  }`}
                 onClick={() => setFormatType("advanced")}
               >
                 Advanced
               </button>
               <button
-                className={`px-3 py-1 rounded-md ${
-                  formatType === "trailing" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
-                }`}
+                className={`px-3 py-1 rounded-md ${formatType === "trailing" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
+                  }`}
                 onClick={() => setFormatType("trailing")}
               >
                 Trailing
               </button>
               <button
-                className={`px-3 py-1 rounded-md ${
-                  formatType === "indicator" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
-                }`}
+                className={`px-3 py-1 rounded-md ${formatType === "indicator" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
+                  }`}
                 onClick={() => setFormatType("indicator")}
               >
                 Indicator
@@ -187,21 +181,19 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                 <label className="block text-sm font-medium mb-1">Value Type</label>
                 <div className="flex gap-2">
                   <button
-                    className={`px-3 py-1 rounded-md ${
-                      settings.valueType === "pips"
+                    className={`px-3 py-1 rounded-md ${settings.valueType === "pips"
                         ? "bg-blue-600 text-white"
                         : "bg-gray-100 text-black hover:bg-gray-200"
-                    }`}
+                      }`}
                     onClick={() => setSettings({ ...settings, valueType: "pips" })}
                   >
                     Points
                   </button>
                   <button
-                    className={`px-3 py-1 rounded-md ${
-                      settings.valueType === "percentage"
+                    className={`px-3 py-1 rounded-md ${settings.valueType === "percentage"
                         ? "bg-blue-600 text-white"
                         : "bg-gray-100 text-black hover:bg-gray-200"
-                    }`}
+                      }`}
                     onClick={() =>
                       setSettings({
                         ...settings,
@@ -212,7 +204,7 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                   >
                     Percentage
                   </button>
-                  
+
                 </div>
               </div>
 
@@ -222,21 +214,19 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                   {settings.valueType === "pips" ? (
                     <>
                       <button
-                        className={`px-3 py-1 rounded-md ${
-                          settings.direction === "+"
+                        className={`px-3 py-1 rounded-md ${settings.direction === "+"
                             ? "bg-blue-600 text-white"
                             : "bg-gray-100 text-black hover:bg-gray-200"
-                        }`}
+                          }`}
                         onClick={() => setSettings({ ...settings, direction: "+" })}
                       >
                         +
                       </button>
                       <button
-                        className={`px-3 py-1 rounded-md ${
-                          settings.direction === "-"
+                        className={`px-3 py-1 rounded-md ${settings.direction === "-"
                             ? "bg-blue-600 text-white"
                             : "bg-gray-100 text-black hover:bg-gray-200"
-                        }`}
+                          }`}
                         onClick={() => setSettings({ ...settings, direction: "-" })}
                       >
                         -
@@ -245,11 +235,10 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                   ) : (
                     <>
                       <button
-                        className={`px-3 py-1 rounded-md ${
-                          settings.direction === "*"
+                        className={`px-3 py-1 rounded-md ${settings.direction === "*"
                             ? "bg-blue-600 text-white"
                             : "bg-gray-100 text-black hover:bg-gray-200"
-                        }`}
+                          }`}
                         onClick={() => setSettings({ ...settings, direction: "*" })}
                       >
                         ×
@@ -296,19 +285,17 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                 <label className="block text-sm font-medium mb-1">Reference Type</label>
                 <div className="flex gap-2">
                   <button
-                    className={`px-3 py-1 rounded-md ${
-                      settings.inp2 === "Entry_Price"
+                    className={`px-3 py-1 rounded-md ${settings.inp2 === "Entry_Price"
                         ? "bg-blue-600 text-white"
                         : "bg-gray-100 text-black hover:bg-gray-200"
-                    }`}
+                      }`}
                     onClick={() => setSettings({ ...settings, inp2: "Entry_Price" })}
                   >
                     Entry Price
                   </button>
                   <button
-                    className={`px-3 py-1 rounded-md ${
-                      settings.inp2 === "Close" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
-                    }`}
+                    className={`px-3 py-1 rounded-md ${settings.inp2 === "Close" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
+                      }`}
                     onClick={() => setSettings({ ...settings, inp2: "Close" })}
                   >
                     Close Price
@@ -320,17 +307,15 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                 <label className="block text-sm font-medium mb-1">Operation</label>
                 <div className="flex gap-2">
                   <button
-                    className={`px-3 py-1 rounded-md ${
-                      settings.direction === "+" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
-                    }`}
+                    className={`px-3 py-1 rounded-md ${settings.direction === "+" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
+                      }`}
                     onClick={() => setSettings({ ...settings, direction: "+" })}
                   >
                     +
                   </button>
                   <button
-                    className={`px-3 py-1 rounded-md ${
-                      settings.direction === "-" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
-                    }`}
+                    className={`px-3 py-1 rounded-md ${settings.direction === "-" ? "bg-blue-600 text-white" : "bg-gray-100 text-black hover:bg-gray-200"
+                      }`}
                     onClick={() => setSettings({ ...settings, direction: "-" })}
                   >
                     -
@@ -366,7 +351,7 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
               <div>
                 <label className="block text-sm font-medium mb-1">Base Price</label>
                 <div className="flex gap-2 mb-3">
-                  <button className={`px-3 py-1 rounded-md bg-blue-600 text-white`} onClick={() => {}}>
+                  <button className={`px-3 py-1 rounded-md bg-blue-600 text-white`} onClick={() => { }}>
                     Entry Price
                   </button>
                 </div>
@@ -375,21 +360,19 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                   <label className="block text-sm font-medium mr-2">Direction</label>
                   <div className="flex gap-2">
                     <button
-                      className={`px-3 py-1 rounded-md ${
-                        settings.direction === "+"
+                      className={`px-3 py-1 rounded-md ${settings.direction === "+"
                           ? "bg-blue-600 text-white"
                           : "bg-gray-100 text-black hover:bg-gray-200"
-                      }`}
+                        }`}
                       onClick={() => setSettings({ ...settings, direction: "+" })}
                     >
                       +
                     </button>
                     <button
-                      className={`px-3 py-1 rounded-md ${
-                        settings.direction === "-"
+                      className={`px-3 py-1 rounded-md ${settings.direction === "-"
                           ? "bg-blue-600 text-white"
                           : "bg-gray-100 text-black hover:bg-gray-200"
-                      }`}
+                        }`}
                       onClick={() => setSettings({ ...settings, direction: "-" })}
                     >
                       -
@@ -474,11 +457,10 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                     <label className="block text-sm font-medium mb-1">Side</label>
                     <div className="flex gap-2">
                       <button
-                        className={`px-3 py-1 rounded-md ${
-                          (settings.indicatorParams?.side || "low") === "low"
+                        className={`px-3 py-1 rounded-md ${(settings.indicatorParams?.side || "low") === "low"
                             ? "bg-blue-600 text-white"
                             : "bg-gray-100 text-black hover:bg-gray-200"
-                        }`}
+                          }`}
                         onClick={() =>
                           setSettings({
                             ...settings,
@@ -492,11 +474,10 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                         Low
                       </button>
                       <button
-                        className={`px-3 py-1 rounded-md ${
-                          (settings.indicatorParams?.side || "low") === "high"
+                        className={`px-3 py-1 rounded-md ${(settings.indicatorParams?.side || "low") === "high"
                             ? "bg-blue-600 text-white"
                             : "bg-gray-100 text-black hover:bg-gray-200"
-                        }`}
+                          }`}
                         onClick={() =>
                           setSettings({
                             ...settings,
@@ -678,7 +659,7 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                 >
                   {(() => {
                     const tf = settings.indicatorParams?.timeframe
-                    const presets = ["15min","20min","30min","45min","1h","3h","4h"]
+                    const presets = ["15min", "20min", "30min", "45min", "1h", "3h", "4h"]
                     if (tf && !presets.includes(tf)) {
                       return <option value={tf}>{tf}</option>
                     }
@@ -749,21 +730,19 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
                 <div className="flex items-center">
                   <div className="flex gap-2 mr-2">
                     <button
-                      className={`px-3 py-1 rounded-md ${
-                        settings.direction === "+"
+                      className={`px-3 py-1 rounded-md ${settings.direction === "+"
                           ? "bg-blue-600 text-white"
                           : "bg-gray-100 text-black hover:bg-gray-200"
-                      }`}
+                        }`}
                       onClick={() => setSettings({ ...settings, direction: "+" })}
                     >
                       +
                     </button>
                     <button
-                      className={`px-3 py-1 rounded-md ${
-                        settings.direction === "-"
+                      className={`px-3 py-1 rounded-md ${settings.direction === "-"
                           ? "bg-blue-600 text-white"
                           : "bg-gray-100 text-black hover:bg-gray-200"
-                      }`}
+                        }`}
                       onClick={() => setSettings({ ...settings, direction: "-" })}
                     >
                       -

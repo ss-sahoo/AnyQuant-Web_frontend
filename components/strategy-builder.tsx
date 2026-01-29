@@ -4667,11 +4667,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   }
 
   // Function to render equity rules
-  // Convert pips to points for display (1 pip = 0.1 points)
+  // Display pips as points without conversion (show exact value)
   const pipsToPointsDisplay = (text: string): string => {
     return text.replace(/(\d+)pips/g, (match, num) => {
-      const points = parseInt(num) * 0.1
-      return `${points}points`
+      return `${num}points`
     })
   }
 
