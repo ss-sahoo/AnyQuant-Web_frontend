@@ -39,6 +39,7 @@ import { CandleSizeSettingsModal } from "@/components/modals/candle-size-setting
 import { DeveloperModePage } from "@/components/developer-mode-page"
 import { CustomIndicatorSettingsModal } from "@/components/modals/custom-indicator-settings-modal"
 import { EditStrategyModal } from "@/components/edit-strategy-modal"
+import { TradingSessionModal } from "./trading-session-modal"
 import type { Algorithm } from "@/lib/types"
 
 interface StrategyBuilderProps {
@@ -84,20 +85,20 @@ interface StrategyCondition {
     }
   }
   inp2?:
-    | {
-        type: string
-        value?: number
-        wait?: string
-        index?: number
-        timeframe?: string
-        input?: string
-        name?: string
-        input_params?: any
-        Derivative?: {
-          order: number
-        }
-      }
-    | { name: string }
+  | {
+    type: string
+    value?: number
+    wait?: string
+    index?: number
+    timeframe?: string
+    input?: string
+    name?: string
+    input_params?: any
+    Derivative?: {
+      order: number
+    }
+  }
+  | { name: string }
   timeframe?: string // Added timeframe property to StrategyCondition
   operator?: string
   pips?: number
@@ -149,9 +150,16 @@ interface EquityRule {
     }
     [key: string]: any
   }
+  trade_management?: {
+    type: string
+    name: string
+    params: {
+      [key: string]: any
+    }
+  }
 }
 
-// Update the StrategyStatement interface to include TradingType
+// Update the StrategyStatement interface to include TradingType and TradingSession
 interface StrategyStatement {
   side: string
   saveresult: string
@@ -164,6 +172,17 @@ interface StrategyStatement {
     lot?: string
     cash?: number
     nTrade_max?: number
+  }
+  TradingSession?: {
+    Timezone: string
+    Day: {
+      Operator: string
+      input: string
+    }
+    Time: {
+      Operator: string
+      input: string[]
+    }
   }
 }
 
@@ -195,6 +214,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const [showCandleSizeModal, setShowCandleSizeModal] = useState(false)
   const [showDerivativeModal, setShowDerivativeModal] = useState(false)
   const [showDeveloperModeModal, setShowDeveloperModeModal] = useState(false)
+  const [showTradingSessionModal, setShowTradingSessionModal] = useState(false)
 
   const [showSaveStrategyModal, setShowSaveStrategyModal] = useState(false)
   const [strategyName, setStrategyName] = useState(initialName || "")
@@ -205,7 +225,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   // Initialize with a statement structure that includes "if" and default TradingType settings
   const [statements, setStatements] = useState<StrategyStatement[]>([
     {
-      side: "S",
+      side: "",
       saveresult: "Statement 1",
       strategy: [
         {
@@ -410,22 +430,25 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
   // State for custom indicators - stores custom component data by name for lookup
   const [customIndicatorRegistry, setCustomIndicatorRegistry] = useState<Record<string, any>>({})
-  
+
   // State for custom behaviors - stores custom behavior data by name for lookup
   const [customBehaviorRegistry, setCustomBehaviorRegistry] = useState<Record<string, any>>({})
+
+  // State for custom trade management - stores custom trade management data by name for lookup
+  const [customTradeManagementRegistry, setCustomTradeManagementRegistry] = useState<Record<string, any>>({})
 
   // Listen for component selection events from the sidebar
   useEffect(() => {
     const handleComponentSelected = (e: CustomEvent) => {
       const { component, statementIndex, customComponentData } = e.detail
-      
+
       // Set the active statement index first
       setActiveStatementIndex(statementIndex)
-      
+
       // If this is a custom component (has customComponentData), handle it based on type
       if (customComponentData) {
         const componentType = customComponentData.type
-        
+
         // Handle custom indicators
         if (componentType === "indicator") {
           // Store in registry for future reference
@@ -433,15 +456,15 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             ...prev,
             [component]: customComponentData
           }))
-          
+
           // Directly add the custom indicator to the strategy
           const newStatements = [...statements]
           const currentStatement = newStatements[statementIndex]
-          
+
           if (currentStatement && currentStatement.strategy.length > 0) {
             const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
             const timeframe = lastCondition.timeframe || selectedTimeframe || "3h"
-            
+
             // Create the custom indicator input
             const customIndicatorInput = {
               type: "CUSTOM_I",
@@ -449,7 +472,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               timeframe: timeframe,
               input_params: customComponentData.parameters || {},
             }
-            
+
             // Check if we already have inp1 and an operator - if so, we're adding to inp2
             if (lastCondition.inp1 && lastCondition.operator_name) {
               lastCondition.inp2 = customIndicatorInput
@@ -457,10 +480,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               // We're adding to inp1
               lastCondition.inp1 = customIndicatorInput
             }
-            
+
             // Move timeframe to inp1/inp2 and remove from condition
             delete lastCondition.timeframe
-            
+
             setStatements(newStatements)
           }
         }
@@ -471,36 +494,36 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             ...prev,
             [component]: customComponentData
           }))
-          
+
           // Add the custom behavior as an operator
           setStatements(prevStatements => {
             const newStatements = [...prevStatements]
             const currentStatement = { ...newStatements[statementIndex] }
             const strategy = [...currentStatement.strategy]
-            
+
             if (strategy.length > 0) {
               const lastConditionIndex = strategy.length - 1
               const lastCondition = { ...strategy[lastConditionIndex] }
-              
+
               // Only add operator if inp1 exists (indicator must be added first)
               if (lastCondition.inp1) {
                 // Preserve inp1 by creating a copy
                 const preservedInp1 = lastCondition.inp1
-                
+
                 // Add the custom behavior as operator
                 lastCondition.operator_name = `CUSTOM_B:${customComponentData.name}`
                 lastCondition.operator_display = customComponentData.name
-                
+
                 // Store the behavior parameters
                 lastCondition.Operator = {
                   type: "CUSTOM_B",
                   name: customComponentData.name,
                   params: customComponentData.parameters || {}
                 }
-                
+
                 // Ensure inp1 is preserved
                 lastCondition.inp1 = preservedInp1
-                
+
                 // Update the condition in the strategy array
                 strategy[lastConditionIndex] = lastCondition
                 currentStatement.strategy = strategy
@@ -509,11 +532,45 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 console.warn("Please add an indicator first before adding a behavior")
               }
             }
-            
+
             return newStatements
           })
         }
-        
+        // Handle custom trade management
+        else if (componentType === "trade_management") {
+          // Store in registry for future reference
+          setCustomTradeManagementRegistry(prev => ({
+            ...prev,
+            [component]: customComponentData
+          }))
+
+          // Add the custom trade management to Equity
+          setStatements(prevStatements => {
+            const newStatements = [...prevStatements]
+            const currentStatement = { ...newStatements[statementIndex] }
+
+            // Ensure Equity array exists
+            if (!currentStatement.Equity) {
+              currentStatement.Equity = []
+            }
+
+            // Create the equity rule with custom trade management (without statement field)
+            const equityRule: any = {
+              trade_management: {
+                type: "CUSTOM_TM",
+                name: customComponentData.name,
+                params: customComponentData.parameters || {}
+              }
+            }
+
+            // Add the equity rule
+            currentStatement.Equity.push(equityRule)
+            newStatements[statementIndex] = currentStatement
+
+            return newStatements
+          })
+        }
+
         // Focus the search input after adding
         setTimeout(() => {
           searchInputRefs.current[statementIndex]?.focus()
@@ -521,7 +578,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       } else {
         // For regular components, call handleAddComponent
         handleAddComponent(statementIndex, component)
-        
+
         // Focus the search input after adding
         setTimeout(() => {
           searchInputRefs.current[statementIndex]?.focus()
@@ -589,6 +646,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     // Combine all component types for searching, including custom indicators and behaviors
     const customIndicatorNames = Object.keys(customIndicatorRegistry)
     const customBehaviorNames = Object.keys(customBehaviorRegistry)
+    const customTradeManagementNames = Object.keys(customTradeManagementRegistry)
     const allComponents = [
       ...basicComponents.map((c) => c.label),
       ...extraBasicComponents.map((c) => c.label),
@@ -599,6 +657,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       ...tradeManagement.map((c) => c.label),
       ...customIndicatorNames, // Add custom indicators to search
       ...customBehaviorNames, // Add custom behaviors to search
+      ...customTradeManagementNames, // Add custom trade management to search
     ]
 
     // Filter components based on search term with parent-child relationships
@@ -715,6 +774,30 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
       const currentStatement = statements[statementIndex]
       const strategy = currentStatement.strategy
+
+      // First, try to remove Trading Session if set (appears at end of components)
+      if (currentStatement.TradingSession) {
+        const newStatements = [...statements]
+        delete newStatements[statementIndex].TradingSession
+        setStatements(newStatements)
+        return
+      }
+
+      // Then, try to remove equity rules (last to first)
+      if (currentStatement.Equity && currentStatement.Equity.length > 0) {
+        const newStatements = [...statements]
+        newStatements[statementIndex].Equity.pop()
+        setStatements(newStatements)
+        return
+      }
+
+      // Then, try to remove Buy/Sell if set
+      if (currentStatement.side === "B" || currentStatement.side === "S") {
+        const newStatements = [...statements]
+        newStatements[statementIndex].side = ""
+        setStatements(newStatements)
+        return
+      }
 
       if (strategy.length === 0) return
 
@@ -861,6 +944,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   ]
 
   const actions = [
+    { id: "buy", label: "Buy" },
+    { id: "sell", label: "Sell" },
     { id: "long", label: "Long" },
     { id: "short", label: "Short" },
     { id: "wait", label: "Wait" },
@@ -868,6 +953,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     { id: "tp", label: "TP" },
     { id: "partial-tp", label: "Partial TP" },
     { id: "manage-exit", label: "Manage Exit" },
+    { id: "trading-session", label: "Trading Session" },
   ]
 
   const tradeManagement = [
@@ -975,7 +1061,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       // Extract indicator-specific parameters
       if (inp2.name === "RSI") {
         settings.rsiLength = inp2.input_params?.timeperiod || 14;
-        settings.rsiSource = inp2.input_params?.source ? 
+        settings.rsiSource = inp2.input_params?.source ?
           inp2.input_params.source.charAt(0).toUpperCase() + inp2.input_params.source.slice(1) : "Close";
       } else if (inp2.name === "RSI_MA") {
         settings.rsiMaLength = inp2.input_params?.rsi_length || 14;
@@ -995,7 +1081,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       if (inp2.timeframe) {
         settings.timeframe = inp2.timeframe;
       }
-      
+
       return settings;
     }
 
@@ -1256,39 +1342,39 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             statement: "and",
             operator: `${settings.type} = ${settings.value}`,
           }
-      } else if (settings.valueType === "indicator") {
-        // For indicator-based values
-        const indName = settings.indicatorParams?.name || "nperiod_hl"
-        const timeframe = settings.indicatorParams?.timeframe || "1h"
-        let inputParams: any = {}
+        } else if (settings.valueType === "indicator") {
+          // For indicator-based values
+          const indName = settings.indicatorParams?.name || "nperiod_hl"
+          const timeframe = settings.indicatorParams?.timeframe || "1h"
+          let inputParams: any = {}
 
-        if (indName === "nperiod_hl") {
-          inputParams = { nperiod: settings.indicatorParams?.nperiod || 30, side: settings.indicatorParams?.side || "low" }
-        } else if (indName === "ma") {
-          inputParams = {
-            ma_type: (settings.indicatorParams as any)?.ma_type || "SMA",
-            ma_length: (settings.indicatorParams as any)?.ma_length || 20,
-            ...(settings.indicatorParams as any)?.ma_offset !== undefined
-              ? { ma_offset: (settings.indicatorParams as any)?.ma_offset }
-              : {},
+          if (indName === "nperiod_hl") {
+            inputParams = { nperiod: settings.indicatorParams?.nperiod || 30, side: settings.indicatorParams?.side || "low" }
+          } else if (indName === "ma") {
+            inputParams = {
+              ma_type: (settings.indicatorParams as any)?.ma_type || "SMA",
+              ma_length: (settings.indicatorParams as any)?.ma_length || 20,
+              ...(settings.indicatorParams as any)?.ma_offset !== undefined
+                ? { ma_offset: (settings.indicatorParams as any)?.ma_offset }
+                : {},
+            }
+          } else if (indName === "atr") {
+            inputParams = {
+              atr_length: (settings.indicatorParams as any)?.atr_length || 14,
+              atr_smoothing: (settings.indicatorParams as any)?.atr_smoothing || "SMA",
+              atr_multiple: (settings.indicatorParams as any)?.atr_multiple || 1,
+            }
           }
-        } else if (indName === "atr") {
-          inputParams = {
-            atr_length: (settings.indicatorParams as any)?.atr_length || 14,
-            atr_smoothing: (settings.indicatorParams as any)?.atr_smoothing || "SMA",
-            atr_multiple: (settings.indicatorParams as any)?.atr_multiple || 1,
-          }
-        }
 
-        equityRule = {
-          statement: "and",
-          operator: `${settings.type} = inp2 ${settings.direction} ${settings.value}pips`,
-          inp2: {
-            name: indName,
-            timeframe,
-            input_params: inputParams,
-          },
-        }
+          equityRule = {
+            statement: "and",
+            operator: `${settings.type} = inp2 ${settings.direction} ${settings.value}pips`,
+            inp2: {
+              name: indName,
+              timeframe,
+              input_params: inputParams,
+            },
+          }
         } else if (settings.valueType === "close") {
           // For close price with multiplier
           equityRule = {
@@ -1427,7 +1513,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     if (["Price Open", "Price Close", "Price Low", "Price High"].includes(component)) {
       const priceType = component.split(" ")[1].toLowerCase()
       const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-      
+
       // Check if we already have inp1 and an operator - if so, we're adding to inp2
       if (lastCondition.inp1 && lastCondition.operator_name) {
         // We're adding to inp2
@@ -1437,7 +1523,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         // Create or update inp1 with the selected price type
         lastCondition.inp1 = createConstantInput(priceType, selectedTimeframe || "12min")
       }
-      
+
       setStatements(newStatements)
       setActiveStatementIndex(statementIndex)
       setSearchTerm("")
@@ -1544,7 +1630,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
         // Check if this is a custom indicator
         const customIndicatorData = customIndicatorRegistry[component]
-        
+
         // Special handling for "price" component - it should go to inp1 if no inp1 exists
         if (component.toLowerCase() === "price") {
           // Show the Price Settings modal - handlePriceSelection will determine inp1 vs inp2
@@ -1552,11 +1638,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           setActiveStatementIndex(statementIndex)
           return
         }
-        
+
         // Handle custom indicators - they follow the same flow as normal indicators
         if (customIndicatorData) {
           const timeframe = lastCondition.timeframe || selectedTimeframe
-          
+
           // Create the custom indicator input
           const customIndicatorInput = {
             type: "CUSTOM_I",
@@ -1564,7 +1650,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             timeframe: timeframe,
             input_params: customIndicatorData.parameters || {},
           }
-          
+
           // Check if we already have inp1 and an operator - if so, we're adding to inp2
           if (lastCondition.inp1 && lastCondition.operator_name) {
             lastCondition.inp2 = customIndicatorInput
@@ -1572,10 +1658,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             // We're adding to inp1
             lastCondition.inp1 = customIndicatorInput
           }
-          
+
           // Move timeframe to inp1/inp2 and remove from condition
           delete lastCondition.timeframe
-          
+
           setStatements(newStatements)
           setActiveStatementIndex(statementIndex)
           setSearchTerm("")
@@ -1583,7 +1669,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           searchInputRefs.current[statementIndex]?.focus()
           return
         }
-        
+
         // Check if we already have inp1 and an operator - if so, we're adding to inp2
         if (lastCondition.inp1 && lastCondition.operator_name) {
           // Get the timeframe from the condition or use the selected timeframe
@@ -1664,7 +1750,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 output: "slowk",
               },
             }
-          lastAddedStochasticTarget = { target: "inp2", timeframe }
+            lastAddedStochasticTarget = { target: "inp2", timeframe }
           } else if (component.toLowerCase() === "rsi_ma" || component.toLowerCase() === "rsi-ma") {
             // Special handling for RSI_MA
             let rsiLength = 14;
@@ -1731,7 +1817,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             if (component.toLowerCase() === "volume_ma" || component.toLowerCase() === "volume-ma") {
               indicatorName = "Volume_MA";
             }
-            
+
             lastCondition.inp2 = {
               type: "CUSTOM_I",
               name: indicatorName,
@@ -1842,7 +1928,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 output: "slowk",
               },
             }
-          lastAddedStochasticTarget = { target: "inp1", timeframe }
+            lastAddedStochasticTarget = { target: "inp1", timeframe }
           } else if (component.toLowerCase() === "rsi_ma" || component.toLowerCase() === "rsi-ma") {
             // Special handling for RSI_MA
             let rsiLength = 14;
@@ -1920,7 +2006,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             if (component.toLowerCase() === "volume_ma" || component.toLowerCase() === "volume-ma") {
               indicatorName = "Volume_MA";
             }
-            
+
             lastCondition.inp1 = {
               type: "CUSTOM_I",
               name: indicatorName,
@@ -2006,8 +2092,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               (targetInput === "inp1"
                 ? (lastCondition.inp1 && "timeframe" in lastCondition.inp1 ? lastCondition.inp1.timeframe : undefined)
                 : (lastCondition.inp2 && typeof lastCondition.inp2 === "object" && "timeframe" in lastCondition.inp2
-                    ? lastCondition.inp2.timeframe
-                    : undefined)) ||
+                  ? lastCondition.inp2.timeframe
+                  : undefined)) ||
               lastCondition.timeframe ||
               selectedTimeframe
             openStochasticModal(statementIndex, conditionIndex, targetInput, timeframeForModal)
@@ -2021,8 +2107,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               (targetInput === "inp1"
                 ? (lastCondition.inp1 && "timeframe" in lastCondition.inp1 ? lastCondition.inp1.timeframe : undefined)
                 : (lastCondition.inp2 && typeof lastCondition.inp2 === "object" && "timeframe" in lastCondition.inp2
-                    ? lastCondition.inp2.timeframe
-                    : undefined)) ||
+                  ? lastCondition.inp2.timeframe
+                  : undefined)) ||
               lastCondition.timeframe ||
               selectedTimeframe
             openStochasticModal(statementIndex, conditionIndex, targetInput, timeframeForModal)
@@ -2030,8 +2116,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             setShowBollingerModal(true)
           } else if (component.toLowerCase() === "volume") {
             setShowVolumeModal(true)
-          } else if (component.toLowerCase() === "volume delta" || component.toLowerCase() === "volume-delta" || 
-                     component.toLowerCase() === "cumulative volume delta" || component.toLowerCase() === "cumulative-volume-delta") {
+          } else if (component.toLowerCase() === "volume delta" || component.toLowerCase() === "volume-delta" ||
+            component.toLowerCase() === "cumulative volume delta" || component.toLowerCase() === "cumulative-volume-delta") {
             setShowVolumeDeltaModal(true)
           } else if (component.toLowerCase() === "historical price level" || component.toLowerCase() === "historical-price-level") {
             setShowHistoricalPriceLevelModal(true)
@@ -2078,27 +2164,47 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         if (lastCondition.inp1) {
           // Preserve inp1 by creating a reference
           const preservedInp1 = lastCondition.inp1
-          
+
           // Add the custom behavior as operator
           lastCondition.operator_name = `CUSTOM_B:${customBehaviorData.name}`
           lastCondition.operator_display = customBehaviorData.name
-          
+
           // Store the behavior parameters
           lastCondition.Operator = {
             type: "CUSTOM_B",
             name: customBehaviorData.name,
             params: customBehaviorData.parameters || {}
           }
-          
+
           // Ensure inp1 is preserved
           lastCondition.inp1 = preservedInp1
-          
+
           // Update the condition in the strategy array
           currentStatement.strategy[lastConditionIndex] = lastCondition
         } else {
           console.warn("Please add an indicator first before adding a behavior")
         }
       }
+    } else if (customTradeManagementRegistry[component]) {
+      // Adding a custom trade management
+      const customTradeManagementData = customTradeManagementRegistry[component]
+
+      // Ensure Equity array exists
+      if (!currentStatement.Equity) {
+        currentStatement.Equity = []
+      }
+
+      // Create the equity rule with custom trade management (without statement field)
+      const equityRule: any = {
+        trade_management: {
+          type: "CUSTOM_TM",
+          name: customTradeManagementData.name,
+          params: customTradeManagementData.parameters || {}
+        }
+      }
+
+      // Add the equity rule
+      currentStatement.Equity.push(equityRule)
     } else if (
       // Important: treat "Accumulator" via the dedicated accumulator handler below,
       // not as a generic behaviour. Otherwise the accumulator modal won't open
@@ -2191,9 +2297,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           console.warn("Please select a behavior first before adding an accumulator")
         }
       }
-    } else if (component.toLowerCase() === "long" || component.toLowerCase() === "short") {
-      // Set the side based on Long/Short selection
-      currentStatement.side = component.toLowerCase() === "long" ? "B" : "S"
+    } else if (component.toLowerCase() === "long" || component.toLowerCase() === "short" || component.toLowerCase() === "buy" || component.toLowerCase() === "sell") {
+      // Set the side based on Buy/Sell or Long/Short selection
+      currentStatement.side = (component.toLowerCase() === "long" || component.toLowerCase() === "buy") ? "B" : "S"
     } else if (component.toLowerCase() === "wait") {
       // This is now handled by individual wait buttons for inp1 and inp2
       // The old single wait functionality is deprecated
@@ -2208,6 +2314,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       setShowPartialTPModal(true)
     } else if (component.toLowerCase() === "manage exit" || component.toLowerCase() === "manage-exit") {
       setShowManageExitModal(true)
+    } else if (component.toLowerCase() === "trading session" || component.toLowerCase() === "trading-session") {
+      // Open Trading Session modal
+      setShowTradingSessionModal(true)
     }
 
     setStatements(newStatements)
@@ -2248,7 +2357,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               rsi_length: inp1.input_params?.timeperiod || 14,
               source: inp1.input_params?.source || "close", // Add source to tooltip
               ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
-            
+
             },
           }
         } else if (inp1.name === "RSI_MA") {
@@ -2438,7 +2547,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             rsi_length: inp2.input_params?.timeperiod || 14,
             source: inp2.input_params?.source || "close", // Add source to tooltip
             ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
-          
+
           },
         }
       } else if ("name" in inp2 && inp2.name === "RSI_MA") {
@@ -2597,7 +2706,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         },
       }
     }
-    
+
     if (
       componentType === "operator" &&
       condition.Operator &&
@@ -2613,7 +2722,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         },
       }
     }
-    
+
     // Handle custom behaviors
     if (
       componentType === "operator" &&
@@ -2625,7 +2734,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         details: condition.Operator.params || {},
       }
     }
-    
+
     if (componentType === "accumulate" && condition.Accumulate?.forPeriod) {
       return {
         title: "Accumulate Condition",
@@ -2691,7 +2800,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           setShowTimeframeDropdown(false)
           return;
         }
-      
+
         const newStatements = [...statements]
         const currentStatement = newStatements[activeStatementIndex]
         const condition = currentStatement.strategy[activeConditionIndex]
@@ -2723,16 +2832,16 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     conditionIndex: number,
     inputType: "inp1" | "inp2" | "condition" = "condition",
   ) => {
-  // Prevent opening timeframe dropdown for inp2
-  if (inputType === "inp2") {
-    return;
+    // Prevent opening timeframe dropdown for inp2
+    if (inputType === "inp2") {
+      return;
+    }
+
+    setActiveStatementIndex(statementIndex)
+    setActiveConditionIndex(conditionIndex)
+    setActiveInputType(inputType)
+    setShowTimeframeDropdown(true)
   }
-  
-  setActiveStatementIndex(statementIndex)
-  setActiveConditionIndex(conditionIndex)
-  setActiveInputType(inputType)
-  setShowTimeframeDropdown(true)
-}
 
   // Add a new function to open the AtCandleModal for editing
   const openAtCandleModal = (statementIndex: number, conditionIndex: number, targetInput?: "inp1" | "inp2") => {
@@ -2763,7 +2872,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const handleSaveDraft = async (name: string) => {
     try {
       setIsSavingDraft(true)
-      
+
       // Save all statements, not just the active one
       // If there's only one statement, save it normally
       // If there are multiple statements, save each one separately
@@ -2781,9 +2890,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       if (strategyId) {
         existingId = strategyId
         // Update localStorage to match URL ID
-        try { localStorage.setItem("strategy_id", strategyId) } catch {}
+        try { localStorage.setItem("strategy_id", strategyId) } catch { }
       } else {
-        try { existingId = localStorage.getItem("strategy_id") } catch {}
+        try { existingId = localStorage.getItem("strategy_id") } catch { }
       }
 
       // Save each statement
@@ -2883,7 +2992,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
   // State to track the current component being edited
   const [currentComponentId, setCurrentComponentId] = useState<number | null>(null)
-  
+
   // State to track the current strategy being edited
   const [currentStrategyId, setCurrentStrategyId] = useState<number | null>(null)
 
@@ -2892,7 +3001,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     try {
       // Create or update the strategy
       let strategyId = currentStrategyId
-      
+
       if (!strategyId) {
         // Create a new strategy - use provided name or generate one
         const strategyName = data.strategyName || `custom_strategy_${Date.now()}`
@@ -2915,7 +3024,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
       if (!validationResult.is_valid) {
         const errors: CompileError[] = []
-        
+
         // Parse syntax errors
         if (validationResult.syntax_errors?.length > 0) {
           validationResult.syntax_errors.forEach((err: string) => {
@@ -2927,7 +3036,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             })
           })
         }
-        
+
         // Parse security errors
         if (validationResult.security_errors?.length > 0) {
           validationResult.security_errors.forEach((err: string) => {
@@ -2939,7 +3048,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             })
           })
         }
-        
+
         // Parse contract errors
         if (validationResult.contract_errors?.length > 0) {
           validationResult.contract_errors.forEach((err: string) => {
@@ -3025,7 +3134,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           code: data.code,
           parameters: parametersObj,
         })
-        
+
         // Then validate the code
         const validationResult = await validateCustomComponentCode({
           code: data.code,
@@ -3036,7 +3145,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
         if (!validationResult.is_valid) {
           const errors: CompileError[] = []
-          
+
           // Parse syntax errors - match formats like "Syntax error at line 3:" or "line 3"
           if (validationResult.syntax_errors?.length > 0) {
             validationResult.syntax_errors.forEach((err: string) => {
@@ -3048,7 +3157,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               })
             })
           }
-          
+
           // Parse security errors - match formats like "(line 3)" or "line 3"
           if (validationResult.security_errors?.length > 0) {
             validationResult.security_errors.forEach((err: string) => {
@@ -3060,7 +3169,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               })
             })
           }
-          
+
           // Parse contract errors
           if (validationResult.contract_errors?.length > 0) {
             validationResult.contract_errors.forEach((err: string) => {
@@ -3123,7 +3232,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
         if (!validationResult.is_valid) {
           const errors: CompileError[] = []
-          
+
           // Parse syntax errors - match formats like "Syntax error at line 3:" or "line 3"
           if (validationResult.syntax_errors?.length > 0) {
             validationResult.syntax_errors.forEach((err: string) => {
@@ -3135,7 +3244,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               })
             })
           }
-          
+
           // Parse security errors - match formats like "(line 3)" or "line 3"
           if (validationResult.security_errors?.length > 0) {
             validationResult.security_errors.forEach((err: string) => {
@@ -3147,7 +3256,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               })
             })
           }
-          
+
           // Parse contract errors
           if (validationResult.contract_errors?.length > 0) {
             validationResult.contract_errors.forEach((err: string) => {
@@ -3258,11 +3367,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           code: data.code,
           parameters: parametersObj,
         })
-        
+
         // Store the component ID for future updates
         setCurrentComponentId(createResult.id)
       }
-      
+
       console.log("Saved developer mode code:", data)
     } catch (error: any) {
       console.error("Developer Mode save error:", error)
@@ -3273,7 +3382,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const handleProceedToTesting = async (name: string) => {
     try {
       setIsProceeding(true)
-      
+
       // Save all statements, not just the active one
       // Use the first statement for testing (or combine them if needed)
       const currentStatement = statements[0] // Use first statement for testing
@@ -3335,9 +3444,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       if (strategyId) {
         existingId = strategyId
         // Update localStorage to match URL ID
-        try { localStorage.setItem("strategy_id", strategyId) } catch {}
+        try { localStorage.setItem("strategy_id", strategyId) } catch { }
       } else {
-        try { existingId = localStorage.getItem("strategy_id") } catch {}
+        try { existingId = localStorage.getItem("strategy_id") } catch { }
       }
 
       // Save each statement
@@ -3405,7 +3514,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         if (typeof window !== 'undefined') {
           window.sessionStorage.setItem('builder_return', '1')
         }
-      } catch {}
+      } catch { }
       router.push("/strategy-testing")
     } catch (error) {
       console.error("Error processing strategy:", error)
@@ -3499,7 +3608,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     if (!newWaitStatus[statementIndex]) {
       newWaitStatus[statementIndex] = { inp1: false, inp2: false }
     }
-    
+
     // Update the specific input wait status
     if (inputType === "inp1") {
       newWaitStatus[statementIndex].inp1 = condition.inp1 && "wait" in condition.inp1 && condition.inp1.wait === "yes"
@@ -3838,6 +3947,40 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const renderStrategyConditions = (statement: StrategyStatement) => {
     const components: JSX.Element[] = []
 
+    // Render Buy/Sell component FIRST, based on statement.side
+    // Only display if side has been explicitly set by user (not empty)
+    if (statement.side === "B" || statement.side === "S") {
+      const sideLabel = statement.side === "B" ? "Buy" : "Sell"
+      components.push(
+        <div key="side-component" className="flex items-center relative group">
+          <div
+            className="bg-[#C5C5C5] text-black px-3 py-2 mt-3 rounded-md mr-2 mb-2 transition-all duration-200 hover:bg-[#D5D5D5] cursor-pointer"
+            onClick={() => {
+              // Toggle between Buy and Sell on click
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
+              currentStatement.side = currentStatement.side === "B" ? "S" : "B"
+              setStatements(newStatements)
+            }}
+          >
+            {sideLabel}
+          </div>
+          <button
+            onClick={() => {
+              // Remove the Buy/Sell component by clearing the side
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
+              currentStatement.side = ""
+              setStatements(newStatements)
+            }}
+            className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>,
+      )
+    }
+
     // Add each condition with appropriate background
     statement.strategy.forEach((condition, index) => {
       // Skip rendering "if" statements but keep "and" statements
@@ -4032,11 +4175,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           <div key={`wait-inp1-${index}`} className="mr-2 mb-2">
             <button
               onClick={() => toggleWaitParameter(activeStatementIndex, index, "inp1")}
-              className={`px-2 py-1 text-xs rounded-md transition-all duration-200 ${
-                condition.inp1 && "wait" in condition.inp1 && condition.inp1.wait === "yes"
-                  ? "bg-[#85e1fe] text-black"
-                  : "bg-[#2A2D42] text-white hover:bg-[#3A3D47]"
-              }`}
+              className={`px-2 py-1 text-xs rounded-md transition-all duration-200 ${condition.inp1 && "wait" in condition.inp1 && condition.inp1.wait === "yes"
+                ? "bg-[#85e1fe] text-black"
+                : "bg-[#2A2D42] text-white hover:bg-[#3A3D47]"
+                }`}
             >
               Wait
             </button>
@@ -4047,7 +4189,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       if (condition.operator_name) {
         // Behaviors with light gray background
         let operatorDisplay = condition.operator_display || condition.operator_name.replace("_", " ")
-        
+
         // Handle custom behaviors
         if (condition.operator_name.startsWith("CUSTOM_B:")) {
           operatorDisplay = condition.operator_display || condition.operator_name.replace("CUSTOM_B:", "")
@@ -4057,7 +4199,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           const params = condition.Operator.params
           operatorDisplay = `${condition.Operator.operator_name.replace("_", " ")} ${params.logical_operator} ${params.value}${params.unit}`
         }
-        
+
         components.push(
           <div
             key={`operator-${index}`}
@@ -4080,25 +4222,25 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         )
       }
 
-// Show timeframe for inp2 if it exists
-if (
-  condition.inp2 &&
-  typeof condition.inp2 === "object" &&
-  "timeframe" in condition.inp2 &&
-  condition.inp2.timeframe
-) {
-  components.push(
-    <div key={`inp2-timeframe-${index}`} className="mr-2 mb-2 relative group">
-      <div className="text-xs text-gray-400 mb-1">Timeframe </div>
-      <div
-        className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[160px] border border-[#2A2D42] opacity-60 cursor-not-allowed"
-        data-inp2-timeframe-index={index}
-      >
-        <span className="text-gray-400">{condition.inp2.timeframe}</span>
-      </div>
-    </div>,
-  )
-}
+      // Show timeframe for inp2 if it exists
+      if (
+        condition.inp2 &&
+        typeof condition.inp2 === "object" &&
+        "timeframe" in condition.inp2 &&
+        condition.inp2.timeframe
+      ) {
+        components.push(
+          <div key={`inp2-timeframe-${index}`} className="mr-2 mb-2 relative group">
+            <div className="text-xs text-gray-400 mb-1">Timeframe </div>
+            <div
+              className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[160px] border border-[#2A2D42] opacity-60 cursor-not-allowed"
+              data-inp2-timeframe-index={index}
+            >
+              <span className="text-gray-400">{condition.inp2.timeframe}</span>
+            </div>
+          </div>,
+        )
+      }
 
       // Show inp2 value for all behaviors
       if (condition.inp2) {
@@ -4227,10 +4369,10 @@ if (
             // Handle regular indicators like RSI, BBANDS, etc.
             // Always show "Bollinger" for BBANDS, not "BBANDS" or the input value
             // Check by name or by type+input combination to catch all cases
-            const displayName = 
-              condition.inp2.name === "BBANDS" || 
-              (condition.inp2.input && ["upperband", "lowerband", "middleband"].includes(condition.inp2.input?.toLowerCase()))
-                ? "Bollinger" 
+            const displayName =
+              condition.inp2.name === "BBANDS" ||
+                (condition.inp2.input && ["upperband", "lowerband", "middleband"].includes(condition.inp2.input?.toLowerCase()))
+                ? "Bollinger"
                 : condition.inp2.name
 
             components.push(
@@ -4256,10 +4398,10 @@ if (
           // Handle cases where inp2 has a name property but no type
           // Always show "Bollinger" for BBANDS, not "BBANDS" or the input value
           // Check by name or by input value to catch all cases
-          let displayName = 
-            condition.inp2.name === "BBANDS" || 
-            (condition.inp2.input && ["upperband", "lowerband", "middleband"].includes(condition.inp2.input?.toLowerCase()))
-              ? "Bollinger" 
+          let displayName =
+            condition.inp2.name === "BBANDS" ||
+              (condition.inp2.input && ["upperband", "lowerband", "middleband"].includes(condition.inp2.input?.toLowerCase()))
+              ? "Bollinger"
               : condition.inp2.name
           if (condition.inp2.Derivative) {
             displayName = `${displayName} (Derivative)`
@@ -4290,11 +4432,10 @@ if (
           <div key={`wait-inp2-${index}`} className="mr-2 mb-2">
             <button
               onClick={() => toggleWaitParameter(activeStatementIndex, index, "inp2")}
-              className={`px-2 py-1 text-xs rounded-md transition-all duration-200 ${
-                condition.inp2 && "wait" in condition.inp2 && condition.inp2.wait === "yes"
-                  ? "bg-[#85e1fe] text-black"
-                  : "bg-[#2A2D42] text-white hover:bg-[#3A3D47]"
-              }`}
+              className={`px-2 py-1 text-xs rounded-md transition-all duration-200 ${condition.inp2 && "wait" in condition.inp2 && condition.inp2.wait === "yes"
+                ? "bg-[#85e1fe] text-black"
+                : "bg-[#2A2D42] text-white hover:bg-[#3A3D47]"
+                }`}
             >
               Wait
             </button>
@@ -4337,31 +4478,31 @@ if (
       }
 
       // Show accumulator if it exists
-                if (condition.Accumulate) {
-            components.push(
-              <div key={`accumulator-${index}`} className="flex items-center relative group">
-                <div
-                  className="bg-[#C5C5C5] text-black px-3 py-2 mt-3 rounded-md mr-2 mb-2 transition-all duration-200 hover:bg-[#D5D5D5] cursor-pointer"
-                  onClick={() => handleComponentClick(activeStatementIndex, index, "accumulate")}
-                  onMouseEnter={(e) => handleMouseEnter(e, condition, "accumulate", index)}
-                  onMouseLeave={handleMouseLeave}
-                >
-                  {`Accumulate${condition.Accumulate.forPeriod ? `: ${condition.Accumulate.forPeriod}` : ""}`}
-                </div>
-                <button
-                  onClick={() => {
-                    const newStatements = [...statements]
-                    const currentStatement = newStatements[activeStatementIndex]
-                    delete currentStatement.strategy[index].Accumulate
-                    setStatements(newStatements)
-                  }}
-                  className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>,
-            )
-          }
+      if (condition.Accumulate) {
+        components.push(
+          <div key={`accumulator-${index}`} className="flex items-center relative group">
+            <div
+              className="bg-[#C5C5C5] text-black px-3 py-2 mt-3 rounded-md mr-2 mb-2 transition-all duration-200 hover:bg-[#D5D5D5] cursor-pointer"
+              onClick={() => handleComponentClick(activeStatementIndex, index, "accumulate")}
+              onMouseEnter={(e) => handleMouseEnter(e, condition, "accumulate", index)}
+              onMouseLeave={handleMouseLeave}
+            >
+              {`Accumulate${condition.Accumulate.forPeriod ? `: ${condition.Accumulate.forPeriod}` : ""}`}
+            </div>
+            <button
+              onClick={() => {
+                const newStatements = [...statements]
+                const currentStatement = newStatements[activeStatementIndex]
+                delete currentStatement.strategy[index].Accumulate
+                setStatements(newStatements)
+              }}
+              className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>,
+        )
+      }
 
       // Show then if it exists
       if (condition.Then) {
@@ -4390,6 +4531,137 @@ if (
         )
       }
     })
+
+    // Render equity rules inline with other components
+    // Using same styling as indicators/behaviors for consistency
+    if (statement.Equity && statement.Equity.length > 0) {
+      statement.Equity.forEach((rule, equityIndex) => {
+        const isPartialTP = !!(rule.inp1 && rule.inp1.name === "partial_tp" && rule.inp1.partial_tp_list)
+        const isManageExit = !!(rule.inp1 && rule.inp1.name === "manage_exit" && (rule.inp1 as any).manage_exit_list)
+
+        const label = isPartialTP
+          ? `Partial TP (${rule.inp1?.partial_tp_list?.length || 0})`
+          : isManageExit
+            ? `Manage Exit (${(rule.inp1 as any).manage_exit_list?.length || 0})`
+            : pipsToPointsDisplay(rule.operator || "Equity Rule")
+
+        components.push(
+          <div key={`equity-${equityIndex}`} className="flex items-center relative group">
+            <div
+              className="bg-[#C5C5C5] text-black px-3 py-2 mt-3 rounded-md mr-2 mb-2 transition-all duration-200 hover:bg-[#D5D5D5] cursor-pointer"
+              onClick={() => {
+                if (isPartialTP) {
+                  setEditingEquityRule({ statementIndex: activeStatementIndex, equityIndex })
+                  setShowPartialTPModal(true)
+                  return
+                }
+                if (isManageExit) {
+                  setEditingEquityRule({ statementIndex: activeStatementIndex, equityIndex })
+                  setShowManageExitModal(true)
+                  return
+                }
+                handleEquityRuleClick(activeStatementIndex, equityIndex, rule)
+              }}
+              onMouseEnter={(e) => {
+                // Build tooltip content for partial TP / manage exit
+                if (isPartialTP || isManageExit) {
+                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                  const details: Record<string, string> = {}
+
+                  if (isPartialTP && rule.inp1?.partial_tp_list) {
+                    rule.inp1.partial_tp_list.forEach((lvl, i) => {
+                      details[`Level ${i + 1}`] = `${pipsToPointsDisplay(lvl.Price)} | Close: ${lvl.Close}${lvl.Action ? ` | Action: ${pipsToPointsDisplay(lvl.Action)}` : ""}`
+                    })
+                  }
+
+                  if (isManageExit && (rule.inp1 as any).manage_exit_list) {
+                    const list = (rule.inp1 as any).manage_exit_list as Array<{ Price: string; Action: string }>
+                    list.forEach((it, i) => {
+                      details[`Rule ${i + 1}`] = `${pipsToPointsDisplay(it.Price)} | ${pipsToPointsDisplay(it.Action)}`
+                    })
+                  }
+
+                  setHoveredComponent({
+                    show: true,
+                    content: {
+                      title: isPartialTP ? "Partial TP list" : "Manage Exit",
+                      details,
+                    },
+                    position: {
+                      x: rect.left + rect.width / 2,
+                      y: rect.top - 3,
+                    },
+                  })
+                }
+              }}
+              onMouseLeave={handleMouseLeave}
+            >
+              {label}
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                const newStatements = [...statements]
+                newStatements[activeStatementIndex].Equity.splice(equityIndex, 1)
+                setStatements(newStatements)
+              }}
+              className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>,
+        )
+      })
+    }
+
+    // Render Trading Session component at the end if it exists
+    if (statement.TradingSession) {
+      const session = statement.TradingSession
+      components.push(
+        <div key="trading-session-component" className="mr-2 mb-2 relative group">
+          <div className="text-xs text-gray-400 mb-1">Trading Session</div>
+          <div
+            className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[160px] cursor-pointer transition-all duration-200 hover:bg-[#252728]"
+            onClick={() => setShowTradingSessionModal(true)}
+            onMouseEnter={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect()
+              setHoveredComponent({
+                show: true,
+                content: {
+                  title: "Trading Session",
+                  details: {
+                    Timezone: session.Timezone,
+                    Days: session.Day.input,
+                    "Start Time": session.Time.input[0],
+                    "End Time": session.Time.input[1],
+                  },
+                },
+                position: {
+                  x: rect.left + rect.width / 2,
+                  y: rect.top - 3,
+                },
+              })
+            }}
+            onMouseLeave={handleMouseLeave}
+          >
+            <span className="text-gray-300">{session.Time.input.join(' - ')}</span>
+            <ChevronDown className="ml-1 w-4 h-4" />
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
+              delete currentStatement.TradingSession
+              setStatements(newStatements)
+            }}
+            className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>,
+      )
+    }
 
     return components
   }
@@ -4423,8 +4695,8 @@ if (
                 : pipsToPointsDisplay(rule.operator || "Equity Rule")
 
             return (
-              <div 
-                key={index} 
+              <div
+                key={index}
                 className="bg-[#2A2D42] text-white px-3 py-1 rounded-md relative group cursor-pointer hover:bg-[#3A3D52] transition-colors"
                 onClick={() => {
                   if (isPartialTP) {
@@ -4499,12 +4771,12 @@ if (
     const operator = rule.operator || ""
     const isSL = operator.includes("SL") || (rule.inp1 && "name" in rule.inp1 && rule.inp1.name === "SL")
     const isTP = operator.includes("TP") || (rule.inp1 && "name" in rule.inp1 && rule.inp1.name === "TP")
-    
+
     if (!isSL && !isTP) return
-    
+
     // Set editing state
     setEditingEquityRule({ statementIndex, equityIndex })
-    
+
     // Open the appropriate modal
     setShowSLTPSettings({ show: true, type: isSL ? "SL" : "TP" })
   }
@@ -4560,7 +4832,7 @@ if (
     // Get saved Volume settings as fallback
     const savedVolumeSettings = getSavedVolumeSettings();
     const finalMaLength = maLength || savedVolumeSettings?.maLength || 20;
-    
+
     return {
       type: "CUSTOM_I" as const,
       name: "Volume_MA" as const,
@@ -4590,11 +4862,11 @@ if (
   const cleanupVolumeMAIndicator = (indicator: any) => {
     if (indicator && indicator.name === "Volume_MA" && indicator.input_params) {
       console.log('🔍 DEBUG: Cleaning up Volume_MA indicator:', indicator);
-      
+
       // Get saved Volume settings as fallback
       const savedVolumeSettings = getSavedVolumeSettings();
       const finalMaLength = indicator.input_params.ma_length || savedVolumeSettings?.maLength || 20;
-      
+
       // Only keep ma_length, remove any other parameters like ma_type
       const cleanedIndicator = {
         ...indicator,
@@ -4649,11 +4921,11 @@ if (
           <div className="flex items-center">
             <h1 className="text-2xl font-medium">
               {strategyId
-                ? `Editing Strategy: ${initialInstrument || strategyId}`
+                ? (strategyName || initialInstrument || strategyId)
                 : `Building algorithm for ${initialInstrument || "XAU/USD"}`}
             </h1>
             {strategyId && (
-              <button 
+              <button
                 onClick={() => setShowEditNameModal(true)}
                 className="ml-2 p-1 hover:bg-gray-700 rounded-full"
                 title="Edit strategy name"
@@ -4664,7 +4936,7 @@ if (
           </div>
           <div className="flex gap-3">
             {/* Buy/Sell selector */}
-            <button 
+            <button
               onClick={() => setShowDeveloperModeModal(true)}
               className="px-4 py-2 bg-[#151718] rounded-full text-white hover:bg-gray-700 flex items-center gap-2"
             >
@@ -4690,10 +4962,7 @@ if (
               <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center gap-4">
                   <h2 className="text-xl font-medium">{statement.saveresult}</h2>
-                  {/* Display current side (Buy/Sell) */}
-                  <span className={`px-3 py-1 rounded-full text-xs font-bold ${statement.side === "B" ? "bg-gray-500 text-white" : "bg-gray-500 text-white"}`}>
-                    {statement.side === "B" ? "Buy" : "Sell"}
-                  </span>
+                  {/* Buy/Sell badge removed - now shown as inline component in strategy conditions */}
                 </div>
                 <div className="relative flex items-center gap-4">
                   {/* Wait for closes only indicators - show for inp1 and inp2 separately */}
@@ -4763,9 +5032,8 @@ if (
                         {searchResults.map((result, idx) => (
                           <button
                             key={idx}
-                            className={`w-full text-left px-4 py-2 ${
-                              idx === selectedSearchIndex ? "bg-[#4A4D62] text-white" : "hover:bg-[#3A3D47] text-white"
-                            }`}
+                            className={`w-full text-left px-4 py-2 ${idx === selectedSearchIndex ? "bg-[#4A4D62] text-white" : "hover:bg-[#3A3D47] text-white"
+                              }`}
                             onClick={() => {
                               handleAddComponent(index, result)
                             }}
@@ -4777,9 +5045,6 @@ if (
                     )}
                   </div>
                 </div>
-
-                {/* Render equity rules if they exist */}
-                {renderEquityRules(statement)}
               </div>
             </div>
           ))}
@@ -4818,24 +5083,24 @@ if (
               top:
                 activeConditionIndex !== null
                   ? (() => {
-                      const selector =
-                        activeInputType === "inp2"
-                          ? `[data-inp2-timeframe-index="${activeConditionIndex}"]`
-                          : `[data-timeframe-index="${activeConditionIndex}"]`
-                      const element = document.querySelector(selector)
-                      return element ? element.getBoundingClientRect().bottom + window.scrollY + 5 : 0
-                    })()
+                    const selector =
+                      activeInputType === "inp2"
+                        ? `[data-inp2-timeframe-index="${activeConditionIndex}"]`
+                        : `[data-timeframe-index="${activeConditionIndex}"]`
+                    const element = document.querySelector(selector)
+                    return element ? element.getBoundingClientRect().bottom + window.scrollY + 5 : 0
+                  })()
                   : 0,
               left:
                 activeConditionIndex !== null
                   ? (() => {
-                      const selector =
-                        activeInputType === "inp2"
-                          ? `[data-inp2-timeframe-index="${activeConditionIndex}"]`
-                          : `[data-timeframe-index="${activeConditionIndex}"]`
-                      const element = document.querySelector(selector)
-                      return element ? element.getBoundingClientRect().left + window.scrollX : 0
-                    })()
+                    const selector =
+                      activeInputType === "inp2"
+                        ? `[data-inp2-timeframe-index="${activeConditionIndex}"]`
+                        : `[data-timeframe-index="${activeConditionIndex}"]`
+                    const element = document.querySelector(selector)
+                    return element ? element.getBoundingClientRect().left + window.scrollX : 0
+                  })()
                   : 0,
             }}
             onClick={(e) => e.stopPropagation()}
@@ -4845,9 +5110,8 @@ if (
               {["15min", "20min", "30min", "45min", "1h", "3h"].map((timeframe) => (
                 <button
                   key={timeframe}
-                  className={`w-full text-left px-4 py-2 text-black hover:bg-gray-100 ${
-                    selectedTimeframe === timeframe ? "bg-gray-200 font-semibold" : ""
-                  }`}
+                  className={`w-full text-left px-4 py-2 text-black hover:bg-gray-100 ${selectedTimeframe === timeframe ? "bg-gray-200 font-semibold" : ""
+                    }`}
                   onClick={() => handleTimeframeSelect(timeframe)}
                 >
                   {timeframe}
@@ -4857,9 +5121,8 @@ if (
               {customTimeframes.map((timeframe) => (
                 <button
                   key={timeframe}
-                  className={`w-full text-left px-4 py-2 text-black hover:bg-gray-100 ${
-                    selectedTimeframe === timeframe ? "bg-gray-200 font-semibold" : ""
-                  }`}
+                  className={`w-full text-left px-4 py-2 text-black hover:bg-gray-100 ${selectedTimeframe === timeframe ? "bg-gray-200 font-semibold" : ""
+                    }`}
                   onClick={() => handleTimeframeSelect(timeframe)}
                 >
                   {timeframe}
@@ -4895,7 +5158,7 @@ if (
             console.log('🔍 DEBUG: settings.indicator:', settings.indicator);
             console.log('🔍 DEBUG: settings.maType:', settings.maType);
             console.log('🔍 DEBUG: settings.volumeMaLength:', settings.volumeMaLength);
-            
+
             // Update crossing up settings with the custom value
             const newStatements = [...statements]
             const currentStatement = newStatements[activeStatementIndex]
@@ -4934,7 +5197,7 @@ if (
                   };
                 } else if (settings.indicator === "rsi-ma") {
                   console.log('🔍 Received settings for RSI_MA from crossing-up modal:', settings);
-                  
+
                   // Get saved RSI settings from localStorage for better defaults
                   let savedRsiSettings = null;
                   try {
@@ -4946,14 +5209,14 @@ if (
                   } catch (error) {
                     console.log('Error reading saved RSI settings:', error);
                   }
-                  
+
                   // Priority order: settings from modal > saved settings > defaults
                   const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
                   const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
                   const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
                   const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
                   const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
-                  
+
                   console.log('🔧 Final RSI_MA inp2 values:', {
                     rsi_length: finalRsiLength,
                     rsi_source: finalRsiSource,
@@ -4961,7 +5224,7 @@ if (
                     ma_type: finalMaType,
                     bb_stddev: finalBbStdDev
                   });
-                  
+
                   lastCondition.inp2 = {
                     type: "CUSTOM_I",
                     name: "RSI_MA",
@@ -5284,7 +5547,7 @@ if (
                   };
                 } else if (settings.indicator === "rsi-ma") {
                   console.log('🔍 Received settings for RSI_MA from crossing-down modal:', settings);
-                  
+
                   // Get saved RSI settings from localStorage for better defaults
                   let savedRsiSettings = null;
                   try {
@@ -5296,14 +5559,14 @@ if (
                   } catch (error) {
                     console.log('Error reading saved RSI settings:', error);
                   }
-                  
+
                   // Priority order: settings from modal > saved settings > defaults
                   const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
                   const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
                   const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
                   const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
                   const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
-                  
+
                   console.log('🔧 Final RSI_MA inp2 values (crossing-down):', {
                     rsi_length: finalRsiLength,
                     rsi_source: finalRsiSource,
@@ -5311,7 +5574,7 @@ if (
                     ma_type: finalMaType,
                     bb_stddev: finalBbStdDev
                   });
-                  
+
                   lastCondition.inp2 = {
                     type: "CUSTOM_I",
                     name: "RSI_MA",
@@ -5619,7 +5882,7 @@ if (
 
                   case "rsi-ma":
                     console.log('🔍 Received settings for RSI_MA from above modal:', settings);
-                    
+
                     // Get saved RSI settings from localStorage for better defaults
                     let savedRsiSettings = null;
                     try {
@@ -5631,14 +5894,14 @@ if (
                     } catch (error) {
                       console.log('Error reading saved RSI settings:', error);
                     }
-                    
+
                     // Priority order: settings from modal > saved settings > defaults
                     const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
                     const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
                     const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
                     const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
                     const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
-                    
+
                     console.log('🔧 Final RSI_MA inp2 values (above):', {
                       rsi_length: finalRsiLength,
                       rsi_source: finalRsiSource,
@@ -5646,7 +5909,7 @@ if (
                       ma_type: finalMaType,
                       bb_stddev: finalBbStdDev
                     });
-                    
+
                     lastCondition.inp2 = {
                       type: "CUSTOM_I",
                       name: "RSI_MA",
@@ -5870,7 +6133,7 @@ if (
 
                   case "rsi-ma":
                     console.log('🔍 Received settings for RSI_MA from below modal:', settings);
-                    
+
                     // Get saved RSI settings from localStorage for better defaults
                     let savedRsiSettings = null;
                     try {
@@ -5882,14 +6145,14 @@ if (
                     } catch (error) {
                       console.log('Error reading saved RSI settings:', error);
                     }
-                    
+
                     // Priority order: settings from modal > saved settings > defaults
                     const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
                     const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
                     const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
                     const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
                     const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
-                    
+
                     console.log('🔧 Final RSI_MA inp2 values (below):', {
                       rsi_length: finalRsiLength,
                       rsi_source: finalRsiSource,
@@ -5897,7 +6160,7 @@ if (
                       ma_type: finalMaType,
                       bb_stddev: finalBbStdDev
                     });
-                    
+
                     lastCondition.inp2 = {
                       type: "CUSTOM_I",
                       name: "RSI_MA",
@@ -6077,7 +6340,7 @@ if (
                     indicatorType: "rsi",
                     rsiLength: String(indicator.input_params?.timeperiod || 14),
                     source: indicator.input_params?.source ? indicator.input_params.source.charAt(0).toUpperCase() + indicator.input_params.source.slice(1) : "Close",
-                    
+
                     timeframe: indicator.timeframe || "3h",
                   }
                 } else if (indicator.name === "RSI_MA" && "input_params" in indicator) {
@@ -6106,7 +6369,7 @@ if (
                     indicatorType: "rsi",
                     rsiLength: String(indicator.input_params?.timeperiod || 14),
                     source: indicator.input_params?.source ? indicator.input_params.source.charAt(0).toUpperCase() + indicator.input_params.source.slice(1) : "Close",
-                  
+
                     timeframe: indicator.timeframe || "3h",
                   }
                 } else if (indicator.name === "RSI_MA" && "input_params" in indicator) {
@@ -6248,9 +6511,9 @@ if (
               // If there's an operator_name, we're editing inp2, otherwise inp1
               const currentStatement = statements[activeStatementIndex]
               const lastCondition = currentStatement?.strategy[currentStatement.strategy.length - 1]
-              
+
               let indicator = null
-              
+
               // Use the same logic as handleAddComponent: if inp1 exists and has operator, we're editing inp2
               if (lastCondition?.inp1 && lastCondition?.operator_name) {
                 // We're editing inp2
@@ -6314,7 +6577,7 @@ if (
               const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
               let targetIndicator = null
-              
+
               // Use the same logic as handleAddComponent: if inp1 exists and has operator, we're adding to inp2
               if (lastCondition.inp1 && lastCondition.operator_name) {
                 // We're updating inp2
@@ -6516,10 +6779,10 @@ if (
               const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
 
               if (targetIndicator && "timeframe" in targetIndicator) {
-                const indicatorName = settings.indicatorType === "cumulative-volume-delta" 
-                  ? "CumulativeVolumeDelta" 
+                const indicatorName = settings.indicatorType === "cumulative-volume-delta"
+                  ? "CumulativeVolumeDelta"
                   : "VolumeDelta"
-                
+
                 const updatedIndicator: any = {
                   type: "CUSTOM_I",
                   name: indicatorName,
@@ -6543,9 +6806,9 @@ if (
               // Adding new indicator
               const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
               const timeframe = lastCondition.inp1?.timeframe || selectedTimeframe
-              
-              const indicatorName = settings.indicatorType === "cumulative-volume-delta" 
-                ? "CumulativeVolumeDelta" 
+
+              const indicatorName = settings.indicatorType === "cumulative-volume-delta"
+                ? "CumulativeVolumeDelta"
                 : "VolumeDelta"
 
               const newIndicator: any = {
@@ -7087,17 +7350,17 @@ if (
           initialSettings={editingEquityRule ? (() => {
             const rule = statements[editingEquityRule.statementIndex]?.Equity[editingEquityRule.equityIndex]
             if (!rule) return undefined
-            
+
             // Parse the operator string to extract settings
             const operator = rule.operator || ""
             const type = showSLTPSettings.type
-            
+
             // Parse different formats:
             // Simple: "SL = Entry_Price - 100pips"
             // Trailing: "inp1 = inp2 - 100pips" with TrailingStop
             // Percentage: "SL = Entry_Price * 0.95"
             // Fixed: "SL = 1800"
-            
+
             if (rule.inp1 && "name" in rule.inp1 && rule.inp1.input_params?.TrailingStop) {
               // Trailing format
               const pipsMatch = operator.match(/([+-])\s*(\d+)pips/)
@@ -7139,7 +7402,7 @@ if (
                 value: valueMatch ? valueMatch[1] : "1800",
               }
             }
-            
+
             return undefined
           })() : undefined}
           onSave={(settings) => {
@@ -7523,6 +7786,38 @@ if (
           onSave={handleSaveCustomTimeframe}
         />
       )}
+      {/* Trading Session Modal */}
+      {showTradingSessionModal && (
+        <TradingSessionModal
+          onClose={() => setShowTradingSessionModal(false)}
+          initial={
+            statements[activeStatementIndex]?.TradingSession
+              ? {
+                startTime: statements[activeStatementIndex].TradingSession?.Time.input[0] || "09:00",
+                endTime: statements[activeStatementIndex].TradingSession?.Time.input[1] || "17:00",
+                selectedDays: statements[activeStatementIndex].TradingSession?.Day.input.split("") || ["M", "t", "W", "T", "F"],
+              }
+              : undefined
+          }
+          onSave={(config: { startTime: string; endTime: string; selectedDays: string[] }) => {
+            const newStatements = [...statements]
+            const currentStatement = newStatements[activeStatementIndex]
+            currentStatement.TradingSession = {
+              Timezone: "US/Eastern", // Default timezone
+              Day: {
+                Operator: "within",
+                input: config.selectedDays.join(""),
+              },
+              Time: {
+                Operator: "within",
+                input: [config.startTime, config.endTime],
+              },
+            }
+            setStatements(newStatements)
+            setShowTradingSessionModal(false)
+          }}
+        />
+      )}
       {/* Tooltip */}
       {hoveredComponent.show && hoveredComponent.content && (
         <div
@@ -7623,7 +7918,7 @@ if (
             const newStatements = [...statements]
             const currentStatement = newStatements[activeStatementIndex]
             const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-            
+
             if (settings.indicatorType === "rsi-ma") {
               lastCondition.inp2 = {
                 type: "CUSTOM_I",
@@ -7645,7 +7940,7 @@ if (
                 input_params: {
                   timeperiod: Number(settings.rsiLength),
                   source: settings.source?.toLowerCase() || "close",
-                
+
                 },
               }
             }
@@ -7671,7 +7966,7 @@ if (
             const newStatements = [...statements]
             const currentStatement = newStatements[activeStatementIndex]
             const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-            
+
             if (settings.indicatorType === "rsi-ma") {
               lastCondition.inp2 = {
                 type: "CUSTOM_I",
@@ -7724,7 +8019,7 @@ if (
             const newStatements = [...statements]
             const condition = newStatements[showMovingOperatorModal.statementIndex].strategy[showMovingOperatorModal.conditionIndex]
             const operatorType = condition.operator_name as "moving_up" | "moving_down"
-            
+
             // Update the operator structure
             condition.Operator = {
               operator_name: operatorType,
@@ -7734,7 +8029,7 @@ if (
                 unit: settings.unit,
               },
             }
-            
+
             setStatements(newStatements)
             setShowMovingOperatorModal({ show: false, statementIndex: 0, conditionIndex: 0 })
             setTimeout(() => {
@@ -7743,7 +8038,7 @@ if (
           }}
         />
       )}
-       
+
       {showStochasticModal && (
         <StochasticSettingsModal
           onClose={() => {

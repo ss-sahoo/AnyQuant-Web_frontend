@@ -52,7 +52,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
         listCustomComponents("behavior"),
         listCustomComponents("trade_management")
       ])
-      
+
       // Filter only active components
       setCustomIndicators(indicators.filter((c: CustomComponent) => c.status === "active"))
       setCustomBehaviors(behaviors.filter((c: CustomComponent) => c.status === "active"))
@@ -107,12 +107,12 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
   // Complete list of basic components
   const allBasicComponents = [
     "If",
-   
+
     // "Then",
     "Timeframe",
-  
+
     "At Candle",
-    
+
     "And",
     // "Or",
     // "Not",
@@ -130,15 +130,15 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
   const allIndicators = [
     "RSI",
     "Volume",
-     "MACD",
+    "MACD",
     "Bollinger",
     "Price",
     "Stochastic",
-     "ATR",
-     "SuperTrend",   
+    "ATR",
+    "SuperTrend",
     "GENERAL PA",
     "Gradient",
-     "MA",
+    "MA",
     "Volume Delta",
     "Cumulative Volume Delta",
     "Historical Price Level",
@@ -169,7 +169,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
   const allBehaviors = [
     "Cross Above",
     "Cross Below",
-    
+
     // "Inside Channel",
     "Increasing",
     "Decreasing",
@@ -180,7 +180,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
     "Accumulate",
     "Then",
     // "Rising",
-   
+
     // "Equal to",
     // "Not equal to",
     // "Increasing",
@@ -217,7 +217,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
     "Hedge",
     "Reverse position",
     "Partial close",
-     "Manage",
+    "Manage",
     "Close",
     "Cancel",
     "No Trade",
@@ -233,6 +233,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
     "Reduce position",
     "Split position",
     "Merge positions",
+    "Trading Session",
   ]
 
 
@@ -284,7 +285,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
         <div className="mb-6 bg-black p-4 rounded-lg">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-medium">Indicators</h3>
-           
+
           </div>
           <div className="relative mb-3">
             <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
@@ -326,11 +327,82 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
         </div>
 
         {/* Custom Indicators */}
+
+
+        {/* Behaviours */}
+        <div className="mb-6 bg-black p-4 rounded-lg">
+          <h3 className="font-medium mb-3">Behaviours</h3>
+          <div className="relative mb-3">
+            <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
+            <Input
+              className="pl-8 bg-[#2B2E38] border-0"
+              placeholder="Search behaviours"
+              value={behaviorSearch}
+              onChange={(e) => setBehaviorSearch(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(behaviorSearch !== ""
+              ? filteredBehaviors
+              : showAllBehaviors
+                ? allBehaviors
+                : allBehaviors.slice(0, 6)
+            ).map((behavior) => (
+              <Button
+                key={behavior}
+                variant="outline"
+                size="sm"
+                className="bg-[#2B2E38] border-0 hover:bg-gray-700"
+                onClick={() => onComponentSelect(behavior)}
+              >
+                {behavior}
+              </Button>
+            ))}
+            {behaviorSearch === "" && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
+                onClick={() => setShowAllBehaviors(!showAllBehaviors)}
+              >
+                {showAllBehaviors ? "Show less" : "Show all"}
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="mb-6 bg-black p-4 rounded-lg">
+          <h3 className="font-medium mb-3">Trade management</h3>
+          <div className="flex flex-wrap gap-2">
+            {(showAllActions ? allActions : allActions.slice(0, 5)).map((action) => (
+              <Button
+                key={action}
+                variant="outline"
+                size="sm"
+                className="bg-[#2B2E38] border-0 hover:bg-gray-700"
+                onClick={() => onComponentSelect(action)}
+              >
+                {action}
+              </Button>
+            ))}
+            <Button
+              variant="outline"
+              size="sm"
+              className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
+              onClick={() => setShowAllActions(!showAllActions)}
+            >
+              {showAllActions ? "Show less" : "Show all"}
+            </Button>
+            {/* Trading Session Button */}
+
+          </div>
+        </div>
         <div className="mb-6 bg-black p-4 rounded-lg">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-medium">Custom Indicators</h3>
           </div>
-          
+
           {isLoadingCustom ? (
             <div className="flex items-center justify-center py-4">
               <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
@@ -447,7 +519,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-medium">Custom Behaviors</h3>
           </div>
-          
+
           {isLoadingCustom ? (
             <div className="flex items-center justify-center py-4">
               <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
@@ -559,7 +631,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-medium">Custom Trade Management</h3>
           </div>
-          
+
           {isLoadingCustom ? (
             <div className="flex items-center justify-center py-4">
               <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
@@ -666,75 +738,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
           )}
         </div>
 
-        {/* Behaviours */}
-        <div className="mb-6 bg-black p-4 rounded-lg">
-          <h3 className="font-medium mb-3">Behaviours</h3>
-          <div className="relative mb-3">
-            <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
-            <Input
-              className="pl-8 bg-[#2B2E38] border-0"
-              placeholder="Search behaviours"
-              value={behaviorSearch}
-              onChange={(e) => setBehaviorSearch(e.target.value)}
-            />
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {(behaviorSearch !== ""
-              ? filteredBehaviors
-              : showAllBehaviors
-                ? allBehaviors
-                : allBehaviors.slice(0, 6)
-            ).map((behavior) => (
-              <Button
-                key={behavior}
-                variant="outline"
-                size="sm"
-                className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-                onClick={() => onComponentSelect(behavior)}
-              >
-                {behavior}
-              </Button>
-            ))}
-            {behaviorSearch === "" && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
-                onClick={() => setShowAllBehaviors(!showAllBehaviors)}
-              >
-                {showAllBehaviors ? "Show less" : "Show all"}
-              </Button>
-            )}
-          </div>
-        </div>
 
-        {/* Actions */}
-        <div className="mb-6 bg-black p-4 rounded-lg">
-          <h3 className="font-medium mb-3">Actions</h3>
-          <div className="flex flex-wrap gap-2">
-            {(showAllActions ? allActions : allActions.slice(0, 5)).map((action) => (
-              <Button
-                key={action}
-                variant="outline"
-                size="sm"
-                className="bg-[#2B2E38] border-0 hover:bg-gray-700"
-                onClick={() => onComponentSelect(action)}
-              >
-                {action}
-              </Button>
-            ))}
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
-              onClick={() => setShowAllActions(!showAllActions)}
-            >
-              {showAllActions ? "Show less" : "Show all"}
-            </Button>
-          </div>
-        </div>
-
-        
       </div>
     </div>
   )
