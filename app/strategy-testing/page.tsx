@@ -115,7 +115,7 @@ export default function StrategyTestingPage() {
   // Add new state variables for trading modes
   const [selectedTradingMode, setSelectedTradingMode] = useState("CLOSE & OPEN")
   const [maxTrades, setMaxTrades] = useState("1")
-  
+
   // Add state variables for TradingType configuration
   const [commission, setCommission] = useState(0.00007)
   const [assetType, setAssetType] = useState("gold")
@@ -192,7 +192,7 @@ export default function StrategyTestingPage() {
   // Helper function to map MetaAPI symbols to Backtest instruments
   const mapSymbolToInstrument = (symbol: string): string | null => {
     const symbolUpper = symbol.toUpperCase().replace(/\./g, '') // Remove dots like in XAUUSD.a
-    
+
     // Map to the exact instrument names in the instruments list
     if (symbolUpper.includes('XAUUSD') || symbolUpper.includes('GOLD')) return 'XAUUSD'
     if (symbolUpper.includes('GBPUSD')) return 'GBP/USD'
@@ -201,7 +201,7 @@ export default function StrategyTestingPage() {
     if (symbolUpper.includes('FTSE') || symbolUpper.includes('UK100')) return 'FTSE100'
     if (symbolUpper.includes('US30') || symbolUpper.includes('DJ30') || symbolUpper.includes('DJIA')) return 'US30'
     if (symbolUpper.includes('NAS100') || symbolUpper.includes('NASDAQ')) return 'NASDAQ'
-    
+
     return null
   }
 
@@ -280,17 +280,17 @@ export default function StrategyTestingPage() {
           console.log("🔍 DEBUG: Loaded strategy from localStorage:", parsed)
           console.log("🔍 DEBUG: TradingSession in loaded strategy:", parsed.TradingSession)
           setParsedStatement(parsed)
-          
+
           // Load timezone from TradingSession if available
           if (parsed.TradingSession?.Timezone) {
             setTimezone(parsed.TradingSession.Timezone)
           }
-          
+
           // Load date range if available
           if (parsed.date_range) {
             setDateRange(parsed.date_range)
           }
-          
+
           // Load TradingType settings from the strategy
           if (parsed && parsed.TradingType) {
             console.log("🔍 Loading TradingType settings from strategy:", parsed.TradingType)
@@ -298,7 +298,7 @@ export default function StrategyTestingPage() {
             setMaxTrades(parsed.TradingType.nTrade_max?.toString() || "1")
             setAccountDeposit(parsed.TradingType.cash?.toString() || "100000")
             setLot(parsed.TradingType.lot || "mini")
-            
+
             // Load additional TradingType configuration values
             // Use dynamic commission from the strategy or default
             const currentCommission = parsed.TradingType.commission || 0.00007
@@ -306,7 +306,7 @@ export default function StrategyTestingPage() {
             setCommission(currentCommission)
             setAssetType(parsed.TradingType.asset_type || "gold")
             setPositionSize(parsed.TradingType.position_size?.toString() || "1")
-            
+
             // Update the parsed statement with the dynamic commission value
             const updatedStatement = {
               ...parsed,
@@ -320,22 +320,22 @@ export default function StrategyTestingPage() {
             setParsedStatement(updatedStatement)
             localStorage.setItem("savedStrategy", JSON.stringify(updatedStatement))
             console.log("🔍 Updated parsed statement with correct commission:", updatedStatement.TradingType)
-            
+
             // Calculate leverage from margin
             if (parsed.TradingType.margin) {
               const margin = parsed.TradingType.margin
-              const leverage = margin === 1.0 ? "1:1" : 
-                             margin === 0.5 ? "1:2" : 
-                             margin === 0.2 ? "1:5" : 
-                             margin === 0.1 ? "1:10" : 
-                             margin === 0.05 ? "1:20" : 
-                             margin === 0.04 ? "1:25" : 
-                             margin === 0.033 ? "1:30" : 
-                             margin === 0.02 ? "1:50" : 
-                             margin === 0.013 ? "1:75" : 
-                             margin === 0.01 ? "1:100" : 
-                             margin === 0.005 ? "1:200" :
-                             margin === 0.002 ? "1:500" : "1:1"
+              const leverage = margin === 1.0 ? "1:1" :
+                margin === 0.5 ? "1:2" :
+                  margin === 0.2 ? "1:5" :
+                    margin === 0.1 ? "1:10" :
+                      margin === 0.05 ? "1:20" :
+                        margin === 0.04 ? "1:25" :
+                          margin === 0.033 ? "1:30" :
+                            margin === 0.02 ? "1:50" :
+                              margin === 0.013 ? "1:75" :
+                                margin === 0.01 ? "1:100" :
+                                  margin === 0.005 ? "1:200" :
+                                    margin === 0.002 ? "1:500" : "1:1"
               setLeverage(leverage)
             }
           }
@@ -349,11 +349,11 @@ export default function StrategyTestingPage() {
       if (optimisationFormString) {
         try {
           const optimisationForm = JSON.parse(optimisationFormString)
-          
+
           // Add null checks and fallback values
           const maximiseOpts = optimisationForm.maximise_options || []
           const algorithmDefaults = optimisationForm.algorithm_defaults || {}
-          
+
           if (maximiseOpts.length > 0) {
             setSelectedMaximiseOption(maximiseOpts[0] || "")
           }
@@ -392,22 +392,22 @@ export default function StrategyTestingPage() {
         const urlParams = new URLSearchParams(window.location.search)
         let id = urlParams.get("id")
         const isCustomStrategy = urlParams.get("custom") === "true"
-        
+
         if (!id) {
           try {
             id = localStorage.getItem("strategy_id")
-          } catch {}
+          } catch { }
         }
 
         if (id) {
           try {
             let strategyData
-            
+
             if (isCustomStrategy) {
               // Fetch custom strategy from CustomComponent model
               const customStrategy = await getCustomStrategy(Number(id))
               console.log("🔍 Loaded custom strategy:", customStrategy)
-              
+
               // Transform custom strategy data to match expected format
               strategyData = {
                 id: customStrategy.id,
@@ -457,11 +457,11 @@ export default function StrategyTestingPage() {
             if (strategyData.optimisation_form) {
               localStorage.setItem("optimisation_form", JSON.stringify(strategyData.optimisation_form))
               const optimisationForm = strategyData.optimisation_form
-              
+
               // Add null checks and fallback values
               const maximiseOpts = optimisationForm.maximise_options || []
               const algorithmDefaults = optimisationForm.algorithm_defaults || {}
-              
+
               if (maximiseOpts.length > 0) {
                 setSelectedMaximiseOption(maximiseOpts[0] || "")
               }
@@ -497,7 +497,7 @@ export default function StrategyTestingPage() {
             if (strategyData.name) {
               // Extract symbol from strategy name (e.g., "Strategyname" -> "XAUUSD")
               let symbol = "XAUUSD" // Default symbol
-              
+
               // Try to extract symbol from strategy name
               const name = strategyData.name.toLowerCase()
               if (name.includes("xau") || name.includes("gold")) {
@@ -513,9 +513,9 @@ export default function StrategyTestingPage() {
               } else if (name.includes("eth") || name.includes("ethereum")) {
                 symbol = "ETHUSD"
               }
-              
+
               console.log("🔍 Extracted trading symbol from strategy name:", strategyData.name, "->", symbol)
-              
+
               // Update MetaAPI config with the extracted symbol
               const updatedConfig = {
                 token: process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || "",
@@ -523,7 +523,7 @@ export default function StrategyTestingPage() {
                 symbol: symbol
               }
               setMetaAPIConfig(updatedConfig)
-              
+
               // Auto-select the corresponding instrument in Backtest tab
               const mappedInstrument = mapSymbolToInstrument(symbol)
               if (mappedInstrument) {
@@ -582,7 +582,7 @@ export default function StrategyTestingPage() {
     let bgColor = 'bg-[#85e1fe]';
     if (type === 'error') bgColor = 'bg-red-600';
     if (type === 'warning') bgColor = 'bg-yellow-500';
-    
+
     toast.className = `fixed bottom-10 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded shadow-lg z-50 text-black ${bgColor}`;
     toast.textContent = message;
     document.body.appendChild(toast);
@@ -590,6 +590,129 @@ export default function StrategyTestingPage() {
       document.body.removeChild(toast);
     }, 3000);
   };
+
+  // Helper function to detect timeframe from CSV timestamps
+  const detectTimeframeFromTimestamps = (csvContent: string): { detected: boolean; timeframeMinutes: number; timeframeLabel: string; matchesRequired: boolean } => {
+    const lines = csvContent.split('\n')
+    if (lines.length < 3) {
+      return { detected: false, timeframeMinutes: 0, timeframeLabel: '', matchesRequired: false }
+    }
+
+    // Get headers to find the time/timestamp column
+    const headers = lines[0].toLowerCase().split(',').map(col => col.trim())
+    const timeColumnIndex = headers.findIndex(h =>
+      h === 'time' || h === 'timestamp' || h === 'datetime' || h === 'date' || h === 'unix' || h === 'epoch'
+    )
+
+    // If no time column header found, assume first column is timestamp
+    const colIndex = timeColumnIndex >= 0 ? timeColumnIndex : 0
+    console.log("🔍 Using column index for timestamps:", colIndex, "Header:", headers[colIndex])
+
+    // Get timestamps from first few rows (skip header)
+    const timestamps: number[] = []
+    for (let i = 1; i < Math.min(5, lines.length); i++) {
+      const row = lines[i].split(',')
+      if (row[colIndex]) {
+        const val = row[colIndex].trim()
+        // Check if it's a Unix timestamp (number)
+        const timestamp = parseInt(val, 10)
+        if (!isNaN(timestamp) && timestamp > 1000000000) { // Valid Unix timestamp
+          timestamps.push(timestamp)
+        }
+      }
+    }
+
+    console.log("🔍 Extracted timestamps:", timestamps)
+
+    if (timestamps.length < 2) {
+      return { detected: false, timeframeMinutes: 0, timeframeLabel: '', matchesRequired: false }
+    }
+
+    // Calculate differences between consecutive timestamps
+    const differences: number[] = []
+    for (let i = 1; i < timestamps.length; i++) {
+      differences.push(timestamps[i] - timestamps[i - 1])
+    }
+
+    // Get the most common difference (in case of gaps)
+    const avgDiff = differences.reduce((a, b) => a + b, 0) / differences.length
+    const timeframeSeconds = Math.round(avgDiff)
+    const timeframeMinutes = Math.round(timeframeSeconds / 60)
+
+    console.log("🔍 Timestamp differences (seconds):", differences)
+    console.log("🔍 Average difference:", avgDiff, "seconds =", timeframeMinutes, "minutes")
+
+    // Convert minutes to human-readable label
+    let timeframeLabel = ''
+    if (timeframeMinutes >= 1440) {
+      timeframeLabel = `${Math.round(timeframeMinutes / 1440)}d`
+    } else if (timeframeMinutes >= 60) {
+      timeframeLabel = `${Math.round(timeframeMinutes / 60)}h`
+    } else {
+      timeframeLabel = `${timeframeMinutes}min`
+    }
+
+    console.log("🔍 Detected timeframe:", timeframeLabel, `(${timeframeMinutes} minutes)`)
+
+    // Check if detected timeframe matches any required timeframe
+    const timeframeToMinutes: { [key: string]: number } = {
+      "1min": 1, "5min": 5, "15min": 15, "20min": 20, "30min": 30, "36min": 36, "45min": 45,
+      "1h": 60, "2h": 120, "3h": 180, "4h": 240, "6h": 360, "8h": 480, "12h": 720,
+      "1d": 1440, "1 day": 1440, "1w": 10080, "1 week": 10080
+    }
+
+    const matchesRequired = requiredTimeframes.some(tf => {
+      const requiredMinutes = timeframeToMinutes[tf.toLowerCase()]
+      if (requiredMinutes) {
+        // Allow some tolerance (±5% or ±1 minute for small timeframes)
+        const tolerance = Math.max(1, requiredMinutes * 0.05)
+        const matches = Math.abs(timeframeMinutes - requiredMinutes) <= tolerance
+        if (matches) {
+          console.log(`✅ Timeframe ${timeframeLabel} matches required ${tf}`)
+        }
+        return matches
+      }
+      return false
+    })
+
+    return {
+      detected: true,
+      timeframeMinutes,
+      timeframeLabel,
+      matchesRequired
+    }
+  }
+
+  // Helper function to check CSV columns for timeframe patterns (legacy fallback)
+  const checkCsvColumnsForTimeframe = (csvContent: string): boolean => {
+    // Get the first line (headers)
+    const firstLine = csvContent.split('\n')[0]
+    if (!firstLine) return false
+
+    const columns = firstLine.toLowerCase().split(',').map(col => col.trim())
+    console.log("🔍 CSV columns found:", columns)
+
+    // Pattern to match timeframe columns like open_45min, close_30min, high_1h, etc.
+    const timeframeColumnPattern = /^(open|close|high|low|volume|datetime|date|time)_\d+(min|h|d|w)?$/i
+
+    // Also check for any column containing timeframe patterns
+    const hasTimeframeColumn = columns.some(col => {
+      if (timeframeColumnPattern.test(col)) {
+        console.log("✅ Found timeframe column:", col)
+        return true
+      }
+
+      const generalTimeframePattern = /_\d+(min|h|d|w)$/i
+      if (generalTimeframePattern.test(col)) {
+        console.log("✅ Found column with timeframe suffix:", col)
+        return true
+      }
+
+      return false
+    })
+
+    return hasTimeframeColumn
+  }
 
   const handleFile = (file: File) => {
     // Only allow .py and .csv files. Update here if you want to support more types.
@@ -605,26 +728,67 @@ export default function StrategyTestingPage() {
         [file.name]: file,
       }))
 
-      // Check if the file matches any required timeframe
-      console.log("🔍 File upload validation:", {
-        filename: file.name,
-        requiredTimeframes,
-        fileExtension
-      })
-      
-      const matchesAnyTimeframe = requiredTimeframes.some(timeframe => 
-        matchesTimeframe(file.name, timeframe)
-      )
-      
-      console.log("🔍 Match result:", matchesAnyTimeframe)
+      // For CSV files, check timestamps to detect timeframe
+      if (fileExtension === "csv") {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          const content = e.target?.result as string
+          if (content) {
+            console.log("🔍 File upload validation:", {
+              filename: file.name,
+              requiredTimeframes,
+              fileExtension
+            })
 
-      if (matchesAnyTimeframe) {
-        // Show success modal only if file matches a required timeframe
-        setShowSuccessModal(true)
-        showToast(`File uploaded successfully! Matches required timeframe.`, 'success')
+            // Primary check: detect timeframe from timestamps
+            const timestampResult = detectTimeframeFromTimestamps(content)
+
+            // Fallback checks
+            const hasValidTimeframeColumn = checkCsvColumnsForTimeframe(content)
+            const matchesFilename = requiredTimeframes.some(timeframe =>
+              matchesTimeframe(file.name, timeframe)
+            )
+
+            console.log("🔍 Validation results:", {
+              timestampResult,
+              hasValidTimeframeColumn,
+              matchesFilename
+            })
+
+            if (timestampResult.detected && timestampResult.matchesRequired) {
+              // Best case: timestamp analysis confirms matching timeframe
+              setShowSuccessModal(true)
+              showToast(`File uploaded successfully! Detected ${timestampResult.timeframeLabel} timeframe data.`, 'success')
+            } else if (timestampResult.detected && !timestampResult.matchesRequired) {
+              // Timestamp detected but doesn't match required
+              showToast(`File contains ${timestampResult.timeframeLabel} data but required timeframes are: ${requiredTimeframes.join(', ')}. You may get incorrect results.`, 'warning')
+            } else if (hasValidTimeframeColumn || matchesFilename) {
+              // Fallback: column names or filename match
+              setShowSuccessModal(true)
+              showToast(`File uploaded successfully! Valid timeframe pattern found.`, 'success')
+            } else {
+              // No valid timeframe detected
+              showToast(`File uploaded but couldn't detect timeframe. Required: ${requiredTimeframes.join(', ')}. You may get incorrect results.`, 'warning')
+            }
+          }
+        }
+        reader.onerror = () => {
+          // If we can't read the file, fall back to filename matching
+          const matchesAnyTimeframe = requiredTimeframes.some(timeframe =>
+            matchesTimeframe(file.name, timeframe)
+          )
+          if (matchesAnyTimeframe) {
+            setShowSuccessModal(true)
+            showToast(`File uploaded successfully! Matches required timeframe.`, 'success')
+          } else {
+            showToast(`File uploaded but couldn't verify timeframe data.`, 'warning')
+          }
+        }
+        reader.readAsText(file)
       } else {
-        // Show warning instead of success modal for mismatched timeframes
-        showToast(`File uploaded but doesn't match required timeframes (${requiredTimeframes.join(', ')}). You may get incorrect results.`, 'warning')
+        // For .py files, just accept them
+        setShowSuccessModal(true)
+        showToast(`Python file uploaded successfully!`, 'success')
       }
     } else {
       showToast("Only .py and .csv files are supported", 'error')
@@ -692,17 +856,17 @@ export default function StrategyTestingPage() {
     if (minutes) {
       // Check if the filename contains the minute value
       const minutesStr = minutes.toString()
-      
+
       // Use word boundary regex to avoid partial matches
       // For example, "20" in "120" should not match "20m"
       const regex = new RegExp(`\\b${minutesStr}\\b`)
       const isStandaloneNumber = regex.test(lowerFilename)
 
-      console.log("🔍 Minute check:", { 
-        timeframe, 
-        minutes, 
-        minutesStr, 
-        lowerFilename, 
+      console.log("🔍 Minute check:", {
+        timeframe,
+        minutes,
+        minutesStr,
+        lowerFilename,
         isStandaloneNumber,
         regex: regex.toString()
       })
@@ -757,14 +921,14 @@ export default function StrategyTestingPage() {
       let result: any
 
       // Check if this is a custom strategy
-      const isCustomStrategy = parsedStatement?.is_custom_strategy || 
+      const isCustomStrategy = parsedStatement?.is_custom_strategy ||
         localStorage.getItem("is_custom_strategy") === "true"
 
       if (isCustomStrategy) {
         // Use custom strategy backtest API
         const customStrategyId = parsedStatement?.custom_strategy_id || parsedStatement?.id
         const symbol = metaAPIConfig?.symbol || "XAUUSD"
-        
+
         console.log("🔍 Running custom strategy backtest:", {
           customStrategyId,
           symbol,
@@ -813,7 +977,7 @@ export default function StrategyTestingPage() {
 
           // Store the result in sessionStorage for the results page
           sessionStorage.setItem('customBacktestResult', JSON.stringify(normalizedResult))
-          
+
           // Store the result for display in modal
           setCustomStrategyBacktestResult(normalizedResult)
           setShowCustomStrategyBacktestResults(true)
@@ -832,15 +996,15 @@ export default function StrategyTestingPage() {
         const symbol = metaAPIConfig?.symbol || "XAUUSD"
         const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
         const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
-        
+
         console.log("🔍 Using trading symbol for MetaAPI backtest:", symbol)
         console.log("🔍 MetaAPI Token available:", !!token)
         console.log("🔍 MetaAPI Account ID available:", !!accountId)
-        
+
         if (!token || !accountId) {
           throw new Error("MetaAPI credentials not configured. Please check environment variables.")
         }
-        
+
         result = await runBacktestWithMetaAPI(
           parsedStatement,
           token,
@@ -865,7 +1029,7 @@ export default function StrategyTestingPage() {
             stderr: result.stderr || ''
           })
           setShowTradesSummary(true)
-          
+
           // Check if trades CSV has actual data
           const csvLines = result.trades_csv.trim().split('\n')
           if (csvLines.length >= 2) {
@@ -945,7 +1109,7 @@ export default function StrategyTestingPage() {
             stderr: result.stderr || ''
           })
           setShowTradesSummary(true)
-          
+
           // Check if trades CSV has actual data
           const csvLines = result.trades_csv.trim().split('\n')
           if (csvLines.length >= 2) {
@@ -986,7 +1150,7 @@ export default function StrategyTestingPage() {
       }
     } catch (error: any) {
       console.error("Backtest Error:", error)
-      
+
       // Check if this is a MetaAPI-related error
       const errorMessage = error.message || "Unknown error"
       const isMetaAPIError = useMetaAPI && metaAPIConfig && (
@@ -996,13 +1160,13 @@ export default function StrategyTestingPage() {
         errorMessage.toLowerCase().includes("candles") ||
         errorMessage.toLowerCase().includes("broker")
       )
-      
+
       if (isMetaAPIError) {
         // Extract required timeframes from the strategy
         const requiredTimeframes = parsedStatement?.strategy
           ?.filter((step: any) => step.function && step.vars && step.vars.timeframe)
           .map((step: any) => step.vars.timeframe) || []
-        
+
         // Show detailed MetaAPI debug modal
         setMetaAPIError({
           message: errorMessage,
@@ -1059,7 +1223,7 @@ export default function StrategyTestingPage() {
       const optimisationFormString = localStorage.getItem("optimisation_form")
       let parametersObject: Record<string, any> = {}
       let constraintsArray: string[] = []
-      
+
       if (optimisationFormString) {
         try {
           const optimisationForm = JSON.parse(optimisationFormString)
@@ -1192,7 +1356,7 @@ export default function StrategyTestingPage() {
       }
     } catch (error: any) {
       console.error("Optimisation Error:", error)
-      
+
       // Check if this is a MetaAPI-related error
       const errorMessage = error.message || "Unknown error"
       const isMetaAPIError = useMetaAPI && metaAPIConfig && (
@@ -1202,13 +1366,13 @@ export default function StrategyTestingPage() {
         errorMessage.toLowerCase().includes("candles") ||
         errorMessage.toLowerCase().includes("broker")
       )
-      
+
       if (isMetaAPIError) {
         // Extract required timeframes from the strategy
         const requiredTimeframes = parsedStatement?.strategy
           ?.filter((step: any) => step.function && step.vars && step.vars.timeframe)
           .map((step: any) => step.vars.timeframe) || []
-        
+
         // Show detailed MetaAPI debug modal
         setMetaAPIError({
           message: errorMessage,
@@ -1282,7 +1446,7 @@ export default function StrategyTestingPage() {
       const optimisationFormString = localStorage.getItem("optimisation_form")
       let parametersObject: Record<string, any> = {}
       let constraintsArray: string[] = []
-      
+
       if (optimisationFormString) {
         try {
           const optimisationForm = JSON.parse(optimisationFormString)
@@ -1327,7 +1491,7 @@ export default function StrategyTestingPage() {
         walk_forward_setting: walkForwardSettings, // Pass as separate parameter
         wait,
       }
-      
+
       if (strategy_id && !isNaN(Number(strategy_id))) {
         apiParams.strategy_statement_id = Number(strategy_id)
       }
@@ -1363,16 +1527,16 @@ export default function StrategyTestingPage() {
 
       // The API response structure is direct, not nested under 'result'
       const resultData = result;
-      
+
       console.log("🔍 DEBUG: Full result data:", resultData);
       console.log("🔍 DEBUG: Available fields:", Object.keys(resultData || {}));
-      
+
       if (resultData && (resultData.status === 'success' || resultData.message?.toLowerCase().includes('success'))) {
         console.log("Success detected, navigating to results page");
         // Store only the optimization ID in sessionStorage and navigate to results page
         const optimizationId = resultData.walkforward_optimization_id || resultData.optimization_id;
         console.log("🔍 DEBUG: Found optimization ID:", optimizationId);
-        
+
         if (optimizationId) {
           console.log("✅ Storing optimization ID:", optimizationId);
           sessionStorage.setItem('walkForwardOptimizationId', optimizationId.toString());
@@ -1403,7 +1567,7 @@ export default function StrategyTestingPage() {
         // Store only the optimization ID in sessionStorage
         const optimizationId = resultData.walkforward_optimization_id || resultData.optimization_id;
         console.log("🔍 DEBUG: Found optimization ID:", optimizationId);
-        
+
         if (optimizationId) {
           console.log("✅ Storing optimization ID:", optimizationId);
           sessionStorage.setItem('walkForwardOptimizationId', optimizationId.toString());
@@ -1411,7 +1575,7 @@ export default function StrategyTestingPage() {
           setTimeout(() => {
             router.push('/walk-forward-results');
           }, 100);
-      } else {
+        } else {
           // Fallback: store minimal data
           const minimalData = {
             id: resultData.id || resultData.walkforward_optimization_id || resultData.optimization_id,
@@ -1431,7 +1595,7 @@ export default function StrategyTestingPage() {
       console.log("No result data found");
     } catch (error: any) {
       console.error("Walk Forward Optimisation Error:", error)
-      
+
       // Check if this is a MetaAPI-related error
       const errorMessage = error.message || "Unknown error"
       const isMetaAPIError = useMetaAPI && metaAPIConfig && (
@@ -1441,13 +1605,13 @@ export default function StrategyTestingPage() {
         errorMessage.toLowerCase().includes("candles") ||
         errorMessage.toLowerCase().includes("broker")
       )
-      
+
       if (isMetaAPIError) {
         // Extract required timeframes from the strategy
         const requiredTimeframes = parsedStatement?.strategy
           ?.filter((step: any) => step.function && step.vars && step.vars.timeframe)
           .map((step: any) => step.vars.timeframe) || []
-        
+
         // Show detailed MetaAPI debug modal
         setMetaAPIError({
           message: errorMessage,
@@ -1517,7 +1681,7 @@ export default function StrategyTestingPage() {
         page_size: 50
       })
       setOptimizationResults(results.results || [])
-    
+
     } catch (error) {
       showToast("Error loading optimization results", 'error')
       console.error("Error loading optimization results:", error)
@@ -1571,7 +1735,7 @@ export default function StrategyTestingPage() {
         page_size: 50
       })
       setWalkForwardOptimizationResults(results.results || [])
-    
+
     } catch (error) {
       showToast("Error loading walk forward optimization results", 'error')
       console.error("Error loading walk forward optimization results:", error)
@@ -1584,9 +1748,9 @@ export default function StrategyTestingPage() {
       console.log("Fetching WFO result detail for ID:", optimizationId)
       const result = await getWalkForwardOptimizationResultDetail(optimizationId)
       console.log("WFO result detail received:", result)
-      
+
       showToast("Loading walk forward optimization result details...", 'success')
-      
+
       // Navigate to the walk-forward-results page with the optimization ID
       // The page will fetch the data directly using the ID
       router.push(`/walk-forward-results?id=${optimizationId}`)
@@ -1643,7 +1807,7 @@ export default function StrategyTestingPage() {
   // MetaAPI Configuration Handlers
   const handleMetaAPIConfigChange = (config: MetaAPIConfigType) => {
     setMetaAPIConfig(config)
-    
+
     // Auto-select the corresponding instrument in Backtest tab
     if (config.symbol) {
       const mappedInstrument = mapSymbolToInstrument(config.symbol)
@@ -1672,7 +1836,7 @@ export default function StrategyTestingPage() {
     if (leverageStr === "custom" && customLeverage.trim()) {
       leverageStr = customLeverage.trim()
     }
-    
+
     const ratio = Number.parseInt(leverageStr.split(":")[1])
     // For 1:1 leverage, margin should be 1.0 (100%)
     // For 1:2 leverage, margin should be 0.5 (50%)
@@ -1735,7 +1899,7 @@ export default function StrategyTestingPage() {
       // Use custom leverage if available, otherwise use the selected leverage
       const actualLeverage = (leverage === "custom" && customLeverage.trim()) ? customLeverage.trim() : leverage
       const leverageMargin = getLeverageMargin(actualLeverage)
-      
+
       console.log("🔍 Saving leverage settings:", {
         leverage,
         customLeverage,
@@ -1754,9 +1918,9 @@ export default function StrategyTestingPage() {
         asset_type: assetType, // Add the asset type
         position_size: Number.parseFloat(positionSize) || 1, // Add position size with default value of 1
       }
-      
-      console.log("🔍 Commission being sent to API:", { 
-        commission, 
+
+      console.log("🔍 Commission being sent to API:", {
+        commission,
         commissionState: commission,
         parsedStatementCommission: parsedStatement?.TradingType?.commission
       })
@@ -1768,11 +1932,11 @@ export default function StrategyTestingPage() {
 
       // Get TradingSession from parsedStatement if it exists
       const tradingSession = parsedStatement?.TradingSession || null
-      
+
       console.log("🔍 DEBUG: TradingSession being sent to API:", tradingSession)
       console.log("🔍 DEBUG: parsedStatement:", parsedStatement)
       console.log("🔍 DEBUG: parsedStatement.TradingSession:", parsedStatement?.TradingSession)
-      
+
       // Use editStrategy to update the complete strategy including TradingSession
       const updatedStrategyData = {
         ...parsedStatement,
@@ -1789,10 +1953,10 @@ export default function StrategyTestingPage() {
         // Preserve TradingSession if it exists
         ...(parsedStatement.TradingSession && { TradingSession: parsedStatement.TradingSession })
       }
-      
+
       console.log("🔍 DEBUG: updatedStrategyData being sent to editStrategy:", updatedStrategyData)
       console.log("🔍 DEBUG: TradingSession in updatedStrategyData:", updatedStrategyData.TradingSession)
-      
+
       const result = await editStrategy(strategy_id, updatedStrategyData)
 
       // Update the local strategy object with the response from the API
@@ -1802,17 +1966,17 @@ export default function StrategyTestingPage() {
           ...result,
           TradingSession: updatedStrategyData.TradingSession
         }
-        
+
         setParsedStatement(finalResult)
         localStorage.setItem("savedStrategy", JSON.stringify(finalResult))
-        
+
         // Update strategy_id if it changed
         if (result.id && result.id.toString() !== strategy_id) {
           setStrategyId(result.id.toString())
           localStorage.setItem("strategy_id", result.id.toString())
           console.log("🔍 Strategy ID updated from", strategy_id, "to", result.id)
         }
-        
+
         console.log("🔍 Updated strategy from API:", result)
         console.log("🔍 TradingSession preserved locally:", finalResult.TradingSession)
         showToast("Backtest settings saved successfully!", 'success')
@@ -1837,17 +2001,17 @@ export default function StrategyTestingPage() {
       let currentOptimisationForm = currentOptimisationFormString
         ? JSON.parse(currentOptimisationFormString)
         : {
-            parameters: [],
-            maximise_options: [],
-            algorithm_options: [],
-            default_algorithm: "",
-            algorithm_defaults: {
-              population_size: 100,
-              generations: 50,
-              mutation_rate: 0.1,
-              tournament_size: 3,
-            },
-          }
+          parameters: [],
+          maximise_options: [],
+          algorithm_options: [],
+          default_algorithm: "",
+          algorithm_defaults: {
+            population_size: 100,
+            generations: 50,
+            mutation_rate: 0.1,
+            tournament_size: 3,
+          },
+        }
 
       // Transform parameters array to Parameters object format for the API
       const parametersObject: Record<string, any> = {}
@@ -1900,11 +2064,11 @@ export default function StrategyTestingPage() {
   // Helper function to generate convergence plot HTML
   const generateConvergencePlotHTML = (convergenceData: any[]) => {
     if (!convergenceData || convergenceData.length === 0) return null;
-    
+
     // Extract generations and equity values
     const generations = convergenceData.map((d, idx) => d.generation ?? idx);
     const equityValues = convergenceData.map(d => d['Equity Final [$]']);
-    
+
     const plotlyData = JSON.stringify([{
       x: generations,
       y: equityValues,
@@ -1914,7 +2078,7 @@ export default function StrategyTestingPage() {
       line: { color: '#85e1fe', width: 2 },
       name: 'Equity Final'
     }]);
-    
+
     const layout = JSON.stringify({
       title: 'Convergence Plot',
       xaxis: { title: 'Generation', gridcolor: '#333' },
@@ -1923,7 +2087,7 @@ export default function StrategyTestingPage() {
       plot_bgcolor: '#0e1018',
       font: { color: '#fff' }
     });
-    
+
     return `
       <!DOCTYPE html>
       <html>
@@ -1943,22 +2107,22 @@ export default function StrategyTestingPage() {
   // Helper function to generate heatmap plot HTML
   const generateHeatmapPlotHTML = (heatmapData: any[]) => {
     if (!heatmapData || heatmapData.length === 0) return null;
-    
+
     // Extract unique parameter values and create a matrix
     const param1Key = Object.keys(heatmapData[0]).find(k => k !== 'Equity Final [$]' && k !== 'Return [%]');
     const param2Key = Object.keys(heatmapData[0]).find(k => k !== 'Equity Final [$]' && k !== 'Return [%]' && k !== param1Key);
-    
+
     if (!param1Key || !param2Key) {
       // If we can't find two parameters, create a simple scatter plot
       const x = heatmapData.map((d, idx) => idx);
       const y = heatmapData.map(d => d['Equity Final [$]']);
-      
+
       const plotlyData = JSON.stringify([{
         x: x,
         y: y,
         mode: 'markers',
         type: 'scatter',
-        marker: { 
+        marker: {
           color: y,
           colorscale: 'Viridis',
           showscale: true,
@@ -1966,7 +2130,7 @@ export default function StrategyTestingPage() {
         },
         name: 'Equity Final'
       }]);
-      
+
       const layout = JSON.stringify({
         title: 'Optimization Results',
         xaxis: { title: 'Index', gridcolor: '#333' },
@@ -1975,7 +2139,7 @@ export default function StrategyTestingPage() {
         plot_bgcolor: '#0e1018',
         font: { color: '#fff' }
       });
-      
+
       return `
         <!DOCTYPE html>
         <html>
@@ -1991,17 +2155,17 @@ export default function StrategyTestingPage() {
         </html>
       `;
     }
-    
+
     const x = heatmapData.map(d => d[param1Key]);
     const y = heatmapData.map(d => d[param2Key]);
     const z = heatmapData.map(d => d['Equity Final [$]']);
-    
+
     const plotlyData = JSON.stringify([{
       x: x,
       y: y,
       mode: 'markers',
       type: 'scatter',
-      marker: { 
+      marker: {
         color: z,
         colorscale: 'Viridis',
         showscale: true,
@@ -2011,7 +2175,7 @@ export default function StrategyTestingPage() {
       text: z.map((val: number) => `$${val.toFixed(2)}`),
       hovertemplate: `${param1Key}: %{x}<br>${param2Key}: %{y}<br>Equity: %{text}<extra></extra>`
     }]);
-    
+
     const layout = JSON.stringify({
       title: 'Parameter Optimization Heatmap',
       xaxis: { title: param1Key, gridcolor: '#333' },
@@ -2020,7 +2184,7 @@ export default function StrategyTestingPage() {
       plot_bgcolor: '#0e1018',
       font: { color: '#fff' }
     });
-    
+
     return `
       <!DOCTYPE html>
       <html>
@@ -2050,7 +2214,7 @@ export default function StrategyTestingPage() {
   const hasFinalStatusRef = useRef(false)
 
   // New Optimization Droplets Flow Functions
-  
+
   /**
    * Poll droplet job status (for droplet-based optimizations)
    */
@@ -2073,7 +2237,7 @@ export default function StrategyTestingPage() {
       setDropletPollingInterval(null)
     }
 
-    const isFinalStatus = (status: string) => 
+    const isFinalStatus = (status: string) =>
       ["Completed", "Failed", "Cancelled", "completed", "failed", "cancelled"].includes(status)
 
     // Reset final status flag for new polling session
@@ -2085,16 +2249,16 @@ export default function StrategyTestingPage() {
       const initialJobData = await getOptimizationJob(jobId)
       isPollingRequestPendingRef.current = false
       console.log(`📊 Droplet Job ${jobId} Initial Check: ${initialJobData.status}`)
-      
+
       setDropletJobStatus(initialJobData.status)
-      
+
       // If job is already in a final state, don't start polling
       if (isFinalStatus(initialJobData.status)) {
         console.log(`✅ Job ${jobId} already ${initialJobData.status} - skipping polling`)
         hasFinalStatusRef.current = true
         setDropletJobResults(initialJobData)
         setIsPollingActive(false)
-        
+
         if (initialJobData.status === 'Completed' || initialJobData.status === 'completed') {
           console.log('✅ Droplet job already completed:', initialJobData)
           // Don't show toast if we're just loading existing results
@@ -2133,13 +2297,13 @@ export default function StrategyTestingPage() {
         const jobData = await getOptimizationJob(jobId)
         isPollingRequestPendingRef.current = false
         console.log(`📊 Droplet Job ${jobId}: ${jobData.status} (Runtime: ${jobData.runtime_minutes} min)`)
-        
+
         setDropletJobStatus(jobData.status)
-        
+
         // Check if job has reached a final state
         if (isFinalStatus(jobData.status)) {
           console.log(`🛑 Job ${jobId} reached final status: ${jobData.status} - stopping polling`)
-          
+
           // Set all flags to stop polling completely
           stopped = true
           hasFinalStatusRef.current = true
@@ -2151,7 +2315,7 @@ export default function StrategyTestingPage() {
           if (jobData.status === 'Completed' || jobData.status === 'completed') {
             console.log('✅ Droplet job completed successfully:', jobData)
             setDropletJobResults(jobData)  // Store entire job data, not just results
-            
+
             // Show results for walk forward optimization
             if (optimizationType === 'walk_forward') {
               console.log('📊 Walk Forward Results:')
@@ -2161,7 +2325,7 @@ export default function StrategyTestingPage() {
               console.log(`   P-Value: ${jobData.results?.p_value?.toFixed(4)}`)
               console.log(`   Decision: ${jobData.results?.hypothesis_decision}`)
               console.log(`   Avg Validation Return: ${jobData.results?.avg_validation_return?.toFixed(2)}%`)
-              
+
               // Log plot files if available
               if (jobData.results?.plot_files) {
                 console.log('📈 Plot Files:')
@@ -2169,17 +2333,17 @@ export default function StrategyTestingPage() {
                   console.log(`   ${type}: ${info.filename} (${(info.size / 1024 / 1024).toFixed(2)} MB)`)
                 })
               }
-              
+
               // Log cost information
               console.log('💰 Cost Information:')
               console.log(`   Estimated: $${jobData.estimated_cost}`)
               console.log(`   Actual: $${jobData.actual_cost}`)
               console.log(`   Droplet Size: ${jobData.droplet_size}`)
-              
+
               const decision = jobData.results?.hypothesis_decision || 'Completed'
               const pValue = jobData.results?.p_value
               const isProfitable = pValue && pValue < 0.05
-              
+
               showToast(
                 `Walk Forward Optimization completed! ${isProfitable ? '✅ Profitable' : '⚠️ ' + decision.substring(0, 50)}`,
                 isProfitable ? 'success' : 'warning'
@@ -2195,7 +2359,7 @@ export default function StrategyTestingPage() {
             console.log(`⚠️ Droplet job cancelled`)
             showToast('Optimization job was cancelled', 'warning')
           }
-          
+
           // Ensure polling has fully stopped
           console.log(`✅ Polling cleanup complete for job ${jobId}`)
           return // Exit the interval callback after final status
@@ -2203,13 +2367,13 @@ export default function StrategyTestingPage() {
       } catch (error) {
         isPollingRequestPendingRef.current = false
         console.error(`❌ Error polling droplet job status for job ${jobId}:`, error)
-        
+
         // Stop polling on error to prevent infinite error loops
         stopped = true
         clearInterval(interval)
         setDropletPollingInterval(null)
         setIsPollingActive(false)
-        
+
         console.log(`🛑 Polling stopped due to error for job ${jobId}`)
       }
     }, 60000) // Poll every 1 minute (60 seconds)
@@ -2252,9 +2416,9 @@ export default function StrategyTestingPage() {
     try {
       const jobData = await getWalkForwardDropletResults(jobId)
       console.log('📊 Walk Forward Droplet Results:', jobData)
-      
+
       setDropletJobResults(jobData.results)
-      
+
       // Display results summary
       if (jobData.results) {
         console.log('📈 Results Summary:')
@@ -2264,7 +2428,7 @@ export default function StrategyTestingPage() {
         console.log(`   P-Value: ${jobData.results.p_value?.toFixed(4)}`)
         console.log(`   Decision: ${jobData.results.hypothesis_decision}`)
         console.log(`   Avg Validation Return: ${jobData.results.avg_validation_return?.toFixed(2)}%`)
-        
+
         // Display plot URLs
         if (jobData.results.plot_urls) {
           console.log('📈 Available Plots:')
@@ -2272,7 +2436,7 @@ export default function StrategyTestingPage() {
             console.log(`   ${type}: ${url}`)
           })
         }
-        
+
         showToast('Walk forward results loaded successfully!', 'success')
       }
     } catch (error: any) {
@@ -2286,7 +2450,7 @@ export default function StrategyTestingPage() {
    */
   const handleCostConfirmation = async () => {
     setShowCostDialog(false)
-    
+
     if (!parsedStatement) {
       showToast("Strategy statement is missing or not parsed!", 'error')
       return
@@ -2302,7 +2466,7 @@ export default function StrategyTestingPage() {
       setIsCreatingOptimizationJob(true)
       // Prepare files only if NOT using MetaAPI
       let timeframeFiles: Record<string, File> = {}
-      
+
       if (!useMetaAPI) {
         requiredTimeframes.forEach((timeframe, index) => {
           const filename = uploadedFiles[index]
@@ -2324,18 +2488,18 @@ export default function StrategyTestingPage() {
       const optimisationFormString = localStorage.getItem("optimisation_form")
       let parametersObject: Record<string, any> = {}
       let constraintsArray: string[] = []
-      
+
       if (optimisationFormString) {
         try {
           const optimisationForm = JSON.parse(optimisationFormString)
           parametersObject = optimisationForm.Parameters || {}
           constraintsArray = optimisationForm.Constraints || []
-          
+
           // Debug logging for parameters
           console.log("🔍 Optimisation form loaded from localStorage:", optimisationForm)
           console.log("🔍 Parameters object:", parametersObject)
           console.log("🔍 Parameters keys:", Object.keys(parametersObject))
-          
+
           if (Object.keys(parametersObject).length === 0) {
             console.warn("⚠️ WARNING: Parameters object is empty! User needs to configure optimization parameters in Advanced Settings.")
             showToast("No optimization parameters configured. Please set parameters in Advanced Settings.", 'warning')
@@ -2430,7 +2594,7 @@ export default function StrategyTestingPage() {
       } else {
         // Use file upload for optimization job
         apiParams.files = timeframeFiles
-        
+
         // Add CSV file explicitly (use the first uploaded file)
         const firstFile = Object.values(timeframeFiles)[0]
         if (firstFile) {
@@ -2444,28 +2608,28 @@ export default function StrategyTestingPage() {
         files: apiParams.files ? Object.keys(apiParams.files) : undefined,
         metaapi_token: apiParams.metaapi_token ? '***' : undefined
       })
-      
+
       const jobResult = await createOptimizationJob(apiParams)
-      
+
       console.log("Optimization job created:", jobResult)
-      
+
       // Store job ID and start polling
       setDropletJobId(jobResult.job_id)
       setDropletJobStatus(jobResult.status || 'running')
-      
+
       showToast(`Optimization job created! Job ID: ${jobResult.job_id}`, 'success')
-      
+
       // Start polling for job status
       startDropletJobPolling(jobResult.job_id)
-      
+
       // Navigate to results page with job_id parameter
       setTimeout(() => {
         router.push(`/optimization-results?job_id=${jobResult.job_id}&type=droplet`)
       }, 500)
-      
+
     } catch (error: any) {
       console.error("Error creating optimization job:", error)
-      
+
       // Error Handling: 403, 400, 500, Network errors
       if (error.message.includes('401') || error.message.includes('403')) {
         showToast("Authentication failed. Please login again.", 'error')
@@ -2481,13 +2645,13 @@ export default function StrategyTestingPage() {
           errorMessage.toLowerCase().includes("candles") ||
           errorMessage.toLowerCase().includes("broker")
         )
-        
+
         if (isMetaAPIError) {
           // Extract required timeframes from the strategy
           const requiredTimeframes = parsedStatement?.strategy
             ?.filter((step: any) => step.function && step.vars && step.vars.timeframe)
             .map((step: any) => step.vars.timeframe) || []
-          
+
           // Show detailed MetaAPI debug modal
           setMetaAPIError({
             message: errorMessage,
@@ -2511,13 +2675,13 @@ export default function StrategyTestingPage() {
           errorMessage.toLowerCase().includes("candles") ||
           errorMessage.toLowerCase().includes("broker")
         )
-        
+
         if (isMetaAPIError) {
           // Extract required timeframes from the strategy
           const requiredTimeframes = parsedStatement?.strategy
             ?.filter((step: any) => step.function && step.vars && step.vars.timeframe)
             .map((step: any) => step.vars.timeframe) || []
-          
+
           // Show detailed MetaAPI debug modal
           setMetaAPIError({
             message: errorMessage,
@@ -2610,9 +2774,8 @@ export default function StrategyTestingPage() {
                 {["strategy", "backtest", "optimisation", "properties"].map((tab) => (
                   <button
                     key={tab}
-                    className={`flex-1 py-3 text-center font-medium ${
-                      activeTab === tab ? "bg-[#141721] text-[#85e1fe]" : "bg-[#1A1D2D] text-gray-400"
-                    }`}
+                    className={`flex-1 py-3 text-center font-medium ${activeTab === tab ? "bg-[#141721] text-[#85e1fe]" : "bg-[#1A1D2D] text-gray-400"
+                      }`}
                     onClick={() => handleTabChange(tab)}
                   >
                     {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -2665,7 +2828,7 @@ export default function StrategyTestingPage() {
                         </label>
                       </div>
                       <p className="text-sm text-gray-400 mt-2">
-                        {useMetaAPI 
+                        {useMetaAPI
                           ? "Use MetaAPI to fetch real market data automatically"
                           : "Upload CSV files manually for backtesting"
                         }
@@ -2674,7 +2837,7 @@ export default function StrategyTestingPage() {
 
                     {/* Previous Backtests Button - Always Visible */}
                     <div className="mb-4 flex justify-end">
-                      <button 
+                      <button
                         onClick={() => setShowBacktestHistory(true)}
                         className="bg-gray-600 hover:bg-gray-700 text-white rounded-full px-6 py-3 text-sm font-medium"
                       >
@@ -2689,7 +2852,7 @@ export default function StrategyTestingPage() {
                           onConfigChange={handleMetaAPIConfigChange}
                           initialConfig={metaAPIConfig || undefined}
                         />
-                        
+
                         {/* Timezone Selector */}
                         <div className="bg-black border border-gray-700 rounded-lg p-4">
                           <label className="block text-white font-medium mb-2">Timezone</label>
@@ -2721,7 +2884,7 @@ export default function StrategyTestingPage() {
                             Select the timezone for trading session configuration
                           </p>
                         </div>
-                        
+
                         <div className="flex gap-3">
                           {/* <button
                             className="bg-[#141721] hover:bg-[#2B2E38] text-white rounded-full px-4 py-2 text-sm"
@@ -2908,19 +3071,19 @@ export default function StrategyTestingPage() {
                             <tbody>
                               {(optimisationResult.convergence_data || optimisationResult.full_optimization_results || optimisationResult.table || []).map((row: any, idx: number) => {
                                 // Extract parameters (all fields that are not standard metrics)
-                                const standardFields = ['Return [%]', 'Equity Final [$]', '# Trades', 'Win Rate [%]', 
+                                const standardFields = ['Return [%]', 'Equity Final [$]', '# Trades', 'Win Rate [%]',
                                   'Profit Factor', 'Max. Drawdown [%]', 'Sharpe Ratio', 'Sortino Ratio', 'Calmar Ratio',
                                   'Return (Ann.) [%]', 'Volatility (Ann.) [%]', 'Start', 'End', 'Duration', 'SQN',
-                                  'Exposure Time [%]', 'Equity Peak [$]', 'Avg. Trade [%]', 'Best Trade [%]', 
+                                  'Exposure Time [%]', 'Equity Peak [$]', 'Avg. Trade [%]', 'Best Trade [%]',
                                   'Worst Trade [%]', 'Avg. Drawdown [%]', 'Avg. Drawdown Duration', 'Max. Drawdown Duration',
                                   'Avg. Trade Duration', 'Max. Trade Duration', 'Buy & Hold Return [%]', 'Expectancy [%]',
                                   'Unnamed: 0', 'generation'];
-                                
+
                                 const parameters = Object.keys(row)
                                   .filter(key => !standardFields.includes(key))
                                   .map(key => `${key}=${row[key]}`)
                                   .join(', ');
-                                
+
                                 return (
                                   <tr
                                     key={idx}
@@ -2973,7 +3136,7 @@ export default function StrategyTestingPage() {
                             </div>
                           ) : null;
                         })()}
-                        
+
                         {/* Heatmap Plot */}
                         {optimisationResult.optimization_heatmap_data && optimisationResult.optimization_heatmap_data.length > 0 && (() => {
                           const plotHTML = generateHeatmapPlotHTML(optimisationResult.optimization_heatmap_data);
@@ -2988,7 +3151,7 @@ export default function StrategyTestingPage() {
                             </div>
                           ) : null;
                         })()}
-                        
+
                         {/* Legacy plots - still show if available */}
                         {optimisationResult.heatmap_plot_html && (
                           <div className="mb-8">
@@ -3010,16 +3173,16 @@ export default function StrategyTestingPage() {
                             />
                           </div>
                         )}
-                        
+
                         {/* No data message */}
-                        {!optimisationResult.convergence_data && 
-                         !optimisationResult.optimization_heatmap_data && 
-                         !optimisationResult.heatmap_plot_html && 
-                         !optimisationResult.trades_plot_html && (
-                          <div className="text-center text-gray-400 py-8">
-                            No plot data available
-                          </div>
-                        )}
+                        {!optimisationResult.convergence_data &&
+                          !optimisationResult.optimization_heatmap_data &&
+                          !optimisationResult.heatmap_plot_html &&
+                          !optimisationResult.trades_plot_html && (
+                            <div className="text-center text-gray-400 py-8">
+                              No plot data available
+                            </div>
+                          )}
                       </div>
                     )}
 
@@ -3098,10 +3261,10 @@ export default function StrategyTestingPage() {
                         width: (isLoading
                           ? `${Math.min(progress, 100)}%`
                           : isLoading2
-                          ? `${Math.min(progress2, 100)}%`
-                          : isLoading3
-                          ? `${Math.min(progress3, 100)}%`
-                          : "0%"),
+                            ? `${Math.min(progress2, 100)}%`
+                            : isLoading3
+                              ? `${Math.min(progress3, 100)}%`
+                              : "0%"),
                         opacity: (isLoading || isLoading2 || isLoading3) ? 1 : 0,
                       }}
                     ></div>
@@ -3111,13 +3274,12 @@ export default function StrategyTestingPage() {
                 {/* Action Buttons */}
                 <div className="p-4 flex gap-4">
                   <button
-                    className={`flex-1 py-3 rounded-full transition-colors ${
-                      isLoading || (!useMetaAPI && (requiredTimeframes.length > uploadedFiles.length))
-                        ? 'bg-gray-600 cursor-not-allowed text-gray-300'
-                        : (activeTab === 'strategy' || activeTab === 'backtest')
+                    className={`flex-1 py-3 rounded-full transition-colors ${isLoading || (!useMetaAPI && (requiredTimeframes.length > uploadedFiles.length))
+                      ? 'bg-gray-600 cursor-not-allowed text-gray-300'
+                      : (activeTab === 'strategy' || activeTab === 'backtest')
                         ? 'bg-[#85e1fe] text-black hover:bg-[#6bcae2] font-semibold'
                         : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
-                    }`}
+                      }`}
                     onClick={handleRunBacktest}
                     disabled={isLoading || (!useMetaAPI && (requiredTimeframes.length > uploadedFiles.length))}
                   >
@@ -3125,26 +3287,24 @@ export default function StrategyTestingPage() {
                   </button>
                   <button
                     onClick={() => handleOptimisation(false)}
-                    className={`flex-1 py-3 rounded-full transition-colors ${
-                      isLoading2
-                        ? 'bg-gray-600 cursor-not-allowed text-gray-300'
-                        : (activeTab === 'optimisation' || activeTab === 'properties')
+                    className={`flex-1 py-3 rounded-full transition-colors ${isLoading2
+                      ? 'bg-gray-600 cursor-not-allowed text-gray-300'
+                      : (activeTab === 'optimisation' || activeTab === 'properties')
                         ? 'bg-[#85e1fe] text-black hover:bg-[#6bcae2] font-semibold'
                         : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
-                    }`}
+                      }`}
                     disabled={isLoading2}
                   >
                     Run Optimisation (Legacy)
                   </button>
                   <button
                     onClick={() => handleOptimizationWithDroplets('regular')}
-                    className={`flex-1 py-3 rounded-full font-semibold transition-colors ${
-                      isLoading2 || isCreatingOptimizationJob
-                        ? 'bg-gray-600 cursor-not-allowed text-gray-400'
-                        : (activeTab === 'optimisation' || activeTab === 'properties')
+                    className={`flex-1 py-3 rounded-full font-semibold transition-colors ${isLoading2 || isCreatingOptimizationJob
+                      ? 'bg-gray-600 cursor-not-allowed text-gray-400'
+                      : (activeTab === 'optimisation' || activeTab === 'properties')
                         ? 'bg-[#85e1fe] text-black hover:bg-[#6bcae2]'
                         : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
-                    }`}
+                      }`}
                     disabled={isLoading2 || isCreatingOptimizationJob}
                   >
                     {isCreatingOptimizationJob ? 'Creating Job...' : 'Run Optimization (Droplets)'}
@@ -3198,7 +3358,7 @@ export default function StrategyTestingPage() {
         )}
 
         {/* Loading Modal */}
-        
+
         {isChartExpanded && (
           <div className="fixed inset-0 bg-black bg-opacity-50 z-40" onClick={toggleChartExpansion} />
         )}
@@ -3227,14 +3387,14 @@ export default function StrategyTestingPage() {
             <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-6xl max-h-[80vh] overflow-hidden">
               <div className="flex justify-between items-center p-6 border-b border-gray-700">
                 <h2 className="text-2xl font-bold text-white">Optimization History</h2>
-                <button 
+                <button
                   onClick={() => setShowOptimizationHistory(false)}
                   className="text-gray-400 hover:text-white"
                 >
                   <X className="w-6 h-6" />
                 </button>
               </div>
-              
+
               <div className="p-6 overflow-y-auto max-h-[60vh]">
                 {optimizationResults.length === 0 ? (
                   <div className="text-center text-gray-400 py-8">
@@ -3257,12 +3417,11 @@ export default function StrategyTestingPage() {
                             </p>
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                              result.status === "completed" ? "bg-green-500 text-white" :
+                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${result.status === "completed" ? "bg-green-500 text-white" :
                               result.status === "running" ? "bg-yellow-500 text-black" :
-                              result.status === "failed" ? "bg-red-500 text-white" :
-                              "bg-gray-500 text-white"
-                            }`}>
+                                result.status === "failed" ? "bg-red-500 text-white" :
+                                  "bg-gray-500 text-white"
+                              }`}>
                               {result.status}
                             </span>
                             <button
@@ -3273,7 +3432,7 @@ export default function StrategyTestingPage() {
                             </button>
                           </div>
                         </div>
-                        
+
                         {result.status === "completed" && (
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                             <div className="text-center">
@@ -3302,7 +3461,7 @@ export default function StrategyTestingPage() {
                             </div>
                           </div>
                         )}
-                        
+
                         <div className="flex gap-2">
                           <button
                             onClick={() => viewOptimizationResult(result.id)}
@@ -3341,14 +3500,14 @@ export default function StrategyTestingPage() {
                 <h2 className="text-2xl font-bold text-white">
                   Optimization Result Details
                 </h2>
-                <button 
+                <button
                   onClick={() => setSelectedOptimizationResult(null)}
                   className="text-gray-400 hover:text-white"
                 >
                   <X className="w-6 h-6" />
                 </button>
               </div>
-              
+
               <div className="p-6 overflow-y-auto max-h-[60vh]">
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-6 mb-6">
                   <div className="text-center">
@@ -3388,7 +3547,7 @@ export default function StrategyTestingPage() {
                     </p>
                   </div>
                 </div>
-                
+
                 {selectedOptimizationResult.optimized_parameters && (
                   <div className="mb-6">
                     <h3 className="text-lg font-semibold text-white mb-3">Optimized Parameters</h3>
@@ -3399,7 +3558,7 @@ export default function StrategyTestingPage() {
                     </div>
                   </div>
                 )}
-                
+
                 {selectedOptimizationResult.trades_plot_html && (
                   <div className="mb-6">
                     <h3 className="text-lg font-semibold text-white mb-3">Trades Plot</h3>
@@ -3410,7 +3569,7 @@ export default function StrategyTestingPage() {
                     />
                   </div>
                 )}
-                
+
                 {selectedOptimizationResult.heatmap_plot_html && (
                   <div className="mb-6">
                     <h3 className="text-lg font-semibold text-white mb-3">Heatmap Plot</h3>
@@ -3529,14 +3688,14 @@ export default function StrategyTestingPage() {
                     <div className="w-20 h-20 border-4 border-gray-600 border-t-[#85e1fe] rounded-full animate-spin"></div>
                   </div>
                 </div>
-                
+
                 {/* Loading Text */}
                 <h3 className="text-xl font-semibold text-white mb-2">
                   Creating Optimization Job
                 </h3>
                 <p className="text-gray-400 text-center">
-                  {optimizationType === 'walk_forward' 
-                    ? 'Setting up walk forward optimization with droplets...' 
+                  {optimizationType === 'walk_forward'
+                    ? 'Setting up walk forward optimization with droplets...'
                     : 'Setting up regular optimization with droplets...'}
                 </p>
                 <p className="text-sm text-gray-500 text-center mt-2">
@@ -3564,14 +3723,14 @@ export default function StrategyTestingPage() {
                   <h2 className="text-2xl font-bold text-white">{dropletJobResults.strategy_name}</h2>
                   <p className="text-gray-400 text-sm mt-1">{dropletJobResults.type}</p>
                 </div>
-                <button 
+                <button
                   onClick={() => setDropletJobResults(null)}
                   className="text-gray-400 hover:text-white"
                 >
                   <X className="w-6 h-6" />
                 </button>
               </div>
-              
+
               <div className="p-6 overflow-y-auto max-h-[75vh]">
                 {/* Hypothesis Testing Results */}
                 <div className="mb-6">
@@ -3591,22 +3750,20 @@ export default function StrategyTestingPage() {
                     </div>
                     <div className="bg-[#141721] rounded-lg p-4">
                       <p className="text-gray-400 text-sm">Avg Validation Return</p>
-                      <p className={`font-semibold text-lg ${
-                        (dropletJobResults.results.avg_validation_return || 0) > 0 ? 'text-green-500' : 'text-red-500'
-                      }`}>
+                      <p className={`font-semibold text-lg ${(dropletJobResults.results.avg_validation_return || 0) > 0 ? 'text-green-500' : 'text-red-500'
+                        }`}>
                         {dropletJobResults.results.avg_validation_return?.toFixed(2) || 'N/A'}%
                       </p>
                     </div>
                     <div className="bg-[#141721] rounded-lg p-4">
                       <p className="text-gray-400 text-sm">Decision</p>
-                      <p className={`font-semibold text-sm ${
-                        (dropletJobResults.results.p_value || 1) < 0.05 ? 'text-green-500' : 'text-yellow-500'
-                      }`}>
+                      <p className={`font-semibold text-sm ${(dropletJobResults.results.p_value || 1) < 0.05 ? 'text-green-500' : 'text-yellow-500'
+                        }`}>
                         {(dropletJobResults.results.p_value || 1) < 0.05 ? '✅ Profitable' : '⚠️ Not Profitable'}
                       </p>
                     </div>
                   </div>
-                  
+
                   <div className="mt-4 bg-[#141721] rounded-lg p-4">
                     <p className="text-gray-400 text-sm mb-2">Hypothesis Decision:</p>
                     <p className="text-white text-sm">
