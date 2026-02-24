@@ -26,7 +26,14 @@ export function MovingOperatorSettingsModal({
 }: MovingOperatorSettingsModalProps) {
   const [logicalOperator, setLogicalOperator] = useState(initialSettings?.logical_operator || ">=")
   const [value, setValue] = useState(initialSettings?.value || 20)
-  const [unit, setUnit] = useState(initialSettings?.unit || "%")
+  const [unit, setUnit] = useState(initialSettings?.unit || "points")
+
+  useEffect(() => {
+    // Convert incoming 'pips' to 'points' for consistency
+    if (initialSettings?.unit === "pips") {
+      setUnit("points")
+    }
+  }, [initialSettings])
 
   const logicalOperators = [
     { value: ">=", label: "Greater than or equal (>=)" },
@@ -39,7 +46,7 @@ export function MovingOperatorSettingsModal({
 
   const units = [
     { value: "%", label: "Percentage (%)" },
-    { value: "pips", label: "Points" },
+    { value: "points", label: "Points" },
     { value: "", label: "No unit" },
   ]
 

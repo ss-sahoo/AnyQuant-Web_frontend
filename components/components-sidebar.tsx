@@ -19,9 +19,10 @@ interface CustomComponent {
 interface ComponentsSidebarProps {
   onComponentSelect: (component: string, customComponentData?: CustomComponent) => void
   onEditCustomComponent?: (component: CustomComponent) => void
+  width?: number
 }
 
-export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: ComponentsSidebarProps) {
+export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent, width = 300 }: ComponentsSidebarProps) {
   const [showAllBasic, setShowAllBasic] = useState(false)
   const [showAllIndicators, setShowAllIndicators] = useState(false)
   const [showAllBehaviors, setShowAllBehaviors] = useState(false)
@@ -104,6 +105,18 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
     component.name.toLowerCase().includes(customTradeManagementSearch.toLowerCase())
   )
 
+  // Dynamic visible items calculation based on width
+  // Base width is 300px. As width increases, we show more items.
+  const getDynamicLimit = (baseLimit: number) => {
+    return Math.floor(baseLimit * (width / 300))
+  }
+
+  const basicLimit = getDynamicLimit(7)
+  const indicatorLimit = getDynamicLimit(6)
+  const behaviorLimit = getDynamicLimit(6)
+  const actionLimit = getDynamicLimit(5)
+  const customLimit = getDynamicLimit(4)
+
   // Complete list of basic components
   const allBasicComponents = [
     "If",
@@ -175,8 +188,8 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
     "Decreasing",
     "Above",
     "Below",
-    "At most above points",
-    "At most below points",
+    // "At most above points",
+    // "At most below points",
     "Accumulate",
     "Then",
     // "Rising",
@@ -210,29 +223,29 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
     "Manage Exit",
     "Buy",
     "Sell",
-    "Hold",
-    "Exit",
-    "Scale in",
-    "Scale out",
-    "Hedge",
-    "Reverse position",
-    "Partial close",
-    "Manage",
-    "Close",
-    "Cancel",
-    "No Trade",
-    "Reverse",
+    // "Hold",
+    // "Exit",
+    // "Scale in",
+    // "Scale out",
+    // "Hedge",
+    // "Reverse position",
+    // "Partial close",
+    // "Manage",
+    // "Close",
+    // "Cancel",
+    // "No Trade",
+    // "Reverse",
     // "SL",
     // "TP",
-    "Trailing stop",
-    "Break even",
-    "Move stop",
-    "Adjust target",
-    "Lock profit",
-    "Add to position",
-    "Reduce position",
-    "Split position",
-    "Merge positions",
+    // "Trailing stop",
+    // "Break even",
+    // "Move stop",
+    // "Adjust target",
+    // "Lock profit",
+    // "Add to position",
+    // "Reduce position",
+    // "Split position",
+    // "Merge positions",
     "Trading Session",
   ]
 
@@ -249,7 +262,10 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
   )
 
   return (
-    <div className="w-[300px] min-w-[300px] bg-[#141721] border-l border-gray-800 flex flex-col h-screen">
+    <div
+      className="bg-[#141721] border-l border-gray-800 flex flex-col h-screen overflow-hidden"
+      style={{ width: `${width}px`, minWidth: `${width}px` }}
+    >
       <div className="p-4 border-b border-gray-800">
         <h2 className="text-xl font-semibold">Components</h2>
       </div>
@@ -259,7 +275,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
         <div className="mb-6 bg-black p-4 rounded-lg">
           <h3 className="font-medium mb-3">Basic Components</h3>
           <div className="flex flex-wrap gap-2">
-            {(showAllBasic ? allBasicComponents : allBasicComponents.slice(0, 7)).map((component) => (
+            {(showAllBasic ? allBasicComponents : allBasicComponents.slice(0, basicLimit)).map((component) => (
               <Button
                 key={component}
                 variant="outline"
@@ -270,14 +286,16 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
                 {component}
               </Button>
             ))}
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
-              onClick={() => setShowAllBasic(!showAllBasic)}
-            >
-              {showAllBasic ? "Show less" : "Show all"}
-            </Button>
+            {allBasicComponents.length > basicLimit && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
+                onClick={() => setShowAllBasic(!showAllBasic)}
+              >
+                {showAllBasic ? "Show less" : "Show all"}
+              </Button>
+            )}
           </div>
         </div>
 
@@ -301,7 +319,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
               ? filteredIndicators
               : showAllIndicators
                 ? allIndicators
-                : allIndicators.slice(0, 6)
+                : allIndicators.slice(0, indicatorLimit)
             ).map((indicator) => (
               <Button
                 key={indicator}
@@ -313,7 +331,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
                 {indicator}
               </Button>
             ))}
-            {indicatorSearch === "" && (
+            {indicatorSearch === "" && allIndicators.length > indicatorLimit && (
               <Button
                 variant="outline"
                 size="sm"
@@ -346,7 +364,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
               ? filteredBehaviors
               : showAllBehaviors
                 ? allBehaviors
-                : allBehaviors.slice(0, 6)
+                : allBehaviors.slice(0, behaviorLimit)
             ).map((behavior) => (
               <Button
                 key={behavior}
@@ -358,7 +376,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
                 {behavior}
               </Button>
             ))}
-            {behaviorSearch === "" && (
+            {behaviorSearch === "" && allBehaviors.length > behaviorLimit && (
               <Button
                 variant="outline"
                 size="sm"
@@ -375,7 +393,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
         <div className="mb-6 bg-black p-4 rounded-lg">
           <h3 className="font-medium mb-3">Trade management</h3>
           <div className="flex flex-wrap gap-2">
-            {(showAllActions ? allActions : allActions.slice(0, 5)).map((action) => (
+            {(showAllActions ? allActions : allActions.slice(0, actionLimit)).map((action) => (
               <Button
                 key={action}
                 variant="outline"
@@ -386,17 +404,19 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
                 {action}
               </Button>
             ))}
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
-              onClick={() => setShowAllActions(!showAllActions)}
-            >
-              {showAllActions ? "Show less" : "Show all"}
-            </Button>
-            {/* Trading Session Button */}
-
+            {allActions.length > actionLimit && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="bg-black text-gray-400 border-gray-700 hover:bg-gray-900 hover:text-white"
+                onClick={() => setShowAllActions(!showAllActions)}
+              >
+                {showAllActions ? "Show less" : "Show all"}
+              </Button>
+            )}
           </div>
+          {/* Trading Session Button */}
+
         </div>
         <div className="mb-6 bg-black p-4 rounded-lg">
           <div className="flex items-center justify-between mb-3">
@@ -430,7 +450,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
                   ? filteredCustomIndicators
                   : showAllCustomIndicators
                     ? customIndicators
-                    : customIndicators.slice(0, 4)
+                    : customIndicators.slice(0, customLimit)
                 ).map((component) => (
                   <div key={component.id} className="flex items-center gap-1">
                     <Button
@@ -499,7 +519,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
                     </Button>
                   </div>
                 ))}
-                {customIndicatorSearch === "" && customIndicators.length > 4 && (
+                {customIndicatorSearch === "" && customIndicators.length > customLimit && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -544,7 +564,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
                   ? filteredCustomBehaviors
                   : showAllCustomBehaviors
                     ? customBehaviors
-                    : customBehaviors.slice(0, 4)
+                    : customBehaviors.slice(0, customLimit)
                 ).map((component) => (
                   <div key={component.id} className="flex items-center gap-1">
                     <Button
@@ -611,7 +631,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
                     </Button>
                   </div>
                 ))}
-                {customBehaviorSearch === "" && customBehaviors.length > 4 && (
+                {customBehaviorSearch === "" && customBehaviors.length > customLimit && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -656,7 +676,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
                   ? filteredCustomTradeManagement
                   : showAllCustomTradeManagement
                     ? customTradeManagement
-                    : customTradeManagement.slice(0, 4)
+                    : customTradeManagement.slice(0, customLimit)
                 ).map((component) => (
                   <div key={component.id} className="flex items-center gap-1">
                     <Button
@@ -723,7 +743,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent }: 
                     </Button>
                   </div>
                 ))}
-                {customTradeManagementSearch === "" && customTradeManagement.length > 4 && (
+                {customTradeManagementSearch === "" && customTradeManagement.length > customLimit && (
                   <Button
                     variant="outline"
                     size="sm"

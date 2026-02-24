@@ -11,7 +11,7 @@ import { RsiSettingsModal } from "@/components/modals/rsi-settings-modal"
 
 interface CrossingUpSettingsModalProps {
   onClose: () => void
-  currentInp1?: any 
+  currentInp1?: any
   initialSettings?: {
     valueType?: string
     customValue?: string
@@ -39,6 +39,14 @@ interface CrossingUpSettingsModalProps {
     kPeriod?: number
     dPeriod?: number
     period?: number
+    offsetLogicalOperator?: string
+    offsetValue?: number
+    offsetUnit?: string
+    // Stochastic parameters
+    fastk_period?: number
+    slowk_period?: number
+    slowd_period?: number
+    stochasticOutput?: string
   }
   onSave: (settings: {
     valueType: string
@@ -67,6 +75,14 @@ interface CrossingUpSettingsModalProps {
     kPeriod?: number
     dPeriod?: number
     period?: number
+    offsetLogicalOperator?: string
+    offsetValue?: number
+    offsetUnit?: string
+    // Stochastic parameters
+    fastk_period?: number
+    slowk_period?: number
+    slowd_period?: number
+    stochasticOutput?: string
   }) => void
   onNext: (indicator: string, timeframe: string) => void
 }
@@ -122,6 +138,11 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
   const [kPeriod, setKPeriod] = useState(14)
   const [dPeriod, setDPeriod] = useState(3)
   const [period, setPeriod] = useState(14)
+
+  // Offset parameters
+  const [offsetLogicalOperator, setOffsetLogicalOperator] = useState(">=")
+  const [offsetValue, setOffsetValue] = useState(0)
+  const [offsetUnit, setOffsetUnit] = useState("none")
 
   // Add state to control showing the indicator modal for 'other' valueType
   const [showIndicatorModal, setShowIndicatorModal] = useState(false)
@@ -246,7 +267,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
       ) {
         console.log('🔍 DEBUG: Found Volume_MA in currentInp1:', currentInp1);
         console.log('🔍 DEBUG: Volume_MA input_params:', currentInp1.input_params);
-        
+
         // Get saved Volume settings as fallback
         let savedVolumeMaLength = 20;
         try {
@@ -258,7 +279,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
         } catch (error) {
           console.log('Error reading saved Volume settings:', error);
         }
-        
+
         // Always use saved settings for Volume_MA, unless currentInp1 has a specific ma_length
         let finalVolumeMaLength = savedVolumeMaLength;
         if (currentInp1.input_params?.ma_length) {
@@ -287,7 +308,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
     console.log('🔍 currentInp1:', currentInp1);
     console.log('🔍 DEBUG: maType value before save:', maType);
     console.log('🔍 DEBUG: volumeMaLength value before save:', volumeMaLength);
-    
+
     // For Stochastic %K or %D, copy input_params from inp1 and change output
     if (valueType === "indicator" && (indicator === "stochastic-k" || indicator === "stochastic-d")) {
       if (currentInp1 && currentInp1.input_params) {
@@ -304,7 +325,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
         return;
       }
     }
-    
+
     // For RSI_MA indicator, use saved localStorage values instead of currentInp1
     if (valueType === "indicator" && indicator === "rsi-ma") {
       // Get saved RSI settings from localStorage
@@ -319,14 +340,14 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
       } catch (error) {
         console.log('Error reading saved RSI settings in handleSave:', error);
       }
-      
+
       // Use saved values with fallbacks
       const finalRsiMaLength = savedRsiSettings?.rsiLength || 14;
       const finalMaLength = savedRsiSettings?.maLength || 14;
       const finalRsiSource = savedRsiSettings?.source || "Close";
       const finalMaType = savedRsiSettings?.maType || "SMA";
       const finalBbStdDev = savedRsiSettings?.bbStdDev || 2;
-      
+
       console.log('🔧 Final values for RSI_MA in handleSave:', {
         rsiMaLength: finalRsiMaLength,
         maLength: finalMaLength,
@@ -334,7 +355,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
         maType: finalMaType,
         bbStdDev: finalBbStdDev
       });
-      
+
       onSave({
         valueType,
         indicator,
@@ -344,14 +365,17 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
         rsiSource: finalRsiSource,
         maType: finalMaType,
         bbStdDev: finalBbStdDev,
+        offsetLogicalOperator,
+        offsetValue,
+        offsetUnit: offsetUnit === "none" ? "" : offsetUnit,
       });
       return;
     }
-    
+
     // For other indicators, use the form values
     let finalRsiMaLength = rsiMaLength
     let finalMaLength = maLength
-    
+
     // Create the save object without maType for Volume_MA
     const saveObject: any = {
       valueType,
@@ -375,12 +399,15 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
       kPeriod,
       dPeriod,
       period,
+      offsetLogicalOperator,
+      offsetValue,
+      offsetUnit: offsetUnit === "none" ? "" : offsetUnit,
     }
-    
+
     console.log('🔍 DEBUG: Save object before maType check:', saveObject);
     console.log('🔍 DEBUG: indicator value:', indicator);
     console.log('🔍 DEBUG: indicator !== "volume-ma":', indicator !== "volume-ma");
-    
+
     // Only include maType if it's not Volume_MA and maType is not empty
     if (indicator !== "volume-ma" && maType && maType.trim() !== "") {
       saveObject.maType = maType
@@ -388,9 +415,9 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
     } else {
       console.log('🔍 DEBUG: Skipped adding maType for Volume_MA or empty maType');
     }
-    
+
     console.log('🔍 DEBUG: Final save object:', saveObject);
-    
+
     // Save Volume settings to localStorage if Volume_MA is being used
     if (indicator === "volume-ma" && volumeMaLength) {
       try {
@@ -404,7 +431,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
         console.log('Error saving Volume settings:', error);
       }
     }
-    
+
     onSave(saveObject)
   }
 
@@ -422,7 +449,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
       // If inp1 is RSI, use its timeperiod. If inp1 is RSI_MA, use its rsi_length.
       let rsiLength = 14;
       let rsiSource = "close";
-      
+
       // Try to get saved RSI settings from localStorage first
       try {
         const savedRsiSettings = localStorage.getItem('rsiSettings');
@@ -440,7 +467,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
       } catch (error) {
         console.log('Error reading saved RSI settings:', error);
       }
-      
+
       if (currentInp1.name === "RSI") {
         rsiLength = currentInp1.input_params?.timeperiod || rsiLength;
         rsiSource = currentInp1.input_params?.source || rsiSource;
@@ -459,7 +486,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
       let maLength = 14;
       let maType = "SMA";
       let bbStdDev = 2;
-      
+
       // Try to get saved RSI settings from localStorage first
       try {
         const savedRsiSettings = localStorage.getItem('rsiSettings');
@@ -475,7 +502,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
       } catch (error) {
         console.log('Error reading saved RSI settings:', error);
       }
-      
+
       if (currentInp1.name === "RSI_MA") {
         rsiLength = currentInp1.input_params?.rsi_length || rsiLength;
         rsiSource = currentInp1.input_params?.rsi_source || rsiSource;
@@ -507,7 +534,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
       } catch (error) {
         console.log('Error reading saved Volume settings in getReadOnlyParams:', error);
       }
-      
+
       return {
         volumeMaLength: currentInp1.input_params?.ma_length || savedVolumeMaLength,
       }
@@ -663,6 +690,57 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
     return null
   }
 
+  const renderOffsetSettings = () => {
+    return (
+      <div className="mt-4 pt-4 border-t border-gray-100">
+        <Label className="block text-sm font-semibold text-gray-700 mb-3">Offset (Optional)</Label>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="block text-sm font-medium text-gray-600 mb-1">By Operator</Label>
+              <Select value={offsetLogicalOperator} onValueChange={setOffsetLogicalOperator}>
+                <SelectTrigger className="w-full border border-gray-300 text-black bg-white">
+                  <SelectValue placeholder="Operator" />
+                </SelectTrigger>
+                <SelectContent className="bg-white text-black">
+                  <SelectItem value=">=">Greater than or equal (&gt;=)</SelectItem>
+                  <SelectItem value="<=">Less than or equal (&lt;=)</SelectItem>
+                  <SelectItem value=">">Greater than (&gt;)</SelectItem>
+                  <SelectItem value="<">Less than (&lt;)</SelectItem>
+                  <SelectItem value="==">Equal (==)</SelectItem>
+                  <SelectItem value="!=">Not equal (!=)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="block text-sm font-medium text-gray-600 mb-1">Value</Label>
+              <Input
+                type="number"
+                value={offsetValue}
+                onChange={(e) => setOffsetValue(Number(e.target.value))}
+                className="w-full border border-gray-300 rounded-md text-black"
+                placeholder="Enter value"
+              />
+            </div>
+          </div>
+          <div>
+            <Label className="block text-sm font-medium text-gray-600 mb-1">Unit</Label>
+            <Select value={offsetUnit} onValueChange={setOffsetUnit}>
+              <SelectTrigger className="w-full border border-gray-300 text-black bg-white">
+                <SelectValue placeholder="Select unit" />
+              </SelectTrigger>
+              <SelectContent className="bg-white text-black">
+                <SelectItem value="%">Percentage (%)</SelectItem>
+                <SelectItem value="points">Points</SelectItem>
+                <SelectItem value="none">No unit</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const handleCrossingUpNext = (indicator: string, timeframe: string) => {
     onNext(indicator, timeframe)
   }
@@ -682,26 +760,23 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
             <Label className="block text-sm font-medium text-black mb-2">Value type</Label>
             <div className="grid grid-cols-3 gap-1 bg-gray-100 p-1 rounded-md">
               <button
-                className={`py-2 px-3 text-sm rounded-md text-center ${
-                  valueType === "value" ? "bg-white shadow-sm text-black" : "text-gray-700 hover:bg-gray-200"
-                }`}
+                className={`py-2 px-3 text-sm rounded-md text-center ${valueType === "value" ? "bg-white shadow-sm text-black" : "text-gray-700 hover:bg-gray-200"
+                  }`}
                 onClick={() => setValueType("value")}
               >
                 Value
               </button>
               <button
-                className={`py-2 px-3 text-sm rounded-md text-center ${
-                  valueType === "indicator" ? "bg-white shadow-sm text-black" : "text-gray-700 hover:bg-gray-200"
-                } ${existingIndicatorOptions.length === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
+                className={`py-2 px-3 text-sm rounded-md text-center ${valueType === "indicator" ? "bg-white shadow-sm text-black" : "text-gray-700 hover:bg-gray-200"
+                  } ${existingIndicatorOptions.length === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
                 onClick={() => existingIndicatorOptions.length > 0 && setValueType("indicator")}
                 disabled={existingIndicatorOptions.length === 0}
               >
                 Existing Indicator
               </button>
               <button
-                className={`py-2 px-3 text-sm rounded-md text-center ${
-                  valueType === "other" ? "bg-white shadow-sm text-black" : "text-gray-700 hover:bg-gray-200"
-                }`}
+                className={`py-2 px-3 text-sm rounded-md text-center ${valueType === "other" ? "bg-white shadow-sm text-black" : "text-gray-700 hover:bg-gray-200"
+                  }`}
                 onClick={() => setValueType("other")}
               >
                 Other Indicator
@@ -722,6 +797,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
                 className="w-full border border-gray-300 rounded-md text-black"
                 placeholder="Enter value"
               />
+              {renderOffsetSettings()}
             </div>
           )}
 
@@ -745,6 +821,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
                 </Select>
               </div>
               {renderExistingIndicatorParams()}
+              {renderOffsetSettings()}
             </div>
           )}
 

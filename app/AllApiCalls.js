@@ -150,7 +150,7 @@ export const getUserProfile = async (userId) => {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
-      
+
     },
   })
 
@@ -170,12 +170,12 @@ export const updateUserProfile = async (userId, updatedData, profileImage = null
   // If profileImage is provided (File object) or removeImage is true, use FormData
   if (profileImage instanceof File || removeImage) {
     const formData = new FormData()
-    
+
     // Add text fields
     if (updatedData.username) formData.append("username", updatedData.username)
     if (updatedData.email) formData.append("email", updatedData.email)
     if (updatedData.phoneno) formData.append("phoneno", updatedData.phoneno)
-    
+
     // If removing image, send empty string or null
     // If uploading new image, send the file
     if (removeImage) {
@@ -282,7 +282,7 @@ export const runBacktestWithMetaAPI = async (strategy, token, accountId, symbol)
   formData.append('metaapi_token', token);
   formData.append('metaapi_account_id', accountId);
   formData.append('symbol', symbol);
-  
+
   try {
     const response = await Fetch('/api/run-backtest/', {
       method: 'POST',
@@ -381,14 +381,14 @@ export const findSymbolsWithTimeframe = async ({ metaapi_token, metaapi_account_
  * @param {string|null} [params.metaapi_account_id] - MetaAPI account ID (for MetaAPI mode)
  * @param {string|null} [params.symbol] - Trading symbol (for MetaAPI mode)
  */
-export const runOptimisation = async ({ 
-  statement, 
-  files = null, 
-  strategy_statement_id = null, 
+export const runOptimisation = async ({
+  statement,
+  files = null,
+  strategy_statement_id = null,
   wait = false,
   metaapi_token = null,
   metaapi_account_id = null,
-  symbol = null 
+  symbol = null
 }) => {
   // Validate input: either files OR MetaAPI credentials must be provided
   const isMetaAPIMode = metaapi_token && metaapi_account_id && symbol;
@@ -466,20 +466,8 @@ export const runOptimisation = async ({
 export const createStatement = async ({ account, statement }) => {
   const payload = {
     account,
-    name: statement.name,
-    side: statement.side,
-    saveresult: statement.saveresult,
-    strategy: statement.strategy,
-    instrument: statement.instrument || "XAU/USD",  // use default if not provided
-  }
-
-  // Add optional fields if they exist
-  if (statement.Equity !== undefined && statement.Equity !== null) {
-    payload.Equity = statement.Equity
-  }
-
-  if (statement.tradingtype !== undefined && statement.tradingtype !== null) {
-    payload.tradingtype = statement.tradingtype
+    ...statement,
+    instrument: statement.instrument || "XAU/USD",
   }
 
   const response = await Fetch("/api/strategies/", {
@@ -492,7 +480,8 @@ export const createStatement = async ({ account, statement }) => {
 
   if (!response.ok) {
     const error = await response.json()
-    throw new Error(error?.error || "Failed to create statement")
+    const errorMessage = error?.error || error?.detail || JSON.stringify(error) || "Failed to create statement"
+    throw new Error(errorMessage)
   }
 
   return response.json()
@@ -505,7 +494,7 @@ export const fetchStatement = async (page = 1, pageSize = 10, search = "") => {
   if (!accountId) throw new Error("Account ID not found")
 
   let url = `/api/strategies/?page=${page}&page_size=${pageSize}&account=${accountId}`
-  
+
   // Add search parameter if provided
   if (search && search.trim()) {
     url += `&search=${encodeURIComponent(search.trim())}`
@@ -532,21 +521,21 @@ export const fetchStatement = async (page = 1, pageSize = 10, search = "") => {
 
 
 
-  export const fetchStatementDetail = async (id) => {
-    const response = await Fetch(`/api/strategies/${id}/`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    })
+export const fetchStatementDetail = async (id) => {
+  const response = await Fetch(`/api/strategies/${id}/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  })
 
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error?.detail || "Failed to fetch statement detail")
-    }
-
-    return response.json()
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error?.detail || "Failed to fetch statement detail")
   }
+
+  return response.json()
+}
 
 export const deleteStatement = async (statement_id) => {
   const response = await Fetch(`/api/strategies/${statement_id}/delete/`, {
@@ -660,7 +649,7 @@ export async function editStrategy(id, data) {
   try {
     // Debug logging
     console.log("🔍 DEBUG: editStrategy data being sent:", JSON.stringify(data, null, 2))
-    
+
     const response = await Fetch(`/api/strategies/${id}/edit/`, {
       method: "PATCH",
       headers: {
@@ -670,7 +659,9 @@ export async function editStrategy(id, data) {
     })
 
     if (!response.ok) {
-      throw new Error(`Failed to update strategy: ${response.status}`)
+      const errorData = await response.json()
+      const errorMessage = errorData?.error || errorData?.detail || JSON.stringify(errorData) || "Failed to update strategy"
+      throw new Error(errorMessage)
     }
 
     const responseData = await response.json()
@@ -711,13 +702,13 @@ export async function duplicateStrategy(id, newName) {
   }
 }
 
-export const changePassword = async (old_password, new_password,user_id) => {
+export const changePassword = async (old_password, new_password, user_id) => {
 
   const response = await Fetch(`/api/change-password/${user_id}/`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-    
+
     },
     body: JSON.stringify({ old_password, new_password }),
   })
@@ -765,7 +756,7 @@ export const getOptimisationStatus = async (taskId) => {
 
 export const getOptimizationResults = async (params = {}) => {
   const queryParams = new URLSearchParams();
-  
+
   if (params.strategy_statement_id) {
     queryParams.append('strategy_statement_id', params.strategy_statement_id);
   }
@@ -834,7 +825,7 @@ export const deleteOptimizationResult = async (optimizationId) => {
 
 export const getStrategyOptimizationResults = async (strategyStatementId, params = {}) => {
   const queryParams = new URLSearchParams();
-  
+
   if (params.page) {
     queryParams.append('page', params.page);
   }
@@ -871,15 +862,15 @@ export const getStrategyOptimizationResults = async (strategyStatementId, params
  * @param {string|null} [params.metaapi_account_id] - MetaAPI account ID (for MetaAPI mode)
  * @param {string|null} [params.symbol] - Trading symbol (for MetaAPI mode)
  */
-export const runWalkForwardOptimisation = async ({ 
-  statement, 
-  files = null, 
-  strategy_statement_id = null, 
-  wait = false, 
+export const runWalkForwardOptimisation = async ({
+  statement,
+  files = null,
+  strategy_statement_id = null,
+  wait = false,
   walk_forward_setting = null,
   metaapi_token = null,
   metaapi_account_id = null,
-  symbol = null 
+  symbol = null
 }) => {
   // Validate input: either files OR MetaAPI credentials must be provided
   const isMetaAPIMode = metaapi_token && metaapi_account_id && symbol;
@@ -896,7 +887,7 @@ export const runWalkForwardOptimisation = async ({
   console.log("🆔 Strategy Statement ID:", strategy_statement_id);
   console.log("⏳ Wait:", wait);
   console.log("⚙️ Walk Forward Settings:", walk_forward_setting);
-  
+
   // Debug logging for MetaAPI mode
   if (isMetaAPIMode) {
     console.log('🔍 MetaAPI Walk Forward Optimisation Debug Info:', {
@@ -978,7 +969,7 @@ export const runWalkForwardOptimisation = async ({
 
 export const getWalkForwardOptimizationResults = async (params = {}) => {
   const queryParams = new URLSearchParams();
-  
+
   if (params.strategy_statement_id) {
     queryParams.append('strategy_statement_id', params.strategy_statement_id);
   }
@@ -1012,7 +1003,7 @@ export const getWalkForwardOptimizationResults = async (params = {}) => {
 
 export const getWalkForwardOptimizationResultDetail = async (optimizationId) => {
   console.log("API call: getWalkForwardOptimizationResultDetail for ID:", optimizationId)
-  
+
   const response = await Fetch(`/api/walkforward-optimization-results/${optimizationId}/`, {
     method: "GET",
     headers: {
@@ -1051,7 +1042,7 @@ export const deleteWalkForwardOptimizationResult = async (optimizationId) => {
 
 export const getStrategyWalkForwardOptimizationResults = async (strategyStatementId, params = {}) => {
   const queryParams = new URLSearchParams();
-  
+
   if (params.page) {
     queryParams.append('page', params.page);
   }
@@ -1118,15 +1109,15 @@ export const getOptimizationCosts = async () => {
  * @param {string|null} [params.metaapi_account_id] - MetaAPI account ID (for MetaAPI mode)
  * @param {string|null} [params.symbol] - Trading symbol (for MetaAPI mode)
  */
-export const createOptimizationJob = async ({ 
+export const createOptimizationJob = async ({
   strategy_statement_id, // REQUIRED - backend fetches strategy from DB
-  type = "regular", 
-  files = null, 
+  type = "regular",
+  files = null,
   walk_forward_settings = null,
   csvFile = null,
   metaapi_token = null,
   metaapi_account_id = null,
-  symbol = null 
+  symbol = null
 }) => {
   // Validate required parameters
   if (!strategy_statement_id) {
@@ -1280,7 +1271,7 @@ export const cancelOptimizationJob = async (jobId) => {
  */
 export const listOptimizationJobs = async (params = {}) => {
   const queryParams = new URLSearchParams();
-  
+
   if (params.limit) {
     queryParams.append('limit', params.limit);
   }
@@ -1363,7 +1354,7 @@ export const listStrategyWalkForwardJobs = async (strategyId) => {
  */
 export const getBacktestResults = async (params = {}) => {
   const queryParams = new URLSearchParams();
-  
+
   if (params.strategy_statement_id) {
     queryParams.append('strategy_statement_id', params.strategy_statement_id);
   }
@@ -1407,7 +1398,7 @@ export const getBacktestResults = async (params = {}) => {
  */
 export const getStrategyBacktestResults = async (strategyStatementId, params = {}) => {
   const queryParams = new URLSearchParams();
-  
+
   if (params.page) {
     queryParams.append('page', params.page);
   }
@@ -1520,7 +1511,7 @@ export const removeFromShortlist = async (strategyId) => {
  */
 export const getShortlistedStrategies = async (params = {}) => {
   const queryParams = new URLSearchParams();
-  
+
   if (params.page) {
     queryParams.append('page', params.page);
   }
@@ -1555,12 +1546,12 @@ export const getShortlistedStrategies = async (params = {}) => {
  */
 export const listCustomComponents = async (type = null) => {
   let url = "/api/custom-components/";
-  
+
   // Add type filter if provided
   if (type) {
     url += `?type=${type}`;
   }
-  
+
   const response = await Fetch(url, {
     method: "GET",
     headers: {

@@ -20,7 +20,7 @@ import { AtCandleModal } from "@/components/modals/at-candle-modal"
 import { DerivativeSettingsModal } from "@/components/modals/derivative-settings-modal"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { createStatement, editStrategy, createCustomComponent, validateCustomComponentCode, activateCustomComponent, listCustomComponents, createCustomStrategy, validateCustomStrategyCode, getCustomStrategyTemplate, updateCustomStrategy, listCustomStrategies, deleteCustomStrategy, getCustomStrategy, updateCustomComponent } from "@/app/AllApiCalls"
+import { createStatement, editStrategy, createCustomComponent, validateCustomComponentCode, activateCustomComponent, listCustomComponents, createCustomStrategy, validateCustomStrategyCode, getCustomStrategyTemplate, updateCustomStrategy, listCustomStrategies, deleteCustomStrategy, getCustomStrategy, updateCustomComponent, fetchStatementDetail } from "@/app/AllApiCalls"
 import type { JSX } from "react/jsx-runtime"
 import { PipsSettingsModal } from "@/components/modals/pips-settings-modal"
 import { SaveStrategyModal } from "@/components/modals/save-strategy-modal"
@@ -41,6 +41,8 @@ import { CustomIndicatorSettingsModal } from "@/components/modals/custom-indicat
 import { EditStrategyModal } from "@/components/edit-strategy-modal"
 import { TradingSessionModal } from "./trading-session-modal"
 import type { Algorithm } from "@/lib/types"
+import { useToast } from "@/components/ui/use-toast"
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip"
 
 interface StrategyBuilderProps {
   initialName?: string
@@ -113,6 +115,11 @@ interface StrategyCondition {
   pendingAtCandle?: {
     inp1?: number
     inp2?: number
+  }
+  offset?: {
+    logical_operator: string
+    value: number
+    unit: string
   }
 }
 
@@ -188,6 +195,7 @@ interface StrategyStatement {
 
 export function StrategyBuilder({ initialName, initialInstrument, strategyData, strategyId }: StrategyBuilderProps) {
   const router = useRouter()
+  const { toast } = useToast()
   const [activeTab, setActiveTab] = useState("create")
   const [showStochasticModal, setShowStochasticModal] = useState(false)
   const [showCrossingUpModal, setShowCrossingUpModal] = useState(false)
@@ -218,6 +226,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
   const [showSaveStrategyModal, setShowSaveStrategyModal] = useState(false)
   const [strategyName, setStrategyName] = useState(initialName || "")
+  const [persistedId, setPersistedId] = useState<string | null>(strategyId || null)
   const [showPriceSettingsModal, setShowPriceSettingsModal] = useState(false)
   const [showAtCandleModal, setShowAtCandleModal] = useState(false)
   const [selectedCandleNumber, setSelectedCandleNumber] = useState<number | null>(null)
@@ -225,7 +234,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   // Initialize with a statement structure that includes "if" and default TradingType settings
   const [statements, setStatements] = useState<StrategyStatement[]>([
     {
-      side: "",
+      side: "", // Remove default Buy
       saveresult: "Statement 1",
       strategy: [
         {
@@ -351,6 +360,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     if (strategyId && typeof window !== 'undefined') {
       try {
         localStorage.setItem('strategy_id', strategyId)
+        setPersistedId(strategyId)
       } catch (error) {
         console.error('Error updating localStorage with strategy_id:', error)
       }
@@ -361,9 +371,49 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   useEffect(() => {
     if (strategyData && strategyId) {
       try {
-        // If strategyData has the expected structure, use it
-        if (strategyData.strategy) {
-          const loadedStatements = [
+        console.log("🔍 DEBUG: Loading strategy data:", JSON.stringify(strategyData, null, 2))
+
+        // Handle the new nested Strategy.statements format
+        let loadedStatements: StrategyStatement[] = []
+
+        const allStmts = (strategyData.Strategy && Array.isArray(strategyData.Strategy.statements))
+          ? strategyData.Strategy.statements
+          : (Array.isArray(strategyData.statements))
+            ? strategyData.statements
+            : null;
+
+        if (allStmts) {
+          // Load signal statements with their independent equity and side
+          loadedStatements = allStmts.map((s: any) => ({
+            side: s.side || "B",
+            saveresult: s.name || s.saveresult || "Statement",
+            strategy: s.strategy || [{ statement: "if" }],
+            Equity: s.Equity || [], // Preserve independent equity
+            TradingType: strategyData.TradingType,
+            TradingSession: s.TradingSession,
+          }))
+
+          // Add Global Equity if present as a dedicated block (statements with NO conditions)
+          const topLevelEquity = (strategyData.Strategy?.Equity && Array.isArray(strategyData.Strategy.Equity) && strategyData.Strategy.Equity.length > 0)
+            ? strategyData.Strategy.Equity
+            : (strategyData.Equity && Array.isArray(strategyData.Equity) && strategyData.Equity.length > 0)
+              ? strategyData.Equity
+              : [];
+
+          if (topLevelEquity.length > 0) {
+            loadedStatements.push({
+              side: strategyData.side || "B",
+              saveresult: "Global Exit Settings",
+              strategy: [], // No entry conditions
+              Equity: topLevelEquity,
+              TradingType: strategyData.TradingType,
+              TradingSession: strategyData.TradingSession,
+            })
+          }
+        }
+        else if (strategyData.strategy) {
+          // Fallback for old format
+          loadedStatements = [
             {
               side: strategyData.side || "S",
               saveresult: strategyData.saveresult || strategyData.name || "Statement 1",
@@ -378,7 +428,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               TradingSession: strategyData.TradingSession || undefined,
             },
           ]
+        }
 
+        if (loadedStatements.length > 0) {
           setStatements(loadedStatements)
 
           // Initialize waitStatus based on loaded strategy data
@@ -416,11 +468,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         // Set strategy name if available
         if (strategyData.name) {
           setStrategyName(strategyData.name)
-        }
-
-        // Set instrument if available
-        if (strategyData.instrument) {
-          // You can add logic here to update instrument if needed
         }
       } catch (error) {
         console.error("Error loading strategy data:", error)
@@ -970,12 +1017,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     const newStatements = [...statements]
     const newStatementIndex = statements.length
     newStatements.push({
-      side: "s",
+      side: "", // Remove default Buy for new signal blocks
       saveresult: `Statement ${statements.length + 1}`,
       strategy: [
         {
           statement: "if",
-          // Remove default timeframe - let user add it explicitly
         },
       ],
       Equity: [],
@@ -1250,7 +1296,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     }
 
     // Create the new equity rule
-    let equityRule: EquityRule
+    let equityRule: EquityRule | undefined = undefined
 
     // Handle partial take profit
     if (settings.type === "partial_tp" && settings.partialTpList && settings.partialTpList.length > 0) {
@@ -1325,6 +1371,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         if (settings.valueType === "pips") {
           equityRule = {
             statement: "and",
+            inp1: { name: settings.type },
             operator: `${settings.type} = Entry_Price ${settings.direction} ${settings.value}pips`,
           }
         } else if (settings.valueType === "percentage") {
@@ -1340,6 +1387,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           // For fixed price values
           equityRule = {
             statement: "and",
+            inp1: { name: settings.type },
             operator: `${settings.type} = ${settings.value}`,
           }
         } else if (settings.valueType === "indicator") {
@@ -1368,7 +1416,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
           equityRule = {
             statement: "and",
-            operator: `${settings.type} = inp2 ${settings.direction} ${settings.value}pips`,
+            inp1: { name: settings.type },
+            operator: `${settings.type} = inp2 ${settings.direction} ${settings.value}points`,
             inp2: {
               name: indName,
               timeframe,
@@ -1379,6 +1428,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           // For close price with multiplier
           equityRule = {
             statement: "and",
+            inp1: { name: settings.type },
             operator: `${settings.type} = Close * ${settings.value}`,
           }
         }
@@ -1421,11 +1471,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           strategy[conditionIndex] = conditionInp2
           break
         case "operator":
-          const conditionOperator = { ...strategy[conditionIndex] }
-          delete conditionOperator.operator_name
-          delete conditionOperator.operator
-          delete conditionOperator.Operator
-          strategy[conditionIndex] = conditionOperator
+          const conditionOp = { ...strategy[conditionIndex] }
+          delete conditionOp.operator_name
+          delete conditionOp.operator_display
+          delete conditionOp.Operator
+          strategy[conditionIndex] = conditionOp
           break
         case "inp1":
           const conditionInp1 = { ...strategy[conditionIndex] }
@@ -1456,6 +1506,19 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       statement.strategy = strategy
       newStatements[statementIndex] = statement
 
+      return newStatements
+    })
+  }
+
+  // Function to remove an equity rule
+  const removeEquityRule = (statementIndex: number, equityIndex: number) => {
+    setStatements((prevStatements) => {
+      const newStatements = [...prevStatements]
+      const statement = { ...newStatements[statementIndex] }
+      const equity = [...(statement.Equity || [])] // Ensure Equity array exists
+      equity.splice(equityIndex, 1)
+      statement.Equity = equity
+      newStatements[statementIndex] = statement
       return newStatements
     })
   }
@@ -2223,6 +2286,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
         // Handle moving operators with new structure
         if (lastCondition.operator_name === "moving_up" || lastCondition.operator_name === "moving_down") {
+          // Explicitly clear inp2 to prevent redundant "0" block display
+          delete lastCondition.inp2
+
           // Show moving operator settings modal
           setShowMovingOperatorModal({
             show: true,
@@ -2735,6 +2801,16 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       }
     }
 
+    if (componentType === "operator" && condition.offset && (condition.offset.value !== 0 || condition.offset.unit !== "")) {
+      return {
+        title: "Offset Details",
+        details: {
+          operator: condition.offset.logical_operator,
+          value: pipsToPointsDisplay(`${condition.offset.value}${condition.offset.unit}`),
+        },
+      }
+    }
+
     if (componentType === "accumulate" && condition.Accumulate?.forPeriod) {
       return {
         title: "Accumulate Condition",
@@ -2751,7 +2827,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const handleMouseEnter = (
     e: React.MouseEvent,
     condition: StrategyCondition,
-    componentType: "inp1" | "inp2" | "timeframe" | "then",
+    componentType: "inp1" | "inp2" | "timeframe" | "then" | "operator" | "accumulate", // Added operator and accumulate
     index: number,
   ) => {
     const content = getTooltipContent(condition, componentType, index)
@@ -2884,77 +2960,60 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       let result
       let firstStatementId: string | null = null
 
-      // Rule: if URL has strategy_id (strategyId prop), use it; else if localStorage has one, use it; otherwise CREATE
-      // Prioritize strategyId from URL over localStorage to ensure correct strategy is edited
-      let existingId: string | null = null
-      if (strategyId) {
-        existingId = strategyId
-        // Update localStorage to match URL ID
-        try { localStorage.setItem("strategy_id", strategyId) } catch { }
+      const unifiedPayload = buildUnifiedPayload(name)
+
+      // Debug: Log the unified payload
+      console.log("🔍 DEBUG: Unified payload for Save Draft:", JSON.stringify(unifiedPayload, null, 2))
+
+      // Rule: if persistedId exists, use it; otherwise CREATE
+      let existingId: string | null = persistedId
+
+      if (existingId) {
+        result = await editStrategy(existingId, unifiedPayload)
+        firstStatementId = existingId
       } else {
-        try { existingId = localStorage.getItem("strategy_id") } catch { }
-      }
-
-      // Save each statement
-      for (let i = 0; i < statements.length; i++) {
-        const currentStatement = statements[i]
-
-        // Clean up any Volume_MA indicators before saving
-        const cleanedStrategy = currentStatement.strategy.map((condition: any) => ({
-          ...condition,
-          inp1: cleanupVolumeMAIndicator(condition.inp1),
-          inp2: cleanupVolumeMAIndicator(condition.inp2),
-        }))
-
-        // Create the statement object to send to the API with the structure you want
-        const apiStatement: any = {
-          name: statements.length > 1 ? `${name} - ${currentStatement.saveresult}` : name,
-          side: currentStatement.side,
-          saveresult: currentStatement.saveresult || `Statement ${i + 1}`,
-          strategy: cleanedStrategy,
-          Equity: currentStatement.Equity || [],
-          instrument: initialInstrument,
-          TradingType: currentStatement.TradingType || {
-            NewTrade: "MTOOTAAT",
-            commission: 0.00007,
-            margin: 1,
-            lot: "mini",
-            cash: 100000,
-            nTrade_max: 1,
-          },
-          // Add TradingSession if it exists in the current statement
-          ...(currentStatement.TradingSession && { TradingSession: currentStatement.TradingSession }),
-        }
-
-        // Debug: Log the API statement to verify TradingType and TradingSession are included
-        console.log(`🔍 DEBUG: API Statement ${i + 1} being sent:`, JSON.stringify(apiStatement, null, 2))
-
-        // For the first statement, use existingId if available
-        // For subsequent statements, always create new ones
-        if (i === 0 && existingId) {
-          result = await editStrategy(existingId, apiStatement)
-          firstStatementId = existingId
-        } else {
-          result = await createStatement({ account, statement: apiStatement })
-          if (result && result.id) {
-            if (i === 0) {
-              firstStatementId = result.id
-              localStorage.setItem("strategy_id", result.id)
-            }
-          }
+        result = await createStatement({ account, statement: unifiedPayload })
+        if (result && result.id) {
+          firstStatementId = result.id
+          setPersistedId(result.id)
+          localStorage.setItem("strategy_id", result.id)
         }
       }
+
+      // Update local state immediately for better UX
+      setStrategyName(name)
 
       // Update localStorage with the first statement ID for subsequent edits
       if (firstStatementId) {
         localStorage.setItem("strategy_id", firstStatementId)
+
+        // Refresh strategy data to ensure UI is in sync
+        try {
+          const freshData = await fetchStatementDetail(firstStatementId)
+          if (freshData) {
+            // Update strategy name and statements from fresh data
+            if (freshData.name) setStrategyName(freshData.name)
+            // The useEffect that depends on strategyData and strategyId will handle the rest
+            // if we were able to pass the fresh data back up, but since we're inside StrategyBuilder,
+            // we'll manually trigger the same logic or ensure the prop update triggers it.
+            // Actually, strategyData is a prop from the parent. 
+            // If we can't update the prop, we should at least update local state.
+          }
+        } catch (refreshError) {
+          console.error("Error refreshing strategy data after save draft:", refreshError)
+        }
       }
 
       setIsSavingDraft(false)
       setShowSaveStrategyModal(false)
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving strategy:", error)
       setIsSavingDraft(false)
+      toast({
+        variant: "destructive",
+        title: "Error Saving Strategy",
+        description: error.message || "Something went wrong while saving your strategy draft.",
+      })
     }
   }
 
@@ -3383,53 +3442,18 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     try {
       setIsProceeding(true)
 
-      // Save all statements, not just the active one
-      // Use the first statement for testing (or combine them if needed)
-      const currentStatement = statements[0] // Use first statement for testing
+      // Build the unified multi-statement Strategy payload
+      const unifiedPayload = buildUnifiedPayload(name)
 
-      // Clean up any Volume_MA indicators before saving
-      const cleanedStrategy = currentStatement.strategy.map((condition: any) => ({
-        ...condition,
-        inp1: cleanupVolumeMAIndicator(condition.inp1),
-        inp2: cleanupVolumeMAIndicator(condition.inp2),
-      }))
-
-      // Create the statement object to send to the API with the structure you want
-      const apiStatement: any = {
-        name: name,
-        side: currentStatement.side,
-        saveresult: currentStatement.saveresult || "Statement 1",
-        strategy: cleanedStrategy,
-        Equity: currentStatement.Equity || [],
-        instrument: initialInstrument,
-        TradingType: currentStatement.TradingType || {
-          NewTrade: "MTOOTAAT",
-          commission: 0.00007,
-          margin: 1,
-          lot: "mini",
-          cash: 100000,
-          nTrade_max: 1,
-        },
-        // Add TradingSession if it exists in the current statement
-        ...(currentStatement.TradingSession && { TradingSession: currentStatement.TradingSession }),
-      }
-
-      // Debug: Log the API statement to verify TradingType and TradingSession are included
-      console.log("🔍 DEBUG: API Statement being sent (Proceed to Testing):", JSON.stringify(apiStatement, null, 2))
-      console.log("🔍 DEBUG: Strategy conditions with wait properties (Proceed to Testing):")
-      apiStatement.strategy.forEach((condition: any, index: number) => {
-        console.log(`  Condition ${index}:`, {
-          inp1_wait: condition.inp1?.wait,
-          inp2_wait: condition.inp2?.wait,
-          inp1: condition.inp1,
-          inp2: condition.inp2
-        })
-      })
+      // Debug: Log the unified payload
+      console.log("🔍 DEBUG: Unified payload for Proceed to Testing:", JSON.stringify(unifiedPayload, null, 2))
 
       // Save the complete statement for local use
-      localStorage.setItem("savedStrategy", JSON.stringify(apiStatement))
+      localStorage.setItem("savedStrategy", JSON.stringify(unifiedPayload))
 
-      // Save all statements first
+      // Rule: if persistedId exists, use it; otherwise CREATE
+      let existingId: string | null = persistedId
+
       const account = localStorage.getItem("user_id")
       if (!account) {
         throw new Error("No account found in localStorage")
@@ -3438,67 +3462,35 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       let result
       let firstStatementId: string | null = null
 
-      // Rule on proceed: if URL has strategy_id (strategyId prop), use it; else if localStorage has one, use it; otherwise CREATE
-      // Prioritize strategyId from URL over localStorage to ensure correct strategy is edited
-      let existingId: string | null = null
-      if (strategyId) {
-        existingId = strategyId
-        // Update localStorage to match URL ID
-        try { localStorage.setItem("strategy_id", strategyId) } catch { }
+      if (existingId) {
+        result = await editStrategy(existingId, unifiedPayload)
+        firstStatementId = existingId
       } else {
-        try { existingId = localStorage.getItem("strategy_id") } catch { }
-      }
-
-      // Save each statement
-      for (let i = 0; i < statements.length; i++) {
-        const statementToSave = statements[i]
-
-        // Clean up any Volume_MA indicators before saving
-        const cleanedStrategyForSave = statementToSave.strategy.map((condition: any) => ({
-          ...condition,
-          inp1: cleanupVolumeMAIndicator(condition.inp1),
-          inp2: cleanupVolumeMAIndicator(condition.inp2),
-        }))
-
-        // Create the statement object to send to the API
-        const statementPayload: any = {
-          name: statements.length > 1 ? `${name} - ${statementToSave.saveresult}` : name,
-          side: statementToSave.side,
-          saveresult: statementToSave.saveresult || `Statement ${i + 1}`,
-          strategy: cleanedStrategyForSave,
-          Equity: statementToSave.Equity || [],
-          instrument: initialInstrument,
-          TradingType: statementToSave.TradingType || {
-            NewTrade: "MTOOTAAT",
-            commission: 0.00007,
-            margin: 1,
-            lot: "mini",
-            cash: 100000,
-            nTrade_max: 1,
-          },
-          ...(statementToSave.TradingSession && { TradingSession: statementToSave.TradingSession }),
-        }
-
-        // For the first statement, use existingId if available
-        // For subsequent statements, always create new ones
-        if (i === 0 && existingId) {
-          result = await editStrategy(existingId, statementPayload)
-          firstStatementId = existingId
-        } else {
-          const createResult = await createStatement({ account, statement: statementPayload })
-          if (createResult && createResult.id) {
-            if (i === 0) {
-              firstStatementId = createResult.id
-              result = createResult
-            }
-          }
+        const createResult = await createStatement({ account, statement: unifiedPayload })
+        if (createResult && createResult.id) {
+          firstStatementId = createResult.id
+          setPersistedId(createResult.id)
+          result = createResult
         }
       }
 
       // Update localStorage with the first statement ID
       if (firstStatementId) {
         localStorage.setItem("strategy_id", firstStatementId)
+
+        // Refresh strategy data to ensure UI is in sync
+        try {
+          const freshData = await fetchStatementDetail(firstStatementId)
+          if (freshData) {
+            if (freshData.name) setStrategyName(freshData.name)
+          }
+        } catch (refreshError) {
+          console.error("Error refreshing strategy data after proceed to testing:", refreshError)
+        }
       }
+
+      // Update local state immediately for better UX
+      setStrategyName(name)
 
       // Store timeframes_required if it exists in the response
       if (result && result.optimisation_form) {
@@ -3516,9 +3508,14 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         }
       } catch { }
       router.push("/strategy-testing")
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error processing strategy:", error)
       setIsProceeding(false)
+      toast({
+        variant: "destructive",
+        title: "Error Processing Strategy",
+        description: error.message || "Something went wrong while preparing your strategy for testing.",
+      })
     }
   }
 
@@ -3535,36 +3532,29 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         return
       }
 
-      const currentStatement = statements[0]
-      const cleanedStrategy = currentStatement.strategy.map((condition: any) => ({
-        ...condition,
-        inp1: cleanupVolumeMAIndicator(condition.inp1),
-        inp2: cleanupVolumeMAIndicator(condition.inp2),
-      }))
+      const idToUpdate = id
+      const unifiedPayload = buildUnifiedPayload(newName)
 
-      const apiStatement: any = {
-        name: newName,
-        side: currentStatement.side,
-        saveresult: currentStatement.saveresult || "Statement 1",
-        strategy: cleanedStrategy,
-        Equity: currentStatement.Equity || [],
-        instrument: initialInstrument,
-        TradingType: currentStatement.TradingType || {
-          NewTrade: "MTOOTAAT",
-          commission: 0.00007,
-          margin: 1,
-          lot: "mini",
-          cash: 100000,
-          nTrade_max: 1,
-        },
-        ...(currentStatement.TradingSession && { TradingSession: currentStatement.TradingSession }),
+      await editStrategy(idToUpdate, unifiedPayload)
+
+      // Refresh strategy data to ensure UI is in sync
+      try {
+        const freshData = await fetchStatementDetail(idToUpdate)
+        if (freshData && freshData.name) {
+          setStrategyName(freshData.name)
+        }
+      } catch (refreshError) {
+        console.error("Error refreshing strategy data after name edit:", refreshError)
       }
 
-      await editStrategy(id, apiStatement)
-      setStrategyName(newName)
       setShowEditNameModal(false)
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error editing strategy name:", error)
+      toast({
+        variant: "destructive",
+        title: "Error Renaming Strategy",
+        description: error.message || "Failed to update strategy name.",
+      })
     }
   }
 
@@ -3944,7 +3934,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
   // Update the renderStrategyConditions function to properly display At Candle components
   // Replace the existing At Candle rendering code with this:
-  const renderStrategyConditions = (statement: StrategyStatement) => {
+  const renderStrategyConditions = (statement: StrategyStatement, statementIndex: number) => {
     const components: JSX.Element[] = []
 
     // Render Buy/Sell component FIRST, based on statement.side
@@ -3958,7 +3948,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             onClick={() => {
               // Toggle between Buy and Sell on click
               const newStatements = [...statements]
-              const currentStatement = newStatements[activeStatementIndex]
+              const currentStatement = newStatements[statementIndex]
               currentStatement.side = currentStatement.side === "B" ? "S" : "B"
               setStatements(newStatements)
             }}
@@ -3969,7 +3959,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             onClick={() => {
               // Remove the Buy/Sell component by clearing the side
               const newStatements = [...statements]
-              const currentStatement = newStatements[activeStatementIndex]
+              const currentStatement = newStatements[statementIndex]
               currentStatement.side = ""
               setStatements(newStatements)
             }}
@@ -4197,23 +4187,32 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         // For moving operators with new structure, show the full configuration
         else if (condition.Operator && (condition.operator_name === "moving_up" || condition.operator_name === "moving_down")) {
           const params = condition.Operator.params
-          operatorDisplay = `${condition.Operator.operator_name.replace("_", " ")} ${params.logical_operator} ${params.value}${params.unit}`
+          operatorDisplay = pipsToPointsDisplay(`${condition.Operator.operator_name.replace("_", " ")} ${params.logical_operator} ${params.value}${params.unit}`)
+        }
+        // For Above/Below operators with offset
+        else if (condition.offset && (
+          condition.operator_name.toLowerCase() === "above" ||
+          condition.operator_name.toLowerCase() === "below" ||
+          condition.operator_name.toLowerCase() === "crosses_above" ||
+          condition.operator_name.toLowerCase() === "crosses_below"
+        )) {
+          const offset = condition.offset
+          const offsetStr = offset.value !== 0 ? ` by ${offset.logical_operator} ${offset.value}${offset.unit}` : ""
+          operatorDisplay = pipsToPointsDisplay(`${condition.operator_name.replace("_", " ")}${offsetStr}`)
         }
 
         components.push(
-          <div
-            key={`operator-${index}`}
-            className="bg-[#C5C5C5] text-black px-3 py-2 mt-3 rounded-md mr-2 mb-2 relative group transition-all duration-200 hover:bg-[#D5D5D5] cursor-pointer"
-            onMouseEnter={(e) => handleMouseEnter(e, condition, "operator", index)}
-            onMouseLeave={handleMouseLeave}
-            onClick={() => handleComponentClick(activeStatementIndex, index, "operator")}
-          >
-            {operatorDisplay}
+          <div key={`operator-${index}`} className="flex items-center relative group">
+            <div
+              className="bg-[#C5C5C5] text-black px-3 py-2 mt-3 rounded-md mr-2 mb-2 transition-all duration-200 hover:bg-[#D5D5D5] cursor-pointer"
+              onMouseEnter={(e) => handleMouseEnter(e, condition, "operator", index)}
+              onMouseLeave={handleMouseLeave}
+              onClick={() => handleComponentClick(activeStatementIndex, index, "operator")}
+            >
+              {operatorDisplay}
+            </div>
             <button
-              onClick={(e) => {
-                e.stopPropagation()
-                removeComponent(activeStatementIndex, index, "operator")
-              }}
+              onClick={() => removeComponent(activeStatementIndex, index, "operator")}
               className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
             >
               <X className="w-3 h-3" />
@@ -4229,21 +4228,25 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         "timeframe" in condition.inp2 &&
         condition.inp2.timeframe
       ) {
-        components.push(
-          <div key={`inp2-timeframe-${index}`} className="mr-2 mb-2 relative group">
-            <div className="text-xs text-gray-400 mb-1">Timeframe </div>
-            <div
-              className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[160px] border border-[#2A2D42] opacity-60 cursor-not-allowed"
-              data-inp2-timeframe-index={index}
-            >
-              <span className="text-gray-400">{condition.inp2.timeframe}</span>
-            </div>
-          </div>,
-        )
+        // Hide timeframe for inp2 if offset is present
+        if (true) {
+          components.push(
+            <div key={`inp2-timeframe-${index}`} className="mr-2 mb-2 relative group">
+              <div className="text-xs text-gray-400 mb-1">Timeframe </div>
+              <div
+                className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[160px] border border-[#2A2D42] opacity-60 cursor-not-allowed"
+                data-inp2-timeframe-index={index}
+              >
+                <span className="text-gray-400">{condition.inp2.timeframe}</span>
+              </div>
+            </div>,
+          )
+        }
       }
 
-      // Show inp2 value for all behaviors
-      if (condition.inp2) {
+      // Show inp2 value for all behaviors (except moving_up/down which includes the value in operator)
+      const isMovingOperator = condition.operator_name === "moving_up" || condition.operator_name === "moving_down"
+      if (condition.inp2 && !isMovingOperator) {
         // Values with light gray background
         if ("type" in condition.inp2) {
           if (condition.inp2.type === "value") {
@@ -4532,85 +4535,44 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       }
     })
 
-    // Render equity rules inline with other components
-    // Using same styling as indicators/behaviors for consistency
+    // Restore inline SL/TP rendering
     if (statement.Equity && statement.Equity.length > 0) {
       statement.Equity.forEach((rule, equityIndex) => {
-        const isPartialTP = !!(rule.inp1 && rule.inp1.name === "partial_tp" && rule.inp1.partial_tp_list)
-        const isManageExit = !!(rule.inp1 && rule.inp1.name === "manage_exit" && (rule.inp1 as any).manage_exit_list)
+        const operator = rule.operator || ""
+        const isSL = operator.includes("SL") || (rule.inp1 && "name" in rule.inp1 && rule.inp1.name === "SL")
+        const isTP = operator.includes("TP") || (rule.inp1 && "name" in rule.inp1 && rule.inp1.name === "TP")
 
-        const label = isPartialTP
-          ? `Partial TP (${rule.inp1?.partial_tp_list?.length || 0})`
-          : isManageExit
-            ? `Manage Exit (${(rule.inp1 as any).manage_exit_list?.length || 0})`
-            : pipsToPointsDisplay(rule.operator || "Equity Rule")
+        if (isSL || isTP) {
+          const label = pipsToPointsDisplay(rule.operator || (isSL ? "SL" : "TP"))
+          components.push(
+            <div key={`equity-inline-${equityIndex}`} className="flex items-center relative group">
+              <div
+                className="bg-[#C5C5C5] text-black px-3 py-2 mt-3 rounded-md mr-2 mb-2 transition-all duration-200 hover:bg-[#D5D5D5] cursor-pointer"
+                onClick={() => handleEquityRuleClick(activeStatementIndex, equityIndex, rule)}
+              >
+                {label}
+              </div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  removeEquityRule(activeStatementIndex, equityIndex)
+                }}
+                className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>,
+          )
 
-        components.push(
-          <div key={`equity-${equityIndex}`} className="flex items-center relative group">
-            <div
-              className="bg-[#C5C5C5] text-black px-3 py-2 mt-3 rounded-md mr-2 mb-2 transition-all duration-200 hover:bg-[#D5D5D5] cursor-pointer"
-              onClick={() => {
-                if (isPartialTP) {
-                  setEditingEquityRule({ statementIndex: activeStatementIndex, equityIndex })
-                  setShowPartialTPModal(true)
-                  return
-                }
-                if (isManageExit) {
-                  setEditingEquityRule({ statementIndex: activeStatementIndex, equityIndex })
-                  setShowManageExitModal(true)
-                  return
-                }
-                handleEquityRuleClick(activeStatementIndex, equityIndex, rule)
-              }}
-              onMouseEnter={(e) => {
-                // Build tooltip content for partial TP / manage exit
-                if (isPartialTP || isManageExit) {
-                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                  const details: Record<string, string> = {}
-
-                  if (isPartialTP && rule.inp1?.partial_tp_list) {
-                    rule.inp1.partial_tp_list.forEach((lvl, i) => {
-                      details[`Level ${i + 1}`] = `${pipsToPointsDisplay(lvl.Price)} | Close: ${lvl.Close}${lvl.Action ? ` | Action: ${pipsToPointsDisplay(lvl.Action)}` : ""}`
-                    })
-                  }
-
-                  if (isManageExit && (rule.inp1 as any).manage_exit_list) {
-                    const list = (rule.inp1 as any).manage_exit_list as Array<{ Price: string; Action: string }>
-                    list.forEach((it, i) => {
-                      details[`Rule ${i + 1}`] = `${pipsToPointsDisplay(it.Price)} | ${pipsToPointsDisplay(it.Action)}`
-                    })
-                  }
-
-                  setHoveredComponent({
-                    show: true,
-                    content: {
-                      title: isPartialTP ? "Partial TP list" : "Manage Exit",
-                      details,
-                    },
-                    position: {
-                      x: rect.left + rect.width / 2,
-                      y: rect.top - 3,
-                    },
-                  })
-                }
-              }}
-              onMouseLeave={handleMouseLeave}
-            >
-              {label}
-            </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                const newStatements = [...statements]
-                newStatements[activeStatementIndex].Equity.splice(equityIndex, 1)
-                setStatements(newStatements)
-              }}
-              className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-            >
-              <X className="w-3 h-3" />
-            </button>
-          </div>,
-        )
+          // Add Wait button after each equity rule for visual consistency with the design
+          components.push(
+            <div key={`wait-equity-${equityIndex}`} className="mr-2 mb-2">
+              <button className="bg-[#2A2D42] text-white px-2 py-1 text-xs rounded-md hover:bg-[#3A3D47] transition-all duration-200">
+                Wait
+              </button>
+            </div>,
+          )
+        }
       })
     }
 
@@ -4674,18 +4636,24 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     })
   }
 
-  const renderEquityRules = (statement: StrategyStatement) => {
+  const renderEquityRules = (statement: StrategyStatement, statementIndex: number) => {
     if (!statement.Equity || statement.Equity.length === 0) {
       return null
     }
 
     return (
       <div className="mt-4">
-        <h4 className="text-sm font-medium mb-2">Equity Rules</h4>
         <div className="flex flex-wrap gap-2">
           {statement.Equity.map((rule, index) => {
             const isPartialTP = !!(rule.inp1 && rule.inp1.name === "partial_tp" && rule.inp1.partial_tp_list)
             const isManageExit = !!(rule.inp1 && rule.inp1.name === "manage_exit" && (rule.inp1 as any).manage_exit_list)
+
+            // Filter out SL and TP as they are now rendered inline
+            const operator = rule.operator || ""
+            const isSL = operator.includes("SL") || (rule.inp1 && "name" in rule.inp1 && rule.inp1.name === "SL")
+            const isTP = operator.includes("TP") || (rule.inp1 && "name" in rule.inp1 && rule.inp1.name === "TP")
+
+            if (isSL || isTP) return null
 
             const label = isPartialTP
               ? `Partial TP (${rule.inp1?.partial_tp_list?.length || 0})`
@@ -4699,16 +4667,16 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 className="bg-[#2A2D42] text-white px-3 py-1 rounded-md relative group cursor-pointer hover:bg-[#3A3D52] transition-colors"
                 onClick={() => {
                   if (isPartialTP) {
-                    setEditingEquityRule({ statementIndex: activeStatementIndex, equityIndex: index })
+                    setEditingEquityRule({ statementIndex: statementIndex, equityIndex: index })
                     setShowPartialTPModal(true)
                     return
                   }
                   if (isManageExit) {
-                    setEditingEquityRule({ statementIndex: activeStatementIndex, equityIndex: index })
+                    setEditingEquityRule({ statementIndex: statementIndex, equityIndex: index })
                     setShowManageExitModal(true)
                     return
                   }
-                  handleEquityRuleClick(activeStatementIndex, index, rule)
+                  handleEquityRuleClick(statementIndex, index, rule)
                 }}
                 onMouseEnter={(e) => {
                   // Build tooltip content for partial TP / manage exit
@@ -4748,9 +4716,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
-                    const newStatements = [...statements]
-                    newStatements[activeStatementIndex].Equity.splice(index, 1)
-                    setStatements(newStatements)
+                    removeEquityRule(statementIndex, index)
                   }}
                   className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
                 >
@@ -4857,41 +4823,216 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     return null;
   }
 
+  // Helper to normalize the flat strategy array for the backend
+  const getNormalizedStrategy = (strategyStatements: any[]) => {
+    return strategyStatements.reduce((acc: any[], s: any) => {
+      // Return ONLY strategy rules (indicators/conditions), excluding equity rules
+      return acc.concat(s.strategy || []);
+    }, []);
+  };
+
   // Utility function to clean up Volume_MA indicators that have extra parameters
   const cleanupVolumeMAIndicator = (indicator: any) => {
-    if (indicator && indicator.name === "Volume_MA" && indicator.input_params) {
-      console.log('🔍 DEBUG: Cleaning up Volume_MA indicator:', indicator);
-
+    if (indicator && indicator.name === "Volume MA" && indicator.input_params) {
       // Get saved Volume settings as fallback
       const savedVolumeSettings = getSavedVolumeSettings();
       const finalMaLength = indicator.input_params.ma_length || savedVolumeSettings?.maLength || 20;
 
-      // Only keep ma_length, remove any other parameters like ma_type
-      const cleanedIndicator = {
+      return {
         ...indicator,
         input_params: {
           ma_length: finalMaLength,
         },
       }
-      console.log('🔍 DEBUG: Cleaned Volume_MA indicator:', cleanedIndicator);
-      return cleanedIndicator
     }
     return indicator
   }
 
-  // Clean up any existing Volume_MA indicators that might have extra parameters
-  useEffect(() => {
-    if (strategyData && strategyData.strategy) {
-      // strategyData is an object, not an array, so we need to work with its strategy property
-      const cleanedStatements = [{
-        ...strategyData,
-        strategy: strategyData.strategy.map((condition: any) => ({
+  // Unified builder to generate one of three backend-compatible JSON formats
+  const buildUnifiedPayload = (name: string) => {
+    const account = localStorage.getItem("user_id")
+
+    // Helper to transform flat offset state to backend-expected nested format
+    const transformOffset = (condition: any) => {
+      if (!condition.offset) return condition
+
+      const { logical_operator, value, unit } = condition.offset
+      if (!logical_operator && value === 0 && !unit) {
+        const { offset, ...rest } = condition
+        return rest
+      }
+
+      const params: any = {
+        logical_operator: logical_operator || ">=",
+        value: value || 0,
+        unit: unit || "",
+      }
+
+      // Add boolean flag based on unit
+      if (unit === "%") {
+        params["%"] = true
+      } else if (unit === "points") {
+        params["points"] = true
+      }
+
+      const { offset, ...rest } = condition
+      const transformed = {
+        ...rest,
+        operator: {
+          params
+        }
+      }
+
+      return transformed
+    }
+
+    // 1. Prepare all statements with cleanup
+    const allStatementsRaw = statements.map((s, i) => ({
+      name: s.saveresult || `Statement ${i + 1}`,
+      side: s.side || "B",
+      strategy: s.strategy.map((condition: any) => {
+        const cleaned = {
           ...condition,
           inp1: cleanupVolumeMAIndicator(condition.inp1),
           inp2: cleanupVolumeMAIndicator(condition.inp2),
-        })),
-      }]
-      setStatements(cleanedStatements)
+        }
+        return transformOffset(cleaned)
+      }),
+      Equity: s.Equity || [],
+      ...(s.TradingSession && { TradingSession: s.TradingSession }),
+    }))
+
+    // 2. All statements are preserved to maintain user order and names
+    const signalStatements = allStatementsRaw.filter(s =>
+      s.strategy && s.strategy.length > 0 &&
+      s.strategy.some((cond: any) => cond.inp1 || cond.operator_name)
+    )
+
+    const globalStatements = allStatementsRaw.filter(s =>
+      (!s.strategy || s.strategy.length === 0 || !s.strategy.some((cond: any) => cond.inp1 || cond.operator_name)) &&
+      s.Equity && s.Equity.length > 0
+    )
+
+    // 3. Determine Format
+    const isSingleStatement = signalStatements.length === 1 && globalStatements.length === 0
+    const hasGlobalEquity = globalStatements.length > 0
+    const topLevelEquity = globalStatements.reduce((acc: any[], s: any) => acc.concat(s.Equity || []), [])
+
+    // 4. Global parameters (TradingType)
+    const firstStatement = statements[0]
+    const nTradeMax = signalStatements.length || 1
+    const globalTradingType = {
+      ...(firstStatement.TradingType || {
+        NewTrade: "MTOOTAAT",
+        commission: 0.00007,
+        margin: 1,
+        lot: "mini",
+        cash: 100000,
+      }),
+      nTrade_max: nTradeMax,
+    }
+
+    const basePayload: any = {
+      account: account ? parseInt(account) : 54,
+      name: name,
+      saveresult: name,
+      instrument: initialInstrument,
+      side: signalStatements.length > 0 ? signalStatements[0].side : (allStatementsRaw[0]?.side || "B"),
+      TradingType: globalTradingType,
+      ...(strategyData?.df_pickle_path && { df_pickle_path: strategyData.df_pickle_path }),
+    }
+
+    if (isSingleStatement) {
+      // FORMAT 1: Single Statement
+      const s = signalStatements[0]
+      return {
+        ...basePayload,
+        saveresult: s.name, // Preserve the statement's logical name (e.g. "Statement 1")
+        strategy: s.strategy,
+        Equity: s.Equity,
+      }
+    } else if (hasGlobalEquity) {
+      // FORMAT 3: Multi-Statement Shared (at least one global exit block)
+      return {
+        ...basePayload,
+        strategy: [], // Explicitly clear root strategy to avoid leftover data
+        statements: signalStatements.map(s => {
+          const stmt: any = {
+            name: s.name,
+            side: s.side,
+            strategy: s.strategy.filter((cond: any) => cond.inp1 || cond.operator_name || cond.statement),
+          }
+          // FALLBACK: Omit Equity if empty so backend uses root-level Equity
+          if (s.Equity && s.Equity.length > 0) {
+            stmt.Equity = s.Equity
+          }
+          return stmt
+        }),
+        Equity: topLevelEquity,
+      }
+    } else {
+      // FORMAT 2: Multi-Statement Independent
+      return {
+        ...basePayload,
+        strategy: [], // Explicitly clear root strategy
+        statements: signalStatements.map(s => ({
+          name: s.name,
+          side: s.side,
+          strategy: s.strategy.filter((cond: any) => cond.inp1 || cond.operator_name || cond.statement),
+          Equity: s.Equity
+        }))
+      }
+    }
+  }
+
+  // Clean up any existing Volume_MA indicators and load initial data
+  useEffect(() => {
+    if (strategyData) {
+      if (strategyData.statements && strategyData.statements.length > 0) {
+        // Multi-statement format
+        const cleanedStatements = strategyData.statements.map((s: any) => ({
+          ...s,
+          strategy: (s.strategy || []).map((condition: any) => ({
+            ...condition,
+            inp1: cleanupVolumeMAIndicator(condition.inp1),
+            inp2: cleanupVolumeMAIndicator(condition.inp2),
+          })),
+          Equity: s.Equity || []
+        }))
+
+        // IF we have root-level Equity, it means we have a "Global Exit Block" (Format 3)
+        // Add it as a virtual statement if it's not empty and NOT already in statements
+        if (strategyData.Equity && strategyData.Equity.length > 0) {
+          // Check if this equity is already represented in any statement
+          const isAlreadyRepresented = cleanedStatements.some((ps: any) =>
+            JSON.stringify(ps.Equity) === JSON.stringify(strategyData.Equity) && (ps.strategy || []).length === 0
+          )
+
+          if (!isAlreadyRepresented) {
+            cleanedStatements.push({
+              name: `Statement ${cleanedStatements.length + 1}`,
+              side: "",
+              strategy: [],
+              Equity: strategyData.Equity,
+              TradingType: strategyData.TradingType // Keep global trading type settings
+            })
+          }
+        }
+
+        setStatements(cleanedStatements)
+      } else if (strategyData.strategy) {
+        // Single-statement format (root strategy/Equity)
+        const cleanedStatements = [{
+          ...strategyData,
+          strategy: strategyData.strategy.map((condition: any) => ({
+            ...condition,
+            inp1: cleanupVolumeMAIndicator(condition.inp1),
+            inp2: cleanupVolumeMAIndicator(condition.inp2),
+          })),
+          Equity: strategyData.Equity || []
+        }]
+        setStatements(cleanedStatements)
+      }
     }
   }, [strategyData])
 
@@ -4912,349 +5053,431 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const [showEditNameModal, setShowEditNameModal] = useState(false)
 
   return (
-    <div className="flex-1 flex flex-col">
-      {/* Main content area with scrolling */}
-      <div className="flex-1 p-6 overflow-auto">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-6">
-          <div className="flex items-center">
-            <h1 className="text-2xl font-medium">
-              {strategyId
-                ? (strategyName || initialInstrument || strategyId)
-                : `Building algorithm for ${initialInstrument || "XAU/USD"}`}
-            </h1>
-            {strategyId && (
+    <TooltipProvider>
+      <div className="flex-1 flex flex-col">
+        {/* Main content area with scrolling */}
+        <div className="flex-1 p-6 overflow-auto">
+          {/* Header */}
+          <div className="flex justify-between items-center mb-6">
+            <div className="flex items-center">
+              <h1 className="text-2xl font-medium">
+                {strategyName || (persistedId
+                  ? (initialInstrument || persistedId)
+                  : `Building algorithm for ${initialInstrument || "XAU/USD"}`)}
+              </h1>
+              {persistedId && (
+                <button
+                  onClick={() => setShowEditNameModal(true)}
+                  className="ml-2 p-1 hover:bg-gray-700 rounded-full"
+                  title="Edit strategy name"
+                >
+                  <Edit className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+            <div className="flex gap-3">
+              {/* Buy/Sell selector */}
               <button
-                onClick={() => setShowEditNameModal(true)}
-                className="ml-2 p-1 hover:bg-gray-700 rounded-full"
-                title="Edit strategy name"
+                onClick={() => setShowDeveloperModeModal(true)}
+                className="px-4 py-2 bg-[#151718] rounded-full text-white hover:bg-gray-700 flex items-center gap-2"
               >
-                <Edit className="w-5 h-5" />
+                <Code className="w-4 h-4" />
+                Developer Mode
               </button>
-            )}
+              <button className="px-4 py-2 bg-[#151718] rounded-full text-white hover:bg-gray-700">Add Setup</button>
+              <button className="px-4 py-2 bg-[#151718] rounded-full text-white hover:bg-gray-700" onClick={addStatement}>
+                Add Statement
+              </button>
+            </div>
           </div>
-          <div className="flex gap-3">
-            {/* Buy/Sell selector */}
-            <button
-              onClick={() => setShowDeveloperModeModal(true)}
-              className="px-4 py-2 bg-[#151718] rounded-full text-white hover:bg-gray-700 flex items-center gap-2"
-            >
-              <Code className="w-4 h-4" />
-              Developer Mode
-            </button>
-            <button className="px-4 py-2 bg-[#151718] rounded-full text-white hover:bg-gray-700">Add Setup</button>
-            <button className="px-4 py-2 bg-[#151718] rounded-full text-white hover:bg-gray-700" onClick={addStatement}>
-              Add Statement
-            </button>
-          </div>
-        </div>
 
-        {/* Statements */}
-        <div className="space-y-6">
-          {statements.map((statement, index) => (
-            <div
-              key={index}
-              className="bg-[#151718] rounded-lg p-4"
-              data-active-statement={activeStatementIndex === index}
-              data-active-index={index}
-            >
-              <div className="flex justify-between items-center mb-4">
-                <div className="flex items-center gap-4">
-                  <h2 className="text-xl font-medium">{statement.saveresult}</h2>
-                  {/* Buy/Sell badge removed - now shown as inline component in strategy conditions */}
-                </div>
-                <div className="relative flex items-center gap-4">
-                  {/* Wait for closes only indicators - show for inp1 and inp2 separately */}
-                  {(waitStatus[index]?.inp1 || waitStatus[index]?.inp2) && (
-                    <div className="flex items-center gap-4 text-sm text-gray-300">
-                      {waitStatus[index]?.inp1 && (
-                        <div className="flex items-center gap-2">
-                          <div className="w-4 h-4 border border-gray-300 bg-transparent flex items-center justify-center">
-                            <div className="w-2 h-2 bg-gray-300"></div>
+          {/* Statements */}
+          <div className="space-y-6">
+            {statements.map((statement, index) => (
+              <div
+                key={index}
+                className="bg-[#151718] rounded-lg p-4"
+                data-active-statement={activeStatementIndex === index}
+                data-active-index={index}
+              >
+                <div className="flex justify-between items-center mb-4">
+                  <div className="flex items-center gap-4">
+                    <h2 className="text-xl font-medium">{statement.saveresult || statement.name || `Statement ${index + 1}`}</h2>
+                  </div>
+                  <div className="relative flex items-center gap-4">
+                    {/* Wait for closes only indicators - show for inp1 and inp2 separately */}
+                    {(waitStatus[index]?.inp1 || waitStatus[index]?.inp2) && (
+                      <div className="flex items-center gap-4 text-sm text-gray-300">
+                        {waitStatus[index]?.inp1 && (
+                          <div className="flex items-center gap-2">
+                            <div className="w-4 h-4 border border-gray-300 bg-transparent flex items-center justify-center">
+                              <div className="w-2 h-2 bg-gray-300"></div>
+                            </div>
+                            <span>Wait inp1</span>
                           </div>
-                          <span>Wait inp1</span>
-                        </div>
-                      )}
-                      {waitStatus[index]?.inp2 && (
-                        <div className="flex items-center gap-2">
-                          <div className="w-4 h-4 border border-gray-300 bg-transparent flex items-center justify-center">
-                            <div className="w-2 h-2 bg-gray-300"></div>
+                        )}
+                        {waitStatus[index]?.inp2 && (
+                          <div className="flex items-center gap-2">
+                            <div className="w-4 h-4 border border-gray-300 bg-transparent flex items-center justify-center">
+                              <div className="w-2 h-2 bg-gray-300"></div>
+                            </div>
+                            <span>Wait inp2</span>
                           </div>
-                          <span>Wait inp2</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  <button
-                    onClick={() => {
-                      setIsDropdownOpen(index === activeStatementIndex ? !isDropdownOpen : true)
-                      setActiveStatementIndex(index)
-                    }}
-                    className="p-1 hover:bg-gray-700 rounded-full"
-                  >
-                    <MoreVertical className="w-5 h-5" />
-                  </button>
-                  {isDropdownOpen && activeStatementIndex === index && (
-                    <div className="absolute right-0 top-3 bg-[#2A2D42] rounded-lg shadow-md p-2 mt-4 z-10">
-                      <button
-                        className="w-full text-white p-2 hover:bg-red-600 rounded-lg"
-                        onClick={() => handleDeleteStatement(index)}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Strategy section */}
-              <div className="bg-[#151718] p-4 rounded-lg mb-4">
-                {/* Replace the existing flex flex-col space-y-4 div with this: */}
-                <div className="flex items-center flex-wrap gap-2">
-                  {renderStrategyConditions(statement)}
-
-                  <div className="relative flex-1 min-w-[200px]">
-                    <input
-                      ref={(el) => (searchInputRefs.current[index] = el)}
-                      type="text"
-                      placeholder="Start typing a component name..."
-                      className="w-full bg-transparent border-b border-white pb-1 outline-none focus:border-white"
-                      value={activeStatementIndex === index ? searchTerm : ""}
-                      onChange={(e) => handleSearchInput(index, e.target.value)}
-                      onKeyDown={(e) => handleKeyDown(index, e)}
-                      onClick={() => setActiveStatementIndex(index)}
-                    />
-
-                    {/* Search results dropdown */}
-                    {activeStatementIndex === index && searchResults.length > 0 && (
-                      <div className="absolute z-10 mt-1 w-full bg-[#2B2E38] border border-gray-700 rounded-md shadow-lg max-h-60 overflow-auto">
-                        {searchResults.map((result, idx) => (
-                          <button
-                            key={idx}
-                            className={`w-full text-left px-4 py-2 ${idx === selectedSearchIndex ? "bg-[#4A4D62] text-white" : "hover:bg-[#3A3D47] text-white"
-                              }`}
-                            onClick={() => {
-                              handleAddComponent(index, result)
-                            }}
-                          >
-                            {result}
-                          </button>
-                        ))}
+                        )}
+                      </div>
+                    )}
+                    <button
+                      onClick={() => {
+                        setIsDropdownOpen(index === activeStatementIndex ? !isDropdownOpen : true)
+                        setActiveStatementIndex(index)
+                      }}
+                      className="p-1 hover:bg-gray-700 rounded-full"
+                    >
+                      <MoreVertical className="w-5 h-5" />
+                    </button>
+                    {isDropdownOpen && activeStatementIndex === index && (
+                      <div className="absolute right-0 top-3 bg-[#2A2D42] rounded-lg shadow-md p-2 mt-4 z-10">
+                        <button
+                          className="w-full text-white p-2 hover:bg-red-600 rounded-lg"
+                          onClick={() => handleDeleteStatement(index)}
+                        >
+                          Delete
+                        </button>
                       </div>
                     )}
                   </div>
                 </div>
+
+                {/* Strategy section */}
+                <div className="bg-[#151718] p-4 rounded-lg mb-4">
+                  {/* Replace the existing flex flex-col space-y-4 div with this: */}
+                  <div className="flex items-center flex-wrap gap-2">
+                    {renderStrategyConditions(statement, index)}
+
+                    <div className="relative flex-1 min-w-[200px]">
+                      <input
+                        ref={(el) => (searchInputRefs.current[index] = el)}
+                        type="text"
+                        placeholder="Start typing a component name..."
+                        className="w-full bg-transparent border-b border-white pb-1 outline-none focus:border-white"
+                        value={activeStatementIndex === index ? searchTerm : ""}
+                        onChange={(e) => handleSearchInput(index, e.target.value)}
+                        onKeyDown={(e) => handleKeyDown(index, e)}
+                        onClick={() => setActiveStatementIndex(index)}
+                      />
+
+                      {/* Search results dropdown */}
+                      {activeStatementIndex === index && searchResults.length > 0 && (
+                        <div className="absolute z-10 mt-1 w-full bg-[#2B2E38] border border-gray-700 rounded-md shadow-lg max-h-60 overflow-auto">
+                          {searchResults.map((result, idx) => (
+                            <button
+                              key={idx}
+                              className={`w-full text-left px-4 py-2 ${idx === selectedSearchIndex ? "bg-[#4A4D62] text-white" : "hover:bg-[#3A3D47] text-white"
+                                }`}
+                              onClick={() => {
+                                handleAddComponent(index, result)
+                              }}
+                            >
+                              {result}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {/* Render Equity Rules for this statement */}
+                  {renderEquityRules(statement, index)}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
 
-        {/* Add statement button */}
-        <div className="flex justify-center mt-6">
-          <button onClick={addStatement} className="p-3 rounded-full bg-[#151718] hover:bg-gray-700">
-            <Plus className="w-6 h-6" />
-          </button>
-        </div>
-      </div>
-      {/* Fixed bottom buttons */}
-      <div className="flex justify-between p-6 bg-[#141721] sticky bottom-0 border-t border-gray-800">
-        <Link href="/home">
-          <button className="px-8 py-3 bg-[#151718] rounded-full text-white hover:bg-gray-700">Cancel</button>
-        </Link>
-        <div className="flex gap-3">
-          <button onClick={handleContinue} className="px-8 py-3 bg-[#151718] rounded-full text-white hover:bg-gray-700">
-            Save
-          </button>
-          <button
-            className="px-8 py-3 bg-[#85e1fe] rounded-full text-black hover:bg-[#5AB9D1]"
-            onClick={handleContinue}
-          >
-            Continue
-          </button>
-        </div>
-      </div>
-      {/* Timeframe dropdown */}
-      {showTimeframeDropdown && (
-        <div className="fixed inset-0 z-50" onClick={() => setShowTimeframeDropdown(false)}>
-          <div
-            className="absolute bg-white rounded-md shadow-lg w-[160px] border border-[#2A2D42]"
-            style={{
-              top:
-                activeConditionIndex !== null
-                  ? (() => {
-                    const selector =
-                      activeInputType === "inp2"
-                        ? `[data-inp2-timeframe-index="${activeConditionIndex}"]`
-                        : `[data-timeframe-index="${activeConditionIndex}"]`
-                    const element = document.querySelector(selector)
-                    return element ? element.getBoundingClientRect().bottom + window.scrollY + 5 : 0
-                  })()
-                  : 0,
-              left:
-                activeConditionIndex !== null
-                  ? (() => {
-                    const selector =
-                      activeInputType === "inp2"
-                        ? `[data-inp2-timeframe-index="${activeConditionIndex}"]`
-                        : `[data-timeframe-index="${activeConditionIndex}"]`
-                    const element = document.querySelector(selector)
-                    return element ? element.getBoundingClientRect().left + window.scrollX : 0
-                  })()
-                  : 0,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Scrollable area */}
-            <div className="max-h-48 overflow-y-auto">
-              {["15min", "20min", "30min", "45min", "1h", "3h"].map((timeframe) => (
-                <button
-                  key={timeframe}
-                  className={`w-full text-left px-4 py-2 text-black hover:bg-gray-100 ${selectedTimeframe === timeframe ? "bg-gray-200 font-semibold" : ""
-                    }`}
-                  onClick={() => handleTimeframeSelect(timeframe)}
-                >
-                  {timeframe}
-                </button>
-              ))}
-
-              {customTimeframes.map((timeframe) => (
-                <button
-                  key={timeframe}
-                  className={`w-full text-left px-4 py-2 text-black hover:bg-gray-100 ${selectedTimeframe === timeframe ? "bg-gray-200 font-semibold" : ""
-                    }`}
-                  onClick={() => handleTimeframeSelect(timeframe)}
-                >
-                  {timeframe}
-                </button>
-              ))}
-            </div>
-
-            {/* Divider and Add Custom always visible */}
-            <div className="border-t border-gray-200" />
-            <button
-              className="w-full text-left px-4 py-2 text-black hover:bg-gray-100 font-medium"
-              onClick={() => handleTimeframeSelect("add-custom")}
-            >
-              Add Custom
+          {/* Add statement button */}
+          <div className="flex justify-center mt-6">
+            <button onClick={addStatement} className="p-3 rounded-full bg-[#151718] hover:bg-gray-700">
+              <Plus className="w-6 h-6" />
             </button>
           </div>
         </div>
-      )}
+        {/* Fixed bottom buttons */}
+        <div className="flex justify-between p-6 bg-[#141721] sticky bottom-0 border-t border-gray-800">
+          <Link href="/home">
+            <button className="px-8 py-3 bg-[#151718] rounded-full text-white hover:bg-gray-700">Cancel</button>
+          </Link>
+          <div className="flex gap-3">
+            <button onClick={handleContinue} className="px-8 py-3 bg-[#151718] rounded-full text-white hover:bg-gray-700">
+              Save
+            </button>
+            <button
+              className="px-8 py-3 bg-[#85e1fe] rounded-full text-black hover:bg-[#5AB9D1]"
+              onClick={handleContinue}
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+        {/* Timeframe dropdown */}
+        {showTimeframeDropdown && (
+          <div className="fixed inset-0 z-50" onClick={() => setShowTimeframeDropdown(false)}>
+            <div
+              className="absolute bg-white rounded-md shadow-lg w-[160px] border border-[#2A2D42]"
+              style={{
+                top:
+                  activeConditionIndex !== null
+                    ? (() => {
+                      const selector =
+                        activeInputType === "inp2"
+                          ? `[data-inp2-timeframe-index="${activeConditionIndex}"]`
+                          : `[data-timeframe-index="${activeConditionIndex}"]`
+                      const element = document.querySelector(selector)
+                      return element ? element.getBoundingClientRect().bottom + window.scrollY + 5 : 0
+                    })()
+                    : 0,
+                left:
+                  activeConditionIndex !== null
+                    ? (() => {
+                      const selector =
+                        activeInputType === "inp2"
+                          ? `[data-inp2-timeframe-index="${activeConditionIndex}"]`
+                          : `[data-timeframe-index="${activeConditionIndex}"]`
+                      const element = document.querySelector(selector)
+                      return element ? element.getBoundingClientRect().left + window.scrollX : 0
+                    })()
+                    : 0,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Scrollable area */}
+              <div className="max-h-48 overflow-y-auto">
+                {["15min", "20min", "30min", "45min", "1h", "3h"].map((timeframe) => (
+                  <button
+                    key={timeframe}
+                    className={`w-full text-left px-4 py-2 text-black hover:bg-gray-100 ${selectedTimeframe === timeframe ? "bg-gray-200 font-semibold" : ""
+                      }`}
+                    onClick={() => handleTimeframeSelect(timeframe)}
+                  >
+                    {timeframe}
+                  </button>
+                ))}
 
-      {/* Modals */}
-      {showCrossingUpModal && (
-        <CrossingUpSettingsModal
-          onClose={() => {
-            setShowCrossingUpModal(false)
-            setCrossingUpInitialSettings(undefined)
-          }}
-          currentInp1={
-            statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]?.inp1
-          }
-          initialSettings={crossingUpInitialSettings}
-          onSave={(settings) => {
-            console.log('🔍 DEBUG: Strategy builder received settings:', settings);
-            console.log('🔍 DEBUG: settings.indicator:', settings.indicator);
-            console.log('🔍 DEBUG: settings.maType:', settings.maType);
-            console.log('🔍 DEBUG: settings.volumeMaLength:', settings.volumeMaLength);
+                {customTimeframes.map((timeframe) => (
+                  <button
+                    key={timeframe}
+                    className={`w-full text-left px-4 py-2 text-black hover:bg-gray-100 ${selectedTimeframe === timeframe ? "bg-gray-200 font-semibold" : ""
+                      }`}
+                    onClick={() => handleTimeframeSelect(timeframe)}
+                  >
+                    {timeframe}
+                  </button>
+                ))}
+              </div>
 
-            // Update crossing up settings with the custom value
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+              {/* Divider and Add Custom always visible */}
+              <div className="border-t border-gray-200" />
+              <button
+                className="w-full text-left px-4 py-2 text-black hover:bg-gray-100 font-medium"
+                onClick={() => handleTimeframeSelect("add-custom")}
+              >
+                Add Custom
+              </button>
+            </div>
+          </div>
+        )}
 
-            // Update the handleCrossingUpSettings function in strategy-builder.tsx to handle Volume-MA
+        {/* Modals */}
+        {showCrossingUpModal && (
+          <CrossingUpSettingsModal
+            onClose={() => {
+              setShowCrossingUpModal(false)
+              setCrossingUpInitialSettings(undefined)
+            }}
+            currentInp1={
+              statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]?.inp1
+            }
+            initialSettings={crossingUpInitialSettings}
+            onSave={(settings) => {
+              console.log('🔍 DEBUG: Strategy builder received settings:', settings);
+              console.log('🔍 DEBUG: settings.indicator:', settings.indicator);
+              console.log('🔍 DEBUG: settings.maType:', settings.maType);
+              console.log('🔍 DEBUG: settings.volumeMaLength:', settings.volumeMaLength);
 
-            // Find this section in the file where it handles the CrossingUpModal save action
-            if (lastCondition.operator_name === "crossabove" || lastCondition.operator_name === "crossbelow") {
-              // Update the inp2 value with the settings from the modal
-              if (settings.valueType === "value" && settings.customValue) {
-                lastCondition.inp2 = {
-                  type: "value",
-                  value: Number(settings.customValue),
-                }
-              } else if (settings.valueType === "indicator" && settings.indicator) {
-                // Handle existing indicator selection with proper JSON structure
-                if (settings.indicator === "rsi") {
-                  let rsiLength = 14;
-                  let rsiSource = "close";
-                  if (lastCondition.inp1 && lastCondition.inp1.name === "RSI") {
-                    rsiLength = lastCondition.inp1.input_params?.timeperiod || 14;
-                    rsiSource = lastCondition.inp1.input_params?.source || "close";
-                  } else if (lastCondition.inp1 && lastCondition.inp1.name === "RSI_MA") {
-                    rsiLength = lastCondition.inp1.input_params?.rsi_length || 14;
-                    rsiSource = lastCondition.inp1.input_params?.rsi_source || "close";
-                  }
+              // Update crossing up settings with the custom value
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
+              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+              // Update the handleCrossingUpSettings function in strategy-builder.tsx to handle Volume-MA
+
+              // Find this section in the file where it handles the CrossingUpModal save action
+              if (lastCondition.operator_name === "crossabove" || lastCondition.operator_name === "crossbelow") {
+                // Update the inp2 value with the settings from the modal
+                if (settings.valueType === "value" && settings.customValue) {
                   lastCondition.inp2 = {
-                    type: "I",
-                    name: "RSI",
-                    timeframe: settings.timeframe || "3h",
-                    input_params: {
-                      timeperiod: rsiLength,
-                      source: rsiSource,
-                    },
-                  };
-                } else if (settings.indicator === "rsi-ma") {
-                  console.log('🔍 Received settings for RSI_MA from crossing-up modal:', settings);
-
-                  // Get saved RSI settings from localStorage for better defaults
-                  let savedRsiSettings = null;
-                  try {
-                    const savedSettings = localStorage.getItem('rsiSettings');
-                    if (savedSettings) {
-                      savedRsiSettings = JSON.parse(savedSettings);
-                      console.log('🔍 Retrieved saved RSI settings for RSI_MA inp2:', savedRsiSettings);
+                    type: "value",
+                    value: Number(settings.customValue),
+                  }
+                } else if (settings.valueType === "indicator" && settings.indicator) {
+                  // Handle existing indicator selection with proper JSON structure
+                  if (settings.indicator === "rsi") {
+                    let rsiLength = 14;
+                    let rsiSource = "close";
+                    if (lastCondition.inp1 && lastCondition.inp1.name === "RSI") {
+                      rsiLength = lastCondition.inp1.input_params?.timeperiod || 14;
+                      rsiSource = lastCondition.inp1.input_params?.source || "close";
+                    } else if (lastCondition.inp1 && lastCondition.inp1.name === "RSI_MA") {
+                      rsiLength = lastCondition.inp1.input_params?.rsi_length || 14;
+                      rsiSource = lastCondition.inp1.input_params?.rsi_source || "close";
                     }
-                  } catch (error) {
-                    console.log('Error reading saved RSI settings:', error);
-                  }
+                    lastCondition.inp2 = {
+                      type: "I",
+                      name: "RSI",
+                      timeframe: settings.timeframe || "3h",
+                      input_params: {
+                        timeperiod: rsiLength,
+                        source: rsiSource,
+                      },
+                    };
+                  } else if (settings.indicator === "rsi-ma") {
+                    console.log('🔍 Received settings for RSI_MA from crossing-up modal:', settings);
 
-                  // Priority order: settings from modal > saved settings > defaults
-                  const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
-                  const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
-                  const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
-                  const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
-                  const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
+                    // Get saved RSI settings from localStorage for better defaults
+                    let savedRsiSettings = null;
+                    try {
+                      const savedSettings = localStorage.getItem('rsiSettings');
+                      if (savedSettings) {
+                        savedRsiSettings = JSON.parse(savedSettings);
+                        console.log('🔍 Retrieved saved RSI settings for RSI_MA inp2:', savedRsiSettings);
+                      }
+                    } catch (error) {
+                      console.log('Error reading saved RSI settings:', error);
+                    }
 
-                  console.log('🔧 Final RSI_MA inp2 values:', {
-                    rsi_length: finalRsiLength,
-                    rsi_source: finalRsiSource,
-                    ma_length: finalMaLength,
-                    ma_type: finalMaType,
-                    bb_stddev: finalBbStdDev
-                  });
+                    // Priority order: settings from modal > saved settings > defaults
+                    const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
+                    const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
+                    const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
+                    const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
+                    const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
 
-                  lastCondition.inp2 = {
-                    type: "CUSTOM_I",
-                    name: "RSI_MA",
-                    timeframe: settings.timeframe || "3h",
-                    input_params: {
+                    console.log('🔧 Final RSI_MA inp2 values:', {
                       rsi_length: finalRsiLength,
                       rsi_source: finalRsiSource,
                       ma_length: finalMaLength,
                       ma_type: finalMaType,
-                      bb_stddev: finalBbStdDev,
-                    },
-                  }
-                } else if (settings.indicator === "volume-ma") {
-                  lastCondition.inp2 = {
-                    type: "CUSTOM_I",
-                    name: "Volume_MA",
-                    timeframe: settings.timeframe || "3h",
-                    input_params: {
-                      ma_length: settings.volumeMaLength || 20,
-                    },
-                  }
-                } else if (["open", "high", "low", "close"].includes(settings.indicator)) {
-                  // Handle OHLC price indicators
-                  lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
-                } else if (settings.indicator === "bollinger") {
-                  // Check if inp1 is BBANDS to use special format
-                  if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
-                    // For BBANDS, use type "C" with input "close" format
-                    lastCondition.inp2 = createConstantInput("close", "36min")
+                      bb_stddev: finalBbStdDev
+                    });
+
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "RSI_MA",
+                      timeframe: settings.timeframe || "3h",
+                      input_params: {
+                        rsi_length: finalRsiLength,
+                        rsi_source: finalRsiSource,
+                        ma_length: finalMaLength,
+                        ma_type: finalMaType,
+                        bb_stddev: finalBbStdDev,
+                      },
+                    }
+                  } else if (settings.indicator === "volume-ma") {
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "Volume_MA",
+                      timeframe: settings.timeframe || "3h",
+                      input_params: {
+                        ma_length: settings.volumeMaLength || 20,
+                      },
+                    }
+                  } else if (["open", "high", "low", "close"].includes(settings.indicator)) {
+                    // Handle OHLC price indicators
+                    lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
+                  } else if (settings.indicator === "bollinger") {
+                    // Check if inp1 is BBANDS to use special format
+                    if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
+                      // For BBANDS, use type "C" with input "close" format
+                      lastCondition.inp2 = createConstantInput("close", "36min")
+                    } else {
+                      // Default behavior for other cases
+                      lastCondition.inp2 = {
+                        type: "I",
+                        name: "BBANDS",
+                        timeframe: settings.timeframe || "3h",
+                        input: settings.band || "upperband",
+                        input_params: {
+                          timeperiod: settings.timeperiod || 20,
+                          source: settings.bbSource || "close",
+                          // Add appropriate std dev parameter based on band type
+                          ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
+                          ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
+                          ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
+                        },
+                      }
+                    }
+                  } else if (settings.indicator === "volume") {
+                    lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
+                  } else if (settings.indicator === "atr") {
+                    // Use the same settings from inp1 if it's an ATR indicator (for existing indicator selection)
+                    if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
+                      const inp1Params = lastCondition.inp1.input_params || {}
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "ATR",
+                        timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
+                        input_params: {
+                          atr_length: inp1Params.atr_length || 14,
+                          atr_smoothing: inp1Params.atr_smoothing || "RMA",
+                        },
+                      }
+                    } else {
+                      // Default ATR settings
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "ATR",
+                        timeframe: settings.timeframe || "3h",
+                        input_params: {
+                          atr_length: 14,
+                          atr_smoothing: "RMA",
+                        },
+                      }
+                    }
+                  } else if (settings.indicator === "stochastic" || settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
+                    // Use the same settings from inp1 if it's a Stochastic indicator (for existing indicator selection)
+                    if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
+                      const inp1Params = lastCondition.inp1.input_params || {}
+                      // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
+                      const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "Stochastic",
+                        timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
+                        input_params: {
+                          fastk_period: settings.fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
+                          slowk_period: settings.slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                          slowd_period: settings.slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                          output: outputValue,
+                        },
+                      }
+                    } else {
+                      // Default Stochastic settings
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "Stochastic",
+                        timeframe: settings.timeframe || "3h",
+                        input_params: {
+                          fastk_period: settings.fastk_period || 14,
+                          slowk_period: settings.slowk_period || 3,
+                          slowd_period: settings.slowd_period || 3,
+                          output: (settings as any).stochasticOutput || "slowk",
+                        },
+                      }
+                    }
                   } else {
-                    // Default behavior for other cases
+                    // For other existing indicators
+                    lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
+                  }
+                } else if (settings.valueType === "other" && settings.indicator) {
+                  // Handle indicator type for "other" option
+                  if (settings.indicator === "bollinger") {
                     lastCondition.inp2 = {
                       type: "I",
                       name: "BBANDS",
@@ -5269,342 +5492,349 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                         ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
                       },
                     }
-                  }
-                } else if (settings.indicator === "volume") {
-                  lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
-                } else if (settings.indicator === "atr") {
-                  // Use the same settings from inp1 if it's an ATR indicator (for existing indicator selection)
-                  if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
-                    const inp1Params = lastCondition.inp1.input_params || {}
+                  } else if (settings.indicator === "rsi") {
                     lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "ATR",
-                      timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
-                      input_params: {
-                        atr_length: inp1Params.atr_length || 14,
-                        atr_smoothing: inp1Params.atr_smoothing || "RMA",
-                      },
-                    }
-                  } else {
-                    // Default ATR settings
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "ATR",
+                      type: "I",
+                      name: "RSI",
                       timeframe: settings.timeframe || "3h",
                       input_params: {
-                        atr_length: 14,
-                        atr_smoothing: "RMA",
+                        timeperiod: settings.rsiLength || 14,
                       },
                     }
-                  }
-                } else if (settings.indicator === "stochastic" || settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
-                  // Use the same settings from inp1 if it's a Stochastic indicator (for existing indicator selection)
-                  if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
-                    const inp1Params = lastCondition.inp1.input_params || {}
-                    // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
-                    const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
+                  } else if (settings.indicator === "volume-ma") {
                     lastCondition.inp2 = {
                       type: "CUSTOM_I",
-                      name: "Stochastic",
-                      timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
-                      input_params: {
-                        fastk_period: settings.fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
-                        slowk_period: settings.slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
-                        slowd_period: settings.slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
-                        output: outputValue,
-                      },
-                    }
-                  } else {
-                    // Default Stochastic settings
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "Stochastic",
+                      name: "Volume_MA",
                       timeframe: settings.timeframe || "3h",
                       input_params: {
-                        fastk_period: settings.fastk_period || 14,
-                        slowk_period: settings.slowk_period || 3,
-                        slowd_period: settings.slowd_period || 3,
-                        output: (settings as any).stochasticOutput || "slowk",
+                        ma_length: settings.volumeMaLength || 20,
                       },
                     }
+                  } else if (settings.indicator === "volume") {
+                    lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
+                  } else if (settings.indicator === "atr") {
+                    // Use the same settings from inp1 if it's an ATR indicator
+                    if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
+                      const inp1Params = lastCondition.inp1.input_params || {}
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "ATR",
+                        timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
+                        input_params: {
+                          atr_length: inp1Params.atr_length || 14,
+                          atr_smoothing: inp1Params.atr_smoothing || "RMA",
+                        },
+                      }
+                    } else {
+                      // Default ATR settings
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "ATR",
+                        timeframe: settings.timeframe || "3h",
+                        input_params: {
+                          atr_length: 14,
+                          atr_smoothing: "RMA",
+                        },
+                      }
+                    }
+                  } else if (settings.indicator === "stochastic" || settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
+                    // Use the same settings from inp1 if it's a Stochastic indicator
+                    if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
+                      const inp1Params = lastCondition.inp1.input_params || {}
+                      // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
+                      const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "Stochastic",
+                        timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
+                        input_params: {
+                          fastk_period: (settings as any).fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
+                          slowk_period: (settings as any).slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                          slowd_period: (settings as any).slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                          output: outputValue,
+                        },
+                      }
+                    } else {
+                      // Default Stochastic settings
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "Stochastic",
+                        timeframe: settings.timeframe || "3h",
+                        input_params: {
+                          fastk_period: (settings as any).fastk_period || 14,
+                          slowk_period: (settings as any).slowk_period || 3,
+                          slowd_period: (settings as any).slowd_period || 3,
+                          output: (settings as any).stochasticOutput || "slowk",
+                        },
+                      }
+                    }
+                  } else {
+                    // For other indicators like price, close, open, etc.
+                    lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
                   }
-                } else {
-                  // For other existing indicators
-                  lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
                 }
-              } else if (settings.valueType === "other" && settings.indicator) {
-                // Handle indicator type for "other" option
-                if (settings.indicator === "bollinger") {
-                  lastCondition.inp2 = {
-                    type: "I",
-                    name: "BBANDS",
-                    timeframe: settings.timeframe || "3h",
-                    input: settings.band || "upperband",
-                    input_params: {
-                      timeperiod: settings.timeperiod || 20,
-                      source: settings.bbSource || "close",
-                      // Add appropriate std dev parameter based on band type
-                      ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
-                      ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
-                      ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
-                    },
-                  }
-                } else if (settings.indicator === "rsi") {
-                  lastCondition.inp2 = {
-                    type: "I",
-                    name: "RSI",
-                    timeframe: settings.timeframe || "3h",
-                    input_params: {
-                      timeperiod: settings.rsiLength || 14,
-                    },
-                  }
-                } else if (settings.indicator === "volume-ma") {
-                  lastCondition.inp2 = {
-                    type: "CUSTOM_I",
-                    name: "Volume_MA",
-                    timeframe: settings.timeframe || "3h",
-                    input_params: {
-                      ma_length: settings.volumeMaLength || 20,
-                    },
-                  }
-                } else if (settings.indicator === "volume") {
-                  lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
-                } else if (settings.indicator === "atr") {
-                  // Use the same settings from inp1 if it's an ATR indicator
-                  if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
-                    const inp1Params = lastCondition.inp1.input_params || {}
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "ATR",
-                      timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
-                      input_params: {
-                        atr_length: inp1Params.atr_length || 14,
-                        atr_smoothing: inp1Params.atr_smoothing || "RMA",
-                      },
-                    }
-                  } else {
-                    // Default ATR settings
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "ATR",
-                      timeframe: settings.timeframe || "3h",
-                      input_params: {
-                        atr_length: 14,
-                        atr_smoothing: "RMA",
-                      },
-                    }
-                  }
-                } else if (settings.indicator === "stochastic" || settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
-                  // Use the same settings from inp1 if it's a Stochastic indicator
-                  if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
-                    const inp1Params = lastCondition.inp1.input_params || {}
-                    // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
-                    const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "Stochastic",
-                      timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
-                      input_params: {
-                        fastk_period: (settings as any).fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
-                        slowk_period: (settings as any).slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
-                        slowd_period: (settings as any).slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
-                        output: outputValue,
-                      },
-                    }
-                  } else {
-                    // Default Stochastic settings
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "Stochastic",
-                      timeframe: settings.timeframe || "3h",
-                      input_params: {
-                        fastk_period: (settings as any).fastk_period || 14,
-                        slowk_period: (settings as any).slowk_period || 3,
-                        slowd_period: (settings as any).slowd_period || 3,
-                        output: (settings as any).stochasticOutput || "slowk",
-                      },
-                    }
-                  }
-                } else {
-                  // For other indicators like price, close, open, etc.
-                  lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
+
+                // Save the offset configuration
+                lastCondition.offset = {
+                  logical_operator: (settings as any).offsetLogicalOperator || ">=",
+                  value: (settings as any).offsetValue || 0,
+                  unit: (settings as any).offsetUnit || ""
                 }
               }
+
+              setStatements(newStatements)
+              setShowCrossingUpModal(false)
+              setCrossingUpInitialSettings(undefined)
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+            onNext={(indicator, timeframe) => {
+              setShowCrossingUpModal(false)
+              setCrossingUpInitialSettings(undefined)
+              setPendingOtherIndicator(indicator)
+              setPendingTimeframe(timeframe)
+
+              const conditionIndex =
+                activeConditionIndex ?? (statements[activeStatementIndex]?.strategy.length ?? 1) - 1
+
+              if (indicator === "rsi") {
+                setShowIndicatorModal(true)
+              } else if (indicator === "rsi-ma") {
+                setShowIndicatorModal(true)
+              } else if (indicator === "bollinger") {
+                setPendingBollingerForInp2({
+                  statementIndex: activeStatementIndex,
+                  conditionIndex,
+                  timeframe,
+                });
+                setShowBollingerModal(true);
+              } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
+                openStochasticModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
+              } else if (indicator === "volume-ma" || indicator === "volume") {
+                // Open Volume modal for volume-ma or volume indicators
+                setPendingVolumeIndicatorType(indicator === "volume-ma" ? "volume-ma" : "volume")
+                setShowVolumeModal(true)
+              } else if (indicator === "atr") {
+                // Open ATR modal for ATR indicator
+                openAtrModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
+              } else if (indicator === "macd") {
+                // Open MACD modal for MACD indicator
+                setEditingComponent({
+                  statementIndex: activeStatementIndex,
+                  conditionIndex,
+                  componentType: "inp2",
+                })
+                setPendingTimeframe(timeframe)
+                setShowMacdModal(true)
+              } else if (indicator === "supertrend") {
+                // Open Super Trend modal for Super Trend indicator
+                setEditingComponent({
+                  statementIndex: activeStatementIndex,
+                  conditionIndex,
+                  componentType: "inp2",
+                })
+                setPendingTimeframe(timeframe)
+                setShowSuperTrendModal(true)
+              } else if (indicator === "ma") {
+                // Open MA modal for MA indicator
+                setEditingComponent({
+                  statementIndex: activeStatementIndex,
+                  conditionIndex,
+                  componentType: "inp2",
+                })
+                setPendingTimeframe(timeframe)
+                setShowMaModal(true)
+              } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
+                setShowPriceSettingsModal(true)
+              }
+            }}
+          />
+        )}
+        {showCrossingDownModal && (
+          <CrossingDownSettingsModal
+            onClose={() => setShowCrossingDownModal(false)}
+            currentInp1={
+              statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]?.inp1
             }
+            onSave={(settings) => {
+              // Update crossing down settings with the custom value
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
+              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
-            setStatements(newStatements)
-            setShowCrossingUpModal(false)
-            setCrossingUpInitialSettings(undefined)
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-          onNext={(indicator, timeframe) => {
-            setShowCrossingUpModal(false)
-            setCrossingUpInitialSettings(undefined)
-            setPendingOtherIndicator(indicator)
-            setPendingTimeframe(timeframe)
+              // Update the handleCrossingDownSettings function in strategy-builder.tsx to handle Volume-MA
 
-            const conditionIndex =
-              activeConditionIndex ?? (statements[activeStatementIndex]?.strategy.length ?? 1) - 1
-
-            if (indicator === "rsi") {
-              setShowIndicatorModal(true)
-            } else if (indicator === "rsi-ma") {
-              setShowIndicatorModal(true)
-            } else if (indicator === "bollinger") {
-              setPendingBollingerForInp2({
-                statementIndex: activeStatementIndex,
-                conditionIndex,
-                timeframe,
-              });
-              setShowBollingerModal(true);
-            } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
-              openStochasticModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
-            } else if (indicator === "volume-ma" || indicator === "volume") {
-              // Open Volume modal for volume-ma or volume indicators
-              setPendingVolumeIndicatorType(indicator === "volume-ma" ? "volume-ma" : "volume")
-              setShowVolumeModal(true)
-            } else if (indicator === "atr") {
-              // Open ATR modal for ATR indicator
-              openAtrModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
-            } else if (indicator === "macd") {
-              // Open MACD modal for MACD indicator
-              setEditingComponent({
-                statementIndex: activeStatementIndex,
-                conditionIndex,
-                componentType: "inp2",
-              })
-              setPendingTimeframe(timeframe)
-              setShowMacdModal(true)
-            } else if (indicator === "supertrend") {
-              // Open Super Trend modal for Super Trend indicator
-              setEditingComponent({
-                statementIndex: activeStatementIndex,
-                conditionIndex,
-                componentType: "inp2",
-              })
-              setPendingTimeframe(timeframe)
-              setShowSuperTrendModal(true)
-            } else if (indicator === "ma") {
-              // Open MA modal for MA indicator
-              setEditingComponent({
-                statementIndex: activeStatementIndex,
-                conditionIndex,
-                componentType: "inp2",
-              })
-              setPendingTimeframe(timeframe)
-              setShowMaModal(true)
-            } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
-              setShowPriceSettingsModal(true)
-            }
-          }}
-        />
-      )}
-      {showCrossingDownModal && (
-        <CrossingDownSettingsModal
-          onClose={() => setShowCrossingDownModal(false)}
-          currentInp1={
-            statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]?.inp1
-          }
-          onSave={(settings) => {
-            // Update crossing down settings with the custom value
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-
-            // Update the handleCrossingDownSettings function in strategy-builder.tsx to handle Volume-MA
-
-            // Find this section in the file where it handles the CrossingDownModal save action
-            if (lastCondition.operator_name === "crossabove" || lastCondition.operator_name === "crossbelow") {
-              // Update the inp2 value with the settings from the modal
-              if (settings.valueType === "value" && settings.customValue) {
-                lastCondition.inp2 = {
-                  type: "value",
-                  value: Number(settings.customValue),
-                }
-              } else if (settings.valueType === "indicator" && settings.indicator) {
-                // Handle existing indicator selection with proper JSON structure
-                if (settings.indicator === "rsi") {
-                  let rsiLength = 14;
-                  let rsiSource = "close";
-                  if (lastCondition.inp1 && lastCondition.inp1.name === "RSI") {
-                    rsiLength = lastCondition.inp1.input_params?.timeperiod || 14;
-                    rsiSource = lastCondition.inp1.input_params?.source || "close";
-                  } else if (lastCondition.inp1 && lastCondition.inp1.name === "RSI_MA") {
-                    rsiLength = lastCondition.inp1.input_params?.rsi_length || 14;
-                    rsiSource = lastCondition.inp1.input_params?.rsi_source || "close";
-                  }
+              // Find this section in the file where it handles the CrossingDownModal save action
+              if (lastCondition.operator_name === "crossabove" || lastCondition.operator_name === "crossbelow") {
+                // Update the inp2 value with the settings from the modal
+                if (settings.valueType === "value" && settings.customValue) {
                   lastCondition.inp2 = {
-                    type: "I",
-                    name: "RSI",
-                    timeframe: settings.timeframe || "3h",
-                    input_params: {
-                      timeperiod: rsiLength,
-                      source: rsiSource,
-                    },
-                  };
-                } else if (settings.indicator === "rsi-ma") {
-                  console.log('🔍 Received settings for RSI_MA from crossing-down modal:', settings);
-
-                  // Get saved RSI settings from localStorage for better defaults
-                  let savedRsiSettings = null;
-                  try {
-                    const savedSettings = localStorage.getItem('rsiSettings');
-                    if (savedSettings) {
-                      savedRsiSettings = JSON.parse(savedSettings);
-                      console.log('🔍 Retrieved saved RSI settings for RSI_MA inp2 (crossing-down):', savedRsiSettings);
+                    type: "value",
+                    value: Number(settings.customValue),
+                  }
+                } else if (settings.valueType === "indicator" && settings.indicator) {
+                  // Handle existing indicator selection with proper JSON structure
+                  if (settings.indicator === "rsi") {
+                    let rsiLength = 14;
+                    let rsiSource = "close";
+                    if (lastCondition.inp1 && lastCondition.inp1.name === "RSI") {
+                      rsiLength = lastCondition.inp1.input_params?.timeperiod || 14;
+                      rsiSource = lastCondition.inp1.input_params?.source || "close";
+                    } else if (lastCondition.inp1 && lastCondition.inp1.name === "RSI_MA") {
+                      rsiLength = lastCondition.inp1.input_params?.rsi_length || 14;
+                      rsiSource = lastCondition.inp1.input_params?.rsi_source || "close";
                     }
-                  } catch (error) {
-                    console.log('Error reading saved RSI settings:', error);
-                  }
+                    lastCondition.inp2 = {
+                      type: "I",
+                      name: "RSI",
+                      timeframe: settings.timeframe || "3h",
+                      input_params: {
+                        timeperiod: rsiLength,
+                        source: rsiSource,
+                      },
+                    };
+                  } else if (settings.indicator === "rsi-ma") {
+                    console.log('🔍 Received settings for RSI_MA from crossing-down modal:', settings);
 
-                  // Priority order: settings from modal > saved settings > defaults
-                  const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
-                  const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
-                  const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
-                  const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
-                  const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
+                    // Get saved RSI settings from localStorage for better defaults
+                    let savedRsiSettings = null;
+                    try {
+                      const savedSettings = localStorage.getItem('rsiSettings');
+                      if (savedSettings) {
+                        savedRsiSettings = JSON.parse(savedSettings);
+                        console.log('🔍 Retrieved saved RSI settings for RSI_MA inp2 (crossing-down):', savedRsiSettings);
+                      }
+                    } catch (error) {
+                      console.log('Error reading saved RSI settings:', error);
+                    }
 
-                  console.log('🔧 Final RSI_MA inp2 values (crossing-down):', {
-                    rsi_length: finalRsiLength,
-                    rsi_source: finalRsiSource,
-                    ma_length: finalMaLength,
-                    ma_type: finalMaType,
-                    bb_stddev: finalBbStdDev
-                  });
+                    // Priority order: settings from modal > saved settings > defaults
+                    const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
+                    const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
+                    const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
+                    const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
+                    const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
 
-                  lastCondition.inp2 = {
-                    type: "CUSTOM_I",
-                    name: "RSI_MA",
-                    timeframe: settings.timeframe || "3h",
-                    input_params: {
+                    console.log('🔧 Final RSI_MA inp2 values (crossing-down):', {
                       rsi_length: finalRsiLength,
                       rsi_source: finalRsiSource,
                       ma_length: finalMaLength,
                       ma_type: finalMaType,
-                      bb_stddev: finalBbStdDev,
-                    },
-                  }
-                } else if (settings.indicator === "volume-ma") {
-                  lastCondition.inp2 = {
-                    type: "CUSTOM_I",
-                    name: "Volume_MA",
-                    timeframe: settings.timeframe || "3h",
-                    input_params: {
-                      ma_length: settings.volumeMaLength || 20,
-                    },
-                  }
-                } else if (["open", "high", "low", "close"].includes(settings.indicator)) {
-                  // Handle OHLC price indicators
-                  lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
-                } else if (settings.indicator === "bollinger") {
-                  // Check if inp1 is BBANDS to use special format
-                  if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
-                    // For BBANDS, use type "C" with input "close" format
-                    lastCondition.inp2 = createConstantInput("close", "36min")
+                      bb_stddev: finalBbStdDev
+                    });
+
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "RSI_MA",
+                      timeframe: settings.timeframe || "3h",
+                      input_params: {
+                        rsi_length: finalRsiLength,
+                        rsi_source: finalRsiSource,
+                        ma_length: finalMaLength,
+                        ma_type: finalMaType,
+                        bb_stddev: finalBbStdDev,
+                      },
+                    }
+                  } else if (settings.indicator === "volume-ma") {
+                    lastCondition.inp2 = {
+                      type: "CUSTOM_I",
+                      name: "Volume_MA",
+                      timeframe: settings.timeframe || "3h",
+                      input_params: {
+                        ma_length: settings.volumeMaLength || 20,
+                      },
+                    }
+                  } else if (["open", "high", "low", "close"].includes(settings.indicator)) {
+                    // Handle OHLC price indicators
+                    lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
+                  } else if (settings.indicator === "bollinger") {
+                    // Check if inp1 is BBANDS to use special format
+                    if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
+                      // For BBANDS, use type "C" with input "close" format
+                      lastCondition.inp2 = createConstantInput("close", "36min")
+                    } else {
+                      // Default behavior for other cases
+                      lastCondition.inp2 = {
+                        type: "I",
+                        name: "BBANDS",
+                        timeframe: settings.timeframe || "3h",
+                        input: settings.band || "upperband",
+                        input_params: {
+                          timeperiod: settings.timeperiod || 20,
+                          source: settings.bbSource || "close",
+                          // Add appropriate std dev parameter based on band type
+                          ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
+                          ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
+                          ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
+                        },
+                      }
+                    }
+                  } else if (settings.indicator === "volume") {
+                    lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
+                  } else if (settings.indicator === "atr") {
+                    // Use the same settings from inp1 if it's an ATR indicator (for existing indicator selection)
+                    if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
+                      const inp1Params = lastCondition.inp1.input_params || {}
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "ATR",
+                        timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
+                        input_params: {
+                          atr_length: inp1Params.atr_length || 14,
+                          atr_smoothing: inp1Params.atr_smoothing || "RMA",
+                        },
+                      }
+                    } else {
+                      // Default ATR settings
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "ATR",
+                        timeframe: settings.timeframe || "3h",
+                        input_params: {
+                          atr_length: 14,
+                          atr_smoothing: "RMA",
+                        },
+                      }
+                    }
+                  } else if (settings.indicator === "stochastic" || settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
+                    // Use the same settings from inp1 if it's a Stochastic indicator (for existing indicator selection)
+                    if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
+                      const inp1Params = lastCondition.inp1.input_params || {}
+                      // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
+                      const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "Stochastic",
+                        timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
+                        input_params: {
+                          fastk_period: (settings as any).fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
+                          slowk_period: (settings as any).slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                          slowd_period: (settings as any).slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                          output: outputValue,
+                        },
+                      }
+                    } else {
+                      // Default Stochastic settings
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "Stochastic",
+                        timeframe: settings.timeframe || "3h",
+                        input_params: {
+                          fastk_period: (settings as any).fastk_period || 14,
+                          slowk_period: (settings as any).slowk_period || 3,
+                          slowd_period: (settings as any).slowd_period || 3,
+                          output: (settings as any).stochasticOutput || "slowk",
+                        },
+                      }
+                    }
                   } else {
-                    // Default behavior for other cases
+                    // For other existing indicators
+                    lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
+                  }
+                } else if (settings.valueType === "other" && settings.indicator) {
+                  // Handle indicator type for "other" option
+                  if (settings.indicator === "bollinger") {
                     lastCondition.inp2 = {
                       type: "I",
                       name: "BBANDS",
@@ -5619,1433 +5849,1359 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                         ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
                       },
                     }
-                  }
-                } else if (settings.indicator === "volume") {
-                  lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
-                } else if (settings.indicator === "atr") {
-                  // Use the same settings from inp1 if it's an ATR indicator (for existing indicator selection)
-                  if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
-                    const inp1Params = lastCondition.inp1.input_params || {}
+                  } else if (settings.indicator === "rsi") {
                     lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "ATR",
-                      timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
-                      input_params: {
-                        atr_length: inp1Params.atr_length || 14,
-                        atr_smoothing: inp1Params.atr_smoothing || "RMA",
-                      },
-                    }
-                  } else {
-                    // Default ATR settings
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "ATR",
+                      type: "I",
+                      name: "RSI",
                       timeframe: settings.timeframe || "3h",
                       input_params: {
-                        atr_length: 14,
-                        atr_smoothing: "RMA",
+                        timeperiod: settings.rsiLength || 14,
                       },
                     }
-                  }
-                } else if (settings.indicator === "stochastic" || settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
-                  // Use the same settings from inp1 if it's a Stochastic indicator (for existing indicator selection)
-                  if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
-                    const inp1Params = lastCondition.inp1.input_params || {}
-                    // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
-                    const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
+                  } else if (settings.indicator === "volume-ma") {
                     lastCondition.inp2 = {
                       type: "CUSTOM_I",
-                      name: "Stochastic",
-                      timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
-                      input_params: {
-                        fastk_period: (settings as any).fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
-                        slowk_period: (settings as any).slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
-                        slowd_period: (settings as any).slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
-                        output: outputValue,
-                      },
-                    }
-                  } else {
-                    // Default Stochastic settings
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "Stochastic",
+                      name: "Volume_MA",
                       timeframe: settings.timeframe || "3h",
                       input_params: {
-                        fastk_period: (settings as any).fastk_period || 14,
-                        slowk_period: (settings as any).slowk_period || 3,
-                        slowd_period: (settings as any).slowd_period || 3,
-                        output: (settings as any).stochasticOutput || "slowk",
+                        ma_length: settings.volumeMaLength || 20,
                       },
                     }
+                  } else if (settings.indicator === "volume") {
+                    lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
+                  } else if (settings.indicator === "atr") {
+                    // Use the same settings from inp1 if it's an ATR indicator
+                    if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
+                      const inp1Params = lastCondition.inp1.input_params || {}
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "ATR",
+                        timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
+                        input_params: {
+                          atr_length: inp1Params.atr_length || 14,
+                          atr_smoothing: inp1Params.atr_smoothing || "RMA",
+                        },
+                      }
+                    } else {
+                      // Default ATR settings
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "ATR",
+                        timeframe: settings.timeframe || "3h",
+                        input_params: {
+                          atr_length: 14,
+                          atr_smoothing: "RMA",
+                        },
+                      }
+                    }
+                  } else if (settings.indicator === "stochastic" || settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
+                    // Use the same settings from inp1 if it's a Stochastic indicator
+                    if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
+                      const inp1Params = lastCondition.inp1.input_params || {}
+                      // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
+                      const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "Stochastic",
+                        timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
+                        input_params: {
+                          fastk_period: (settings as any).fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
+                          slowk_period: (settings as any).slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                          slowd_period: (settings as any).slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                          output: outputValue,
+                        },
+                      }
+                    } else {
+                      // Default Stochastic settings
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "Stochastic",
+                        timeframe: settings.timeframe || "3h",
+                        input_params: {
+                          fastk_period: (settings as any).fastk_period || 14,
+                          slowk_period: (settings as any).slowk_period || 3,
+                          slowd_period: (settings as any).slowd_period || 3,
+                          output: (settings as any).stochasticOutput || "slowk",
+                        },
+                      }
+                    }
+                  } else {
+                    // For other indicators like price, close, open, etc.
+                    lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
                   }
-                } else {
-                  // For other existing indicators
-                  lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
                 }
-              } else if (settings.valueType === "other" && settings.indicator) {
-                // Handle indicator type for "other" option
-                if (settings.indicator === "bollinger") {
-                  lastCondition.inp2 = {
-                    type: "I",
-                    name: "BBANDS",
-                    timeframe: settings.timeframe || "3h",
-                    input: settings.band || "upperband",
-                    input_params: {
-                      timeperiod: settings.timeperiod || 20,
-                      source: settings.bbSource || "close",
-                      // Add appropriate std dev parameter based on band type
-                      ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
-                      ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
-                      ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
-                    },
-                  }
-                } else if (settings.indicator === "rsi") {
-                  lastCondition.inp2 = {
-                    type: "I",
-                    name: "RSI",
-                    timeframe: settings.timeframe || "3h",
-                    input_params: {
-                      timeperiod: settings.rsiLength || 14,
-                    },
-                  }
-                } else if (settings.indicator === "volume-ma") {
-                  lastCondition.inp2 = {
-                    type: "CUSTOM_I",
-                    name: "Volume_MA",
-                    timeframe: settings.timeframe || "3h",
-                    input_params: {
-                      ma_length: settings.volumeMaLength || 20,
-                    },
-                  }
-                } else if (settings.indicator === "volume") {
-                  lastCondition.inp2 = createConstantInput("volume", settings.timeframe || "3h")
-                } else if (settings.indicator === "atr") {
-                  // Use the same settings from inp1 if it's an ATR indicator
-                  if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
-                    const inp1Params = lastCondition.inp1.input_params || {}
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "ATR",
-                      timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
-                      input_params: {
-                        atr_length: inp1Params.atr_length || 14,
-                        atr_smoothing: inp1Params.atr_smoothing || "RMA",
-                      },
-                    }
-                  } else {
-                    // Default ATR settings
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "ATR",
-                      timeframe: settings.timeframe || "3h",
-                      input_params: {
-                        atr_length: 14,
-                        atr_smoothing: "RMA",
-                      },
-                    }
-                  }
-                } else if (settings.indicator === "stochastic" || settings.indicator === "stochastic-oscillator" || settings.indicator === "Stochastic") {
-                  // Use the same settings from inp1 if it's a Stochastic indicator
-                  if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
-                    const inp1Params = lastCondition.inp1.input_params || {}
-                    // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
-                    const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "Stochastic",
-                      timeframe: settings.timeframe || lastCondition.inp1.timeframe || "3h",
-                      input_params: {
-                        fastk_period: (settings as any).fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
-                        slowk_period: (settings as any).slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
-                        slowd_period: (settings as any).slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
-                        output: outputValue,
-                      },
-                    }
-                  } else {
-                    // Default Stochastic settings
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "Stochastic",
-                      timeframe: settings.timeframe || "3h",
-                      input_params: {
-                        fastk_period: (settings as any).fastk_period || 14,
-                        slowk_period: (settings as any).slowk_period || 3,
-                        slowd_period: (settings as any).slowd_period || 3,
-                        output: (settings as any).stochasticOutput || "slowk",
-                      },
-                    }
-                  }
-                } else {
-                  // For other indicators like price, close, open, etc.
-                  lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
+
+                // Save the offset configuration
+                lastCondition.offset = {
+                  logical_operator: (settings as any).offsetLogicalOperator || ">=",
+                  value: (settings as any).offsetValue || 0,
+                  unit: (settings as any).offsetUnit || ""
                 }
               }
 
               setStatements(newStatements)
               setShowCrossingDownModal(false)
-            }
-          }}
-          onNext={(indicator, timeframe) => {
-            setShowCrossingDownModal(false)
-            setPendingOtherIndicator(indicator)
-            setPendingTimeframe(timeframe)
-
-            const conditionIndex =
-              activeConditionIndex ?? (statements[activeStatementIndex]?.strategy.length ?? 1) - 1
-
-            if (indicator === "rsi") {
-              setShowIndicatorModal(true)
-            } else if (indicator === "rsi-ma") {
-              setShowIndicatorModal(true)
-            } else if (indicator === "bollinger") {
-              setPendingBollingerForInp2({
-                statementIndex: activeStatementIndex,
-                conditionIndex,
-                timeframe,
-              });
-              setShowBollingerModal(true);
-            } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
-              openStochasticModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
-            } else if (indicator === "volume-ma" || indicator === "volume") {
-              // Open Volume modal for volume-ma or volume indicators
-              setPendingVolumeIndicatorType(indicator === "volume-ma" ? "volume-ma" : "volume")
-              setShowVolumeModal(true)
-            } else if (indicator === "atr") {
-              // Open ATR modal for ATR indicator
-              openAtrModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
-            } else if (indicator === "macd") {
-              // Open MACD modal for MACD indicator
-              setEditingComponent({
-                statementIndex: activeStatementIndex,
-                conditionIndex,
-                componentType: "inp2",
-              })
+            }}
+            onNext={(indicator, timeframe) => {
+              setShowCrossingDownModal(false)
+              setPendingOtherIndicator(indicator)
               setPendingTimeframe(timeframe)
-              setShowMacdModal(true)
-            } else if (indicator === "supertrend") {
-              // Open Super Trend modal for Super Trend indicator
-              setEditingComponent({
-                statementIndex: activeStatementIndex,
-                conditionIndex,
-                componentType: "inp2",
-              })
-              setPendingTimeframe(timeframe)
-              setShowSuperTrendModal(true)
-            } else if (indicator === "ma") {
-              // Open MA modal for MA indicator
-              setEditingComponent({
-                statementIndex: activeStatementIndex,
-                conditionIndex,
-                componentType: "inp2",
-              })
-              setPendingTimeframe(timeframe)
-              setShowMaModal(true)
-            } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
-              setShowPriceSettingsModal(true)
+
+              const conditionIndex =
+                activeConditionIndex ?? (statements[activeStatementIndex]?.strategy.length ?? 1) - 1
+
+              if (indicator === "rsi") {
+                setShowIndicatorModal(true)
+              } else if (indicator === "rsi-ma") {
+                setShowIndicatorModal(true)
+              } else if (indicator === "bollinger") {
+                setPendingBollingerForInp2({
+                  statementIndex: activeStatementIndex,
+                  conditionIndex,
+                  timeframe,
+                });
+                setShowBollingerModal(true);
+              } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
+                openStochasticModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
+              } else if (indicator === "volume-ma" || indicator === "volume") {
+                // Open Volume modal for volume-ma or volume indicators
+                setPendingVolumeIndicatorType(indicator === "volume-ma" ? "volume-ma" : "volume")
+                setShowVolumeModal(true)
+              } else if (indicator === "atr") {
+                // Open ATR modal for ATR indicator
+                openAtrModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
+              } else if (indicator === "macd") {
+                // Open MACD modal for MACD indicator
+                setEditingComponent({
+                  statementIndex: activeStatementIndex,
+                  conditionIndex,
+                  componentType: "inp2",
+                })
+                setPendingTimeframe(timeframe)
+                setShowMacdModal(true)
+              } else if (indicator === "supertrend") {
+                // Open Super Trend modal for Super Trend indicator
+                setEditingComponent({
+                  statementIndex: activeStatementIndex,
+                  conditionIndex,
+                  componentType: "inp2",
+                })
+                setPendingTimeframe(timeframe)
+                setShowSuperTrendModal(true)
+              } else if (indicator === "ma") {
+                // Open MA modal for MA indicator
+                setEditingComponent({
+                  statementIndex: activeStatementIndex,
+                  conditionIndex,
+                  componentType: "inp2",
+                })
+                setPendingTimeframe(timeframe)
+                setShowMaModal(true)
+              } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
+                setShowPriceSettingsModal(true)
+              }
+            }}
+          />
+        )}
+        {showAboveModal && (
+          <AboveSettingsModal
+            onClose={() => setShowAboveModal(false)}
+            currentInp1={
+              statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]?.inp1
             }
-          }}
-        />
-      )}
-      {showAboveModal && (
-        <AboveSettingsModal
-          onClose={() => setShowAboveModal(false)}
-          currentInp1={
-            statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]?.inp1
-          }
-          onSave={(settings) => {
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-
-            if (lastCondition.operator_name === "above") {
-              const tf = settings.timeframe || "3h"
-
-              if (settings.valueType === "value" && settings.customValue) {
-                lastCondition.inp2 = {
-                  type: "value",
-                  value: Number(settings.customValue),
-                }
-              } else if ((settings.valueType === "indicator" || settings.valueType === "other") && settings.indicator) {
-                switch (settings.indicator) {
-                  case "rsi":
-                    lastCondition.inp2 = {
-                      type: "I",
-                      name: "RSI",
-                      timeframe: tf,
-                      input_params: {
-                        timeperiod: settings.rsiLength || 14,
-                        source: settings.rsiSource?.toLowerCase() || "close",
-                      },
-                    }
-                    break
-
-                  case "rsi-ma":
-                    console.log('🔍 Received settings for RSI_MA from above modal:', settings);
-
-                    // Get saved RSI settings from localStorage for better defaults
-                    let savedRsiSettings = null;
-                    try {
-                      const savedSettings = localStorage.getItem('rsiSettings');
-                      if (savedSettings) {
-                        savedRsiSettings = JSON.parse(savedSettings);
-                        console.log('🔍 Retrieved saved RSI settings for RSI_MA inp2 (above):', savedRsiSettings);
-                      }
-                    } catch (error) {
-                      console.log('Error reading saved RSI settings:', error);
-                    }
-
-                    // Priority order: settings from modal > saved settings > defaults
-                    const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
-                    const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
-                    const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
-                    const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
-                    const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
-
-                    console.log('🔧 Final RSI_MA inp2 values (above):', {
-                      rsi_length: finalRsiLength,
-                      rsi_source: finalRsiSource,
-                      ma_length: finalMaLength,
-                      ma_type: finalMaType,
-                      bb_stddev: finalBbStdDev
-                    });
-
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "RSI_MA",
-                      timeframe: tf,
-                      input_params: {
-                        rsi_length: finalRsiLength,
-                        rsi_source: finalRsiSource,
-                        ma_type: finalMaType,
-                        ma_length: finalMaLength,
-                        bb_stddev: finalBbStdDev,
-                      },
-                    }
-                    break
-
-                  case "volume-ma":
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "Volume_MA",
-                      timeframe: tf,
-                      input_params: {
-                        ma_length: settings.volumeMaLength || 20,
-                      },
-                    }
-                    break
-
-                  case "bollinger":
-                    lastCondition.inp2 = {
-                      type: "I",
-                      name: "BBANDS",
-                      timeframe: tf,
-                      input: settings.band || "lowerband",
-                      input_params: {
-                        timeperiod: settings.timeperiod || 17,
-                        source: settings.bbSource || "close",
-                        // Add appropriate std dev parameter based on band type
-                        ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
-                        ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
-                        ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
-                      },
-                    }
-                    break
-
-                  case "volume":
-                    lastCondition.inp2 = createConstantInput("volume", tf)
-                    break
-
-                  case "atr":
-                    // Use the same settings from inp1 if it's an ATR indicator
-                    if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
-                      const inp1Params = lastCondition.inp1.input_params || {}
-                      lastCondition.inp2 = {
-                        type: "CUSTOM_I",
-                        name: "ATR",
-                        timeframe: tf || lastCondition.inp1.timeframe || "3h",
-                        input_params: {
-                          atr_length: inp1Params.atr_length || 14,
-                          atr_smoothing: inp1Params.atr_smoothing || "RMA",
-                        },
-                      }
-                    } else {
-                      // Default ATR settings
-                      lastCondition.inp2 = {
-                        type: "CUSTOM_I",
-                        name: "ATR",
-                        timeframe: tf,
-                        input_params: {
-                          atr_length: 14,
-                          atr_smoothing: "RMA",
-                        },
-                      }
-                    }
-                    break
-
-                  case "stochastic":
-                  case "Stochastic":
-                  case "stochastic-oscillator":
-                    // Use the same settings from inp1 if it's a Stochastic indicator
-                    if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
-                      const inp1Params = lastCondition.inp1.input_params || {}
-                      // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
-                      const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
-                      lastCondition.inp2 = {
-                        type: "CUSTOM_I",
-                        name: "Stochastic",
-                        timeframe: tf || lastCondition.inp1.timeframe || "3h",
-                        input_params: {
-                          fastk_period: (settings as any).fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
-                          slowk_period: (settings as any).slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
-                          slowd_period: (settings as any).slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
-                          output: outputValue,
-                        },
-                      }
-                    } else {
-                      // Default Stochastic settings
-                      lastCondition.inp2 = {
-                        type: "CUSTOM_I",
-                        name: "Stochastic",
-                        timeframe: tf,
-                        input_params: {
-                          fastk_period: (settings as any).fastk_period || 14,
-                          slowk_period: (settings as any).slowk_period || 3,
-                          slowd_period: (settings as any).slowd_period || 3,
-                          output: (settings as any).stochasticOutput || "slowk",
-                        },
-                      }
-                    }
-                    break
-
-                  case "open":
-                  case "high":
-                  case "low":
-                  case "close":
-                    lastCondition.inp2 = createConstantInput(settings.indicator, tf)
-                    break
-
-                  default:
-                    lastCondition.inp2 = createConstantInput(settings.indicator, tf)
-                    break
-                }
-              }
-            }
-
-            setStatements(newStatements)
-            setShowAboveModal(false)
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-          onNext={(indicator, timeframe) => {
-            setShowAboveModal(false)
-            setPendingOtherIndicator(indicator)
-            setPendingTimeframe(timeframe)
-
-            const conditionIndex =
-              activeConditionIndex ?? (statements[activeStatementIndex]?.strategy.length ?? 1) - 1
-
-            if (indicator === "rsi") {
-              setShowIndicatorModal(true)
-            } else if (indicator === "rsi-ma") {
-              setShowIndicatorModal(true)
-            } else if (indicator === "bollinger") {
-              setPendingBollingerForInp2({
-                statementIndex: activeStatementIndex,
-                conditionIndex,
-                timeframe,
-              });
-              setShowBollingerModal(true);
-            } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
-              openStochasticModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
-            } else if (indicator === "volume-ma" || indicator === "volume") {
-              // Open Volume modal for volume-ma or volume indicators
-              setShowVolumeModal(true)
-            } else if (indicator === "atr") {
-              // Open ATR modal for ATR indicator
-              openAtrModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
-            } else if (indicator === "macd") {
-              // Open MACD modal for MACD indicator
-              setEditingComponent({
-                statementIndex: activeStatementIndex,
-                conditionIndex,
-                componentType: "inp2",
-              })
-              setPendingTimeframe(timeframe)
-              setShowMacdModal(true)
-            } else if (indicator === "supertrend") {
-              // Open Super Trend modal for Super Trend indicator
-              setEditingComponent({
-                statementIndex: activeStatementIndex,
-                conditionIndex,
-                componentType: "inp2",
-              })
-              setPendingTimeframe(timeframe)
-              setShowSuperTrendModal(true)
-            } else if (indicator === "ma") {
-              // Open MA modal for MA indicator
-              setEditingComponent({
-                statementIndex: activeStatementIndex,
-                conditionIndex,
-                componentType: "inp2",
-              })
-              setPendingTimeframe(timeframe)
-              setShowMaModal(true)
-            } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
-              setShowPriceSettingsModal(true)
-            }
-          }}
-        />
-      )}
-      {showBelowModal && (
-        <BelowSettingsModal
-          onClose={() => setShowBelowModal(false)}
-          currentInp1={
-            statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]?.inp1
-          }
-          onSave={(settings) => {
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-
-            if (lastCondition.operator_name === "below") {
-              const tf = settings.timeframe || "3h"
-
-              if (settings.valueType === "value" && settings.customValue) {
-                lastCondition.inp2 = {
-                  type: "value",
-                  value: Number(settings.customValue),
-                }
-              } else if ((settings.valueType === "indicator" || settings.valueType === "other") && settings.indicator) {
-                switch (settings.indicator) {
-                  case "rsi":
-                    lastCondition.inp2 = {
-                      type: "I",
-                      name: "RSI",
-                      timeframe: tf,
-                      input_params: {
-                        timeperiod: settings.rsiLength || 14,
-                        source: settings.rsiSource?.toLowerCase() || "close",
-                      },
-                    }
-                    break
-
-                  case "rsi-ma":
-                    console.log('🔍 Received settings for RSI_MA from below modal:', settings);
-
-                    // Get saved RSI settings from localStorage for better defaults
-                    let savedRsiSettings = null;
-                    try {
-                      const savedSettings = localStorage.getItem('rsiSettings');
-                      if (savedSettings) {
-                        savedRsiSettings = JSON.parse(savedSettings);
-                        console.log('🔍 Retrieved saved RSI settings for RSI_MA inp2 (below):', savedRsiSettings);
-                      }
-                    } catch (error) {
-                      console.log('Error reading saved RSI settings:', error);
-                    }
-
-                    // Priority order: settings from modal > saved settings > defaults
-                    const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
-                    const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
-                    const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
-                    const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
-                    const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
-
-                    console.log('🔧 Final RSI_MA inp2 values (below):', {
-                      rsi_length: finalRsiLength,
-                      rsi_source: finalRsiSource,
-                      ma_length: finalMaLength,
-                      ma_type: finalMaType,
-                      bb_stddev: finalBbStdDev
-                    });
-
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "RSI_MA",
-                      timeframe: tf,
-                      input_params: {
-                        rsi_length: finalRsiLength,
-                        rsi_source: finalRsiSource,
-                        ma_type: finalMaType,
-                        ma_length: finalMaLength,
-                        bb_stddev: finalBbStdDev,
-                      },
-                    }
-                    break
-
-                  case "volume-ma":
-                    lastCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "Volume_MA",
-                      timeframe: tf,
-                      input_params: {
-                        ma_length: settings.volumeMaLength || 20,
-                      },
-                    }
-                    break
-
-                  case "bollinger":
-                    lastCondition.inp2 = {
-                      type: "I",
-                      name: "BBANDS",
-                      timeframe: tf,
-                      input: settings.band || "lowerband",
-                      input_params: {
-                        timeperiod: settings.timeperiod || 17,
-                        source: settings.bbSource || "close",
-                        // Add appropriate std dev parameter based on band type
-                        ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
-                        ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
-                        ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
-                      },
-                    }
-                    break
-
-                  case "volume":
-                    lastCondition.inp2 = createConstantInput("volume", tf)
-                    break
-
-                  case "atr":
-                    // Use the same settings from inp1 if it's an ATR indicator
-                    if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
-                      const inp1Params = lastCondition.inp1.input_params || {}
-                      lastCondition.inp2 = {
-                        type: "CUSTOM_I",
-                        name: "ATR",
-                        timeframe: tf || lastCondition.inp1.timeframe || "3h",
-                        input_params: {
-                          atr_length: inp1Params.atr_length || 14,
-                          atr_smoothing: inp1Params.atr_smoothing || "RMA",
-                        },
-                      }
-                    } else {
-                      // Default ATR settings
-                      lastCondition.inp2 = {
-                        type: "CUSTOM_I",
-                        name: "ATR",
-                        timeframe: tf,
-                        input_params: {
-                          atr_length: 14,
-                          atr_smoothing: "RMA",
-                        },
-                      }
-                    }
-                    break
-
-                  case "stochastic":
-                  case "Stochastic":
-                  case "stochastic-oscillator":
-                    // Use the same settings from inp1 if it's a Stochastic indicator
-                    if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
-                      const inp1Params = lastCondition.inp1.input_params || {}
-                      // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
-                      const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
-                      lastCondition.inp2 = {
-                        type: "CUSTOM_I",
-                        name: "Stochastic",
-                        timeframe: tf || lastCondition.inp1.timeframe || "3h",
-                        input_params: {
-                          fastk_period: (settings as any).fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
-                          slowk_period: (settings as any).slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
-                          slowd_period: (settings as any).slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
-                          output: outputValue,
-                        },
-                      }
-                    } else {
-                      // Default Stochastic settings
-                      lastCondition.inp2 = {
-                        type: "CUSTOM_I",
-                        name: "Stochastic",
-                        timeframe: tf,
-                        input_params: {
-                          fastk_period: (settings as any).fastk_period || 14,
-                          slowk_period: (settings as any).slowk_period || 3,
-                          slowd_period: (settings as any).slowd_period || 3,
-                          output: (settings as any).stochasticOutput || "slowk",
-                        },
-                      }
-                    }
-                    break
-
-                  case "open":
-                  case "high":
-                  case "low":
-                  case "close":
-                    lastCondition.inp2 = createConstantInput(settings.indicator, tf)
-                    break
-
-                  default:
-                    lastCondition.inp2 = createConstantInput(settings.indicator, tf)
-                    break
-                }
-              }
-            }
-
-            setStatements(newStatements)
-            setShowBelowModal(false)
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-          onNext={(indicator, timeframe) => {
-            setShowBelowModal(false)
-            setPendingOtherIndicator(indicator)
-            setPendingTimeframe(timeframe)
-
-            const conditionIndex =
-              activeConditionIndex ?? (statements[activeStatementIndex]?.strategy.length ?? 1) - 1
-
-            if (indicator === "rsi") {
-              setShowIndicatorModal(true)
-            } else if (indicator === "rsi-ma") {
-              setShowIndicatorModal(true)
-            } else if (indicator === "bollinger") {
-              setPendingBollingerForInp2({
-                statementIndex: activeStatementIndex,
-                conditionIndex,
-                timeframe,
-              });
-              setShowBollingerModal(true);
-            } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
-              openStochasticModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
-            } else if (indicator === "volume-ma" || indicator === "volume") {
-              // Open Volume modal for volume-ma or volume indicators
-              setPendingVolumeIndicatorType(indicator === "volume-ma" ? "volume-ma" : "volume")
-              setShowVolumeModal(true)
-            } else if (indicator === "atr") {
-              // Open ATR modal for ATR indicator
-              openAtrModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
-            } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
-              setShowPriceSettingsModal(true)
-            }
-          }}
-        />
-      )}
-
-      {showRsiModal && (
-        <RsiSettingsModal
-          onClose={() => setShowRsiModal(false)}
-          initialSettings={(() => {
-            if (editingComponent) {
-              const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
-              const indicator = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
-
-              console.log("Editing RSI component:", editingComponent, "indicator:", indicator)
-
-              if (indicator && "name" in indicator) {
-                if (indicator.name === "RSI" && "input_params" in indicator) {
-                  return {
-                    indicatorType: "rsi",
-                    rsiLength: String(indicator.input_params?.timeperiod || 14),
-                    source: indicator.input_params?.source ? indicator.input_params.source.charAt(0).toUpperCase() + indicator.input_params.source.slice(1) : "Close",
-
-                    timeframe: indicator.timeframe || "3h",
-                  }
-                } else if (indicator.name === "RSI_MA" && "input_params" in indicator) {
-                  const settings = {
-                    indicatorType: "rsi-ma",
-                    rsiLength: String(indicator.input_params?.rsi_length || 14),
-                    source: indicator.input_params?.rsi_source || "Close",
-                    maLength: String(indicator.input_params?.ma_length || 14),
-                    maType: indicator.input_params?.ma_type || "SMA",
-                    bbStdDev: String(indicator.input_params?.bb_stddev || 2.0),
-                    timeframe: indicator.timeframe || "3h",
-                  }
-                  console.log("RSI_MA initialSettings:", settings)
-                  return settings
-                }
-              }
-            } else {
-              // Fallback to original behavior
-              const currentStatement = statements[activeStatementIndex]
-              const lastCondition = currentStatement?.strategy[currentStatement.strategy.length - 1]
-              const indicator = lastCondition?.inp1
-
-              if (indicator && "name" in indicator) {
-                if (indicator.name === "RSI" && "input_params" in indicator) {
-                  return {
-                    indicatorType: "rsi",
-                    rsiLength: String(indicator.input_params?.timeperiod || 14),
-                    source: indicator.input_params?.source ? indicator.input_params.source.charAt(0).toUpperCase() + indicator.input_params.source.slice(1) : "Close",
-
-                    timeframe: indicator.timeframe || "3h",
-                  }
-                } else if (indicator.name === "RSI_MA" && "input_params" in indicator) {
-                  return {
-                    indicatorType: "rsi-ma",
-                    rsiLength: String(indicator.input_params?.rsi_length || 14),
-                    source: indicator.input_params?.rsi_source || "Close",
-                    maLength: String(indicator.input_params?.ma_length || 14),
-                    maType: indicator.input_params?.ma_type || "SMA",
-                    bbStdDev: String(indicator.input_params?.bb_stddev || 2.0),
-                    timeframe: indicator.timeframe || "3h",
-                  }
-                }
-              }
-            }
-            return undefined
-          })()}
-          onSave={(settings) => {
-            // Always update the rsiMaSettings state with the latest MA settings
-            setRsiMaSettings({
-              rsi_length: Number(settings.rsiLength),
-              rsi_source: settings.source || "Close",
-              ma_type: settings.maType || "SMA",
-              ma_length: Number(settings.maLength),
-              bb_stddev: Number(settings.bbStdDev) || 2.0,
-            })
-            // Update RSI settings
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-
-            if (editingComponent) {
-              const condition = currentStatement.strategy[editingComponent.conditionIndex]
-              const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
-
-              if (targetIndicator && "timeframe" in targetIndicator) {
-                if (settings.indicatorType === "rsi-ma") {
-                  // Update to RSI_MA
-                  const updatedIndicator = {
-                    type: "CUSTOM_I",
-                    name: "RSI_MA",
-                    timeframe: settings.timeframe || "3h",
-                    input_params: {
-                      rsi_length: Number(settings.rsiLength),
-                      rsi_source: settings.source || "Close",
-                      ma_type: settings.maType || "SMA",
-                      ma_length: Number(settings.maLength),
-                      bb_stddev: Number(settings.bbStdDev) || 2.0,
-                    },
-                  }
-
-                  if (editingComponent.componentType === "inp1") {
-                    condition.inp1 = updatedIndicator
-                  } else {
-                    condition.inp2 = updatedIndicator
-                  }
-                } else {
-                  // Regular RSI
-                  const updatedIndicator = {
-                    type: "I",
-                    name: "RSI",
-                    timeframe: targetIndicator.timeframe,
-                    input_params: {
-                      timeperiod: Number(settings.rsiLength),
-                      source: settings.source?.toLowerCase() || "close",
-
-                    },
-                  }
-
-                  if (editingComponent.componentType === "inp1") {
-                    condition.inp1 = updatedIndicator
-                  } else {
-                    condition.inp2 = updatedIndicator
-                  }
-                }
-              }
-            } else {
-              // Fallback to original behavior
-              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-
-              if (lastCondition.inp1 && "timeframe" in lastCondition.inp1) {
-                if (settings.indicatorType === "rsi-ma") {
-                  // Update to RSI_MA
-                  lastCondition.inp1 = {
-                    type: "CUSTOM_I",
-                    name: "RSI_MA",
-                    timeframe: settings.timeframe || "3h",
-                    input_params: {
-                      rsi_length: Number(settings.rsiLength),
-                      rsi_source: settings.source || "Close",
-                      ma_type: settings.maType || "SMA",
-                      ma_length: Number(settings.maLength),
-                      bb_stddev: Number(settings.bbStdDev) || 2.0,
-                    },
-                  }
-                } else {
-                  // Regular RSI
-                  lastCondition.inp1 = {
-                    type: "I",
-                    name: "RSI",
-                    timeframe: lastCondition.inp1.timeframe,
-                    input_params: {
-                      timeperiod: Number(settings.rsiLength),
-                      source: settings.source?.toLowerCase() || "close",
-
-                    },
-                  }
-                }
-              }
-            }
-
-            setStatements(newStatements)
-            setShowRsiModal(false)
-            setEditingComponent(null)
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-        />
-      )}
-      {showBollingerModal && (
-        <BollingerBandsSettingsModal
-          onClose={() => setShowBollingerModal(false)}
-          initialSettings={(() => {
-            if (editingComponent) {
-              const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
-              const indicator = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
-
-              if (indicator && "input_params" in indicator) {
-                return {
-                  timeperiod: indicator.input_params?.timeperiod || 20,
-                  input: indicator.input || "upperband",
-                  nbdevup: indicator.input_params?.nbdevup,
-                  nbdevdn: indicator.input_params?.nbdevdn,
-                  source: indicator.input_params?.source || "high",
-                }
-              }
-            } else {
-              // Fallback: determine which indicator to use based on the same logic as handleAddComponent
-              // If there's an operator_name, we're editing inp2, otherwise inp1
-              const currentStatement = statements[activeStatementIndex]
-              const lastCondition = currentStatement?.strategy[currentStatement.strategy.length - 1]
-
-              let indicator = null
-
-              // Use the same logic as handleAddComponent: if inp1 exists and has operator, we're editing inp2
-              if (lastCondition?.inp1 && lastCondition?.operator_name) {
-                // We're editing inp2
-                if (lastCondition.inp2 && "name" in lastCondition.inp2 && lastCondition.inp2.name === "BBANDS") {
-                  indicator = lastCondition.inp2
-                }
-                // If inp2 doesn't have BBANDS yet, don't use inp1's settings - return undefined for new indicator
-              } else {
-                // We're editing inp1
-                if (lastCondition?.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
-                  indicator = lastCondition.inp1
-                }
-                // If inp1 doesn't have BBANDS yet, return undefined for new indicator
-              }
-
-              if (indicator && "input_params" in indicator) {
-                return {
-                  timeperiod: indicator.input_params?.timeperiod || 20,
-                  input: indicator.input || "upperband",
-                  nbdevup: indicator.input_params?.nbdevup,
-                  nbdevdn: indicator.input_params?.nbdevdn,
-                  source: indicator.input_params?.source || "high",
-                }
-              }
-            }
-            return undefined
-          })()}
-          onSave={(settings) => {
-            const newStatements = [...statements];
-
-            if (pendingBollingerForInp2) {
-              // Set inp2 of the correct condition
-              const { statementIndex, conditionIndex, timeframe } = pendingBollingerForInp2;
-              const condition = newStatements[statementIndex].strategy[conditionIndex];
-              condition.inp2 = {
-                type: "I",
-                name: "BBANDS",
-                timeframe: timeframe,
-                input: settings.input,
-                input_params: settings.input_params,
-              };
-              setPendingBollingerForInp2(null);
-            } else if (editingComponent) {
-              const condition = newStatements[editingComponent.statementIndex].strategy[editingComponent.conditionIndex]
-              const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
-
-              if (targetIndicator && "name" in targetIndicator && targetIndicator.name === "BBANDS") {
-                // Preserve the name and type when updating
-                targetIndicator.input = settings.input
-                targetIndicator.input_params = settings.input_params
-                // Ensure name is always "BBANDS" (should already be set, but ensure it)
-                targetIndicator.name = "BBANDS"
-                if (!targetIndicator.type) {
-                  targetIndicator.type = "I"
-                }
-              }
-            } else {
-              // Fallback: determine which input to update based on the same logic as handleAddComponent
-              // If there's an operator_name, we're updating inp2, otherwise inp1
+            onSave={(settings) => {
+              const newStatements = [...statements]
               const currentStatement = newStatements[activeStatementIndex]
               const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
-              let targetIndicator = null
+              if (lastCondition.operator_name === "above") {
+                const tf = settings.timeframe || "3h"
 
-              // Use the same logic as handleAddComponent: if inp1 exists and has operator, we're adding to inp2
-              if (lastCondition.inp1 && lastCondition.operator_name) {
-                // We're updating inp2
-                if (lastCondition.inp2 && "name" in lastCondition.inp2 && lastCondition.inp2.name === "BBANDS") {
-                  targetIndicator = lastCondition.inp2
-                } else if (!lastCondition.inp2) {
-                  // inp2 doesn't exist yet, create it
+                if (settings.valueType === "value" && settings.customValue) {
                   lastCondition.inp2 = {
-                    type: "I",
-                    name: "BBANDS",
-                    timeframe: settings.timeframe || "3h",
-                    input: settings.input,
-                    input_params: settings.input_params,
+                    type: "value",
+                    value: Number(settings.customValue),
                   }
-                  setStatements(newStatements)
-                  setShowBollingerModal(false)
-                  setEditingComponent(null)
-                  setTimeout(() => {
-                    searchInputRefs.current[activeStatementIndex]?.focus()
-                  }, 100)
-                  return
+                } else if ((settings.valueType === "indicator" || settings.valueType === "other") && settings.indicator) {
+                  switch (settings.indicator) {
+                    case "rsi":
+                      lastCondition.inp2 = {
+                        type: "I",
+                        name: "RSI",
+                        timeframe: tf,
+                        input_params: {
+                          timeperiod: settings.rsiLength || 14,
+                          source: settings.rsiSource?.toLowerCase() || "close",
+                        },
+                      }
+                      break
+
+                    case "rsi-ma":
+                      console.log('🔍 Received settings for RSI_MA from above modal:', settings);
+
+                      // Get saved RSI settings from localStorage for better defaults
+                      let savedRsiSettings = null;
+                      try {
+                        const savedSettings = localStorage.getItem('rsiSettings');
+                        if (savedSettings) {
+                          savedRsiSettings = JSON.parse(savedSettings);
+                          console.log('🔍 Retrieved saved RSI settings for RSI_MA inp2 (above):', savedRsiSettings);
+                        }
+                      } catch (error) {
+                        console.log('Error reading saved RSI settings:', error);
+                      }
+
+                      // Priority order: settings from modal > saved settings > defaults
+                      const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
+                      const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
+                      const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
+                      const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
+                      const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
+
+                      console.log('🔧 Final RSI_MA inp2 values (above):', {
+                        rsi_length: finalRsiLength,
+                        rsi_source: finalRsiSource,
+                        ma_length: finalMaLength,
+                        ma_type: finalMaType,
+                        bb_stddev: finalBbStdDev
+                      });
+
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "RSI_MA",
+                        timeframe: tf,
+                        input_params: {
+                          rsi_length: finalRsiLength,
+                          rsi_source: finalRsiSource,
+                          ma_type: finalMaType,
+                          ma_length: finalMaLength,
+                          bb_stddev: finalBbStdDev,
+                        },
+                      }
+                      break
+
+                    case "volume-ma":
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "Volume_MA",
+                        timeframe: tf,
+                        input_params: {
+                          ma_length: settings.volumeMaLength || 20,
+                        },
+                      }
+                      break
+
+                    case "bollinger":
+                      lastCondition.inp2 = {
+                        type: "I",
+                        name: "BBANDS",
+                        timeframe: tf,
+                        input: settings.band || "lowerband",
+                        input_params: {
+                          timeperiod: settings.timeperiod || 17,
+                          source: settings.bbSource || "close",
+                          // Add appropriate std dev parameter based on band type
+                          ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
+                          ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
+                          ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
+                        },
+                      }
+                      break
+
+                    case "volume":
+                      lastCondition.inp2 = createConstantInput("volume", tf)
+                      break
+
+                    case "atr":
+                      // Use the same settings from inp1 if it's an ATR indicator
+                      if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
+                        const inp1Params = lastCondition.inp1.input_params || {}
+                        lastCondition.inp2 = {
+                          type: "CUSTOM_I",
+                          name: "ATR",
+                          timeframe: tf || lastCondition.inp1.timeframe || "3h",
+                          input_params: {
+                            atr_length: inp1Params.atr_length || 14,
+                            atr_smoothing: inp1Params.atr_smoothing || "RMA",
+                          },
+                        }
+                      } else {
+                        // Default ATR settings
+                        lastCondition.inp2 = {
+                          type: "CUSTOM_I",
+                          name: "ATR",
+                          timeframe: tf,
+                          input_params: {
+                            atr_length: 14,
+                            atr_smoothing: "RMA",
+                          },
+                        }
+                      }
+                      break
+
+                    case "stochastic":
+                    case "Stochastic":
+                    case "stochastic-oscillator":
+                      // Use the same settings from inp1 if it's a Stochastic indicator
+                      if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
+                        const inp1Params = lastCondition.inp1.input_params || {}
+                        // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
+                        const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
+                        lastCondition.inp2 = {
+                          type: "CUSTOM_I",
+                          name: "Stochastic",
+                          timeframe: tf || lastCondition.inp1.timeframe || "3h",
+                          input_params: {
+                            fastk_period: (settings as any).fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
+                            slowk_period: (settings as any).slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                            slowd_period: (settings as any).slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                            output: outputValue,
+                          },
+                        }
+                      } else {
+                        // Default Stochastic settings
+                        lastCondition.inp2 = {
+                          type: "CUSTOM_I",
+                          name: "Stochastic",
+                          timeframe: tf,
+                          input_params: {
+                            fastk_period: (settings as any).fastk_period || 14,
+                            slowk_period: (settings as any).slowk_period || 3,
+                            slowd_period: (settings as any).slowd_period || 3,
+                            output: (settings as any).stochasticOutput || "slowk",
+                          },
+                        }
+                      }
+                      break
+
+                    case "open":
+                    case "high":
+                    case "low":
+                    case "close":
+                      lastCondition.inp2 = createConstantInput(settings.indicator, tf)
+                      break
+
+                    default:
+                      lastCondition.inp2 = createConstantInput(settings.indicator, tf)
+                      break
+                  }
                 }
-              } else {
-                // We're updating inp1
-                if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
-                  targetIndicator = lastCondition.inp1
-                } else if (!lastCondition.inp1) {
-                  // inp1 doesn't exist yet, create it
-                  lastCondition.inp1 = {
-                    type: "I",
-                    name: "BBANDS",
-                    timeframe: settings.timeframe || "3h",
-                    input: settings.input,
-                    input_params: settings.input_params,
-                  }
-                  setStatements(newStatements)
-                  setShowBollingerModal(false)
-                  setEditingComponent(null)
-                  setTimeout(() => {
-                    searchInputRefs.current[activeStatementIndex]?.focus()
-                  }, 100)
-                  return
+
+                // Save the offset configuration
+                lastCondition.offset = {
+                  logical_operator: (settings as any).offsetLogicalOperator || ">=",
+                  value: (settings as any).offsetValue || 0,
+                  unit: (settings as any).offsetUnit || ""
                 }
               }
 
-              if (targetIndicator) {
-                // Preserve the name and type when updating
-                targetIndicator.input = settings.input
-                targetIndicator.input_params = settings.input_params
-                // Ensure name is always "BBANDS" (should already be set, but ensure it)
-                if ("name" in targetIndicator) {
-                  targetIndicator.name = "BBANDS"
+              setStatements(newStatements)
+              setShowAboveModal(false)
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+            onNext={(indicator, timeframe) => {
+              setShowAboveModal(false)
+              setPendingOtherIndicator(indicator)
+              setPendingTimeframe(timeframe)
+
+              const conditionIndex =
+                activeConditionIndex ?? (statements[activeStatementIndex]?.strategy.length ?? 1) - 1
+
+              if (indicator === "rsi") {
+                setShowIndicatorModal(true)
+              } else if (indicator === "rsi-ma") {
+                setShowIndicatorModal(true)
+              } else if (indicator === "bollinger") {
+                setPendingBollingerForInp2({
+                  statementIndex: activeStatementIndex,
+                  conditionIndex,
+                  timeframe,
+                });
+                setShowBollingerModal(true);
+              } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
+                openStochasticModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
+              } else if (indicator === "volume-ma" || indicator === "volume") {
+                // Open Volume modal for volume-ma or volume indicators
+                setShowVolumeModal(true)
+              } else if (indicator === "atr") {
+                // Open ATR modal for ATR indicator
+                openAtrModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
+              } else if (indicator === "macd") {
+                // Open MACD modal for MACD indicator
+                setEditingComponent({
+                  statementIndex: activeStatementIndex,
+                  conditionIndex,
+                  componentType: "inp2",
+                })
+                setPendingTimeframe(timeframe)
+                setShowMacdModal(true)
+              } else if (indicator === "supertrend") {
+                // Open Super Trend modal for Super Trend indicator
+                setEditingComponent({
+                  statementIndex: activeStatementIndex,
+                  conditionIndex,
+                  componentType: "inp2",
+                })
+                setPendingTimeframe(timeframe)
+                setShowSuperTrendModal(true)
+              } else if (indicator === "ma") {
+                // Open MA modal for MA indicator
+                setEditingComponent({
+                  statementIndex: activeStatementIndex,
+                  conditionIndex,
+                  componentType: "inp2",
+                })
+                setPendingTimeframe(timeframe)
+                setShowMaModal(true)
+              } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
+                setShowPriceSettingsModal(true)
+              }
+            }}
+          />
+        )}
+        {showBelowModal && (
+          <BelowSettingsModal
+            onClose={() => setShowBelowModal(false)}
+            currentInp1={
+              statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]?.inp1
+            }
+            onSave={(settings) => {
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
+              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+              if (lastCondition.operator_name === "below") {
+                const tf = settings.timeframe || "3h"
+
+                if (settings.valueType === "value" && settings.customValue) {
+                  lastCondition.inp2 = {
+                    type: "value",
+                    value: Number(settings.customValue),
+                  }
+                } else if ((settings.valueType === "indicator" || settings.valueType === "other") && settings.indicator) {
+                  switch (settings.indicator) {
+                    case "rsi":
+                      lastCondition.inp2 = {
+                        type: "I",
+                        name: "RSI",
+                        timeframe: tf,
+                        input_params: {
+                          timeperiod: settings.rsiLength || 14,
+                          source: settings.rsiSource?.toLowerCase() || "close",
+                        },
+                      }
+                      break
+
+                    case "rsi-ma":
+                      console.log('🔍 Received settings for RSI_MA from below modal:', settings);
+
+                      // Get saved RSI settings from localStorage for better defaults
+                      let savedRsiSettings = null;
+                      try {
+                        const savedSettings = localStorage.getItem('rsiSettings');
+                        if (savedSettings) {
+                          savedRsiSettings = JSON.parse(savedSettings);
+                          console.log('🔍 Retrieved saved RSI settings for RSI_MA inp2 (below):', savedRsiSettings);
+                        }
+                      } catch (error) {
+                        console.log('Error reading saved RSI settings:', error);
+                      }
+
+                      // Priority order: settings from modal > saved settings > defaults
+                      const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
+                      const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
+                      const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
+                      const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
+                      const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
+
+                      console.log('🔧 Final RSI_MA inp2 values (below):', {
+                        rsi_length: finalRsiLength,
+                        rsi_source: finalRsiSource,
+                        ma_length: finalMaLength,
+                        ma_type: finalMaType,
+                        bb_stddev: finalBbStdDev
+                      });
+
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "RSI_MA",
+                        timeframe: tf,
+                        input_params: {
+                          rsi_length: finalRsiLength,
+                          rsi_source: finalRsiSource,
+                          ma_type: finalMaType,
+                          ma_length: finalMaLength,
+                          bb_stddev: finalBbStdDev,
+                        },
+                      }
+                      break
+
+                    case "volume-ma":
+                      lastCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "Volume_MA",
+                        timeframe: tf,
+                        input_params: {
+                          ma_length: settings.volumeMaLength || 20,
+                        },
+                      }
+                      break
+
+                    case "bollinger":
+                      lastCondition.inp2 = {
+                        type: "I",
+                        name: "BBANDS",
+                        timeframe: tf,
+                        input: settings.band || "lowerband",
+                        input_params: {
+                          timeperiod: settings.timeperiod || 17,
+                          source: settings.bbSource || "close",
+                          // Add appropriate std dev parameter based on band type
+                          ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
+                          ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
+                          ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
+                        },
+                      }
+                      break
+
+                    case "volume":
+                      lastCondition.inp2 = createConstantInput("volume", tf)
+                      break
+
+                    case "atr":
+                      // Use the same settings from inp1 if it's an ATR indicator
+                      if (lastCondition.inp1 && lastCondition.inp1.name === "ATR") {
+                        const inp1Params = lastCondition.inp1.input_params || {}
+                        lastCondition.inp2 = {
+                          type: "CUSTOM_I",
+                          name: "ATR",
+                          timeframe: tf || lastCondition.inp1.timeframe || "3h",
+                          input_params: {
+                            atr_length: inp1Params.atr_length || 14,
+                            atr_smoothing: inp1Params.atr_smoothing || "RMA",
+                          },
+                        }
+                      } else {
+                        // Default ATR settings
+                        lastCondition.inp2 = {
+                          type: "CUSTOM_I",
+                          name: "ATR",
+                          timeframe: tf,
+                          input_params: {
+                            atr_length: 14,
+                            atr_smoothing: "RMA",
+                          },
+                        }
+                      }
+                      break
+
+                    case "stochastic":
+                    case "Stochastic":
+                    case "stochastic-oscillator":
+                      // Use the same settings from inp1 if it's a Stochastic indicator
+                      if (lastCondition.inp1 && lastCondition.inp1.name === "Stochastic") {
+                        const inp1Params = lastCondition.inp1.input_params || {}
+                        // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
+                        const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
+                        lastCondition.inp2 = {
+                          type: "CUSTOM_I",
+                          name: "Stochastic",
+                          timeframe: tf || lastCondition.inp1.timeframe || "3h",
+                          input_params: {
+                            fastk_period: (settings as any).fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
+                            slowk_period: (settings as any).slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                            slowd_period: (settings as any).slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                            output: outputValue,
+                          },
+                        }
+                      } else {
+                        // Default Stochastic settings
+                        lastCondition.inp2 = {
+                          type: "CUSTOM_I",
+                          name: "Stochastic",
+                          timeframe: tf,
+                          input_params: {
+                            fastk_period: (settings as any).fastk_period || 14,
+                            slowk_period: (settings as any).slowk_period || 3,
+                            slowd_period: (settings as any).slowd_period || 3,
+                            output: (settings as any).stochasticOutput || "slowk",
+                          },
+                        }
+                      }
+                      break
+
+                    case "open":
+                    case "high":
+                    case "low":
+                    case "close":
+                      lastCondition.inp2 = createConstantInput(settings.indicator, tf)
+                      break
+
+                    default:
+                      lastCondition.inp2 = createConstantInput(settings.indicator, tf)
+                      break
+                  }
                 }
-                if (!targetIndicator.type) {
-                  targetIndicator.type = "I"
+
+                // Save the offset configuration
+                lastCondition.offset = {
+                  logical_operator: (settings as any).offsetLogicalOperator || ">=",
+                  value: (settings as any).offsetValue || 0,
+                  unit: (settings as any).offsetUnit || ""
+                }
+              }
+
+              setStatements(newStatements)
+              setShowBelowModal(false)
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+            onNext={(indicator, timeframe) => {
+              setShowBelowModal(false)
+              setPendingOtherIndicator(indicator)
+              setPendingTimeframe(timeframe)
+
+              const conditionIndex =
+                activeConditionIndex ?? (statements[activeStatementIndex]?.strategy.length ?? 1) - 1
+
+              if (indicator === "rsi") {
+                setShowIndicatorModal(true)
+              } else if (indicator === "rsi-ma") {
+                setShowIndicatorModal(true)
+              } else if (indicator === "bollinger") {
+                setPendingBollingerForInp2({
+                  statementIndex: activeStatementIndex,
+                  conditionIndex,
+                  timeframe,
+                });
+                setShowBollingerModal(true);
+              } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
+                openStochasticModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
+              } else if (indicator === "volume-ma" || indicator === "volume") {
+                // Open Volume modal for volume-ma or volume indicators
+                setPendingVolumeIndicatorType(indicator === "volume-ma" ? "volume-ma" : "volume")
+                setShowVolumeModal(true)
+              } else if (indicator === "atr") {
+                // Open ATR modal for ATR indicator
+                openAtrModal(activeStatementIndex, conditionIndex, "inp2", timeframe)
+              } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
+                setShowPriceSettingsModal(true)
+              }
+            }}
+          />
+        )}
+
+        {showRsiModal && (
+          <RsiSettingsModal
+            onClose={() => setShowRsiModal(false)}
+            initialSettings={(() => {
+              if (editingComponent) {
+                const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+                const indicator = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
+
+                console.log("Editing RSI component:", editingComponent, "indicator:", indicator)
+
+                if (indicator && "name" in indicator) {
+                  if (indicator.name === "RSI" && "input_params" in indicator) {
+                    return {
+                      indicatorType: "rsi",
+                      rsiLength: String(indicator.input_params?.timeperiod || 14),
+                      source: indicator.input_params?.source ? indicator.input_params.source.charAt(0).toUpperCase() + indicator.input_params.source.slice(1) : "Close",
+
+                      timeframe: indicator.timeframe || "3h",
+                    }
+                  } else if (indicator.name === "RSI_MA" && "input_params" in indicator) {
+                    const settings = {
+                      indicatorType: "rsi-ma",
+                      rsiLength: String(indicator.input_params?.rsi_length || 14),
+                      source: indicator.input_params?.rsi_source || "Close",
+                      maLength: String(indicator.input_params?.ma_length || 14),
+                      maType: indicator.input_params?.ma_type || "SMA",
+                      bbStdDev: String(indicator.input_params?.bb_stddev || 2.0),
+                      timeframe: indicator.timeframe || "3h",
+                    }
+                    console.log("RSI_MA initialSettings:", settings)
+                    return settings
+                  }
                 }
               } else {
-                // Creating a new indicator - determine if it should be inp1 or inp2
+                // Fallback to original behavior
+                const currentStatement = statements[activeStatementIndex]
+                const lastCondition = currentStatement?.strategy[currentStatement.strategy.length - 1]
+                const indicator = lastCondition?.inp1
+
+                if (indicator && "name" in indicator) {
+                  if (indicator.name === "RSI" && "input_params" in indicator) {
+                    return {
+                      indicatorType: "rsi",
+                      rsiLength: String(indicator.input_params?.timeperiod || 14),
+                      source: indicator.input_params?.source ? indicator.input_params.source.charAt(0).toUpperCase() + indicator.input_params.source.slice(1) : "Close",
+
+                      timeframe: indicator.timeframe || "3h",
+                    }
+                  } else if (indicator.name === "RSI_MA" && "input_params" in indicator) {
+                    return {
+                      indicatorType: "rsi-ma",
+                      rsiLength: String(indicator.input_params?.rsi_length || 14),
+                      source: indicator.input_params?.rsi_source || "Close",
+                      maLength: String(indicator.input_params?.ma_length || 14),
+                      maType: indicator.input_params?.ma_type || "SMA",
+                      bbStdDev: String(indicator.input_params?.bb_stddev || 2.0),
+                      timeframe: indicator.timeframe || "3h",
+                    }
+                  }
+                }
+              }
+              return undefined
+            })()}
+            onSave={(settings) => {
+              // Always update the rsiMaSettings state with the latest MA settings
+              setRsiMaSettings({
+                rsi_length: Number(settings.rsiLength),
+                rsi_source: settings.source || "Close",
+                ma_type: settings.maType || "SMA",
+                ma_length: Number(settings.maLength),
+                bb_stddev: Number(settings.bbStdDev) || 2.0,
+              })
+              // Update RSI settings
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
+
+              if (editingComponent) {
+                const condition = currentStatement.strategy[editingComponent.conditionIndex]
+                const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
+
+                if (targetIndicator && "timeframe" in targetIndicator) {
+                  if (settings.indicatorType === "rsi-ma") {
+                    // Update to RSI_MA
+                    const updatedIndicator = {
+                      type: "CUSTOM_I",
+                      name: "RSI_MA",
+                      timeframe: settings.timeframe || "3h",
+                      input_params: {
+                        rsi_length: Number(settings.rsiLength),
+                        rsi_source: settings.source || "Close",
+                        ma_type: settings.maType || "SMA",
+                        ma_length: Number(settings.maLength),
+                        bb_stddev: Number(settings.bbStdDev) || 2.0,
+                      },
+                    }
+
+                    if (editingComponent.componentType === "inp1") {
+                      condition.inp1 = updatedIndicator
+                    } else {
+                      condition.inp2 = updatedIndicator
+                    }
+                  } else {
+                    // Regular RSI
+                    const updatedIndicator = {
+                      type: "I",
+                      name: "RSI",
+                      timeframe: targetIndicator.timeframe,
+                      input_params: {
+                        timeperiod: Number(settings.rsiLength),
+                        source: settings.source?.toLowerCase() || "close",
+
+                      },
+                    }
+
+                    if (editingComponent.componentType === "inp1") {
+                      condition.inp1 = updatedIndicator
+                    } else {
+                      condition.inp2 = updatedIndicator
+                    }
+                  }
+                }
+              } else {
+                // Fallback to original behavior
+                const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+                if (lastCondition.inp1 && "timeframe" in lastCondition.inp1) {
+                  if (settings.indicatorType === "rsi-ma") {
+                    // Update to RSI_MA
+                    lastCondition.inp1 = {
+                      type: "CUSTOM_I",
+                      name: "RSI_MA",
+                      timeframe: settings.timeframe || "3h",
+                      input_params: {
+                        rsi_length: Number(settings.rsiLength),
+                        rsi_source: settings.source || "Close",
+                        ma_type: settings.maType || "SMA",
+                        ma_length: Number(settings.maLength),
+                        bb_stddev: Number(settings.bbStdDev) || 2.0,
+                      },
+                    }
+                  } else {
+                    // Regular RSI
+                    lastCondition.inp1 = {
+                      type: "I",
+                      name: "RSI",
+                      timeframe: lastCondition.inp1.timeframe,
+                      input_params: {
+                        timeperiod: Number(settings.rsiLength),
+                        source: settings.source?.toLowerCase() || "close",
+
+                      },
+                    }
+                  }
+                }
+              }
+
+              setStatements(newStatements)
+              setShowRsiModal(false)
+              setEditingComponent(null)
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+          />
+        )}
+        {showBollingerModal && (
+          <BollingerBandsSettingsModal
+            onClose={() => setShowBollingerModal(false)}
+            initialSettings={(() => {
+              if (editingComponent) {
+                const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+                const indicator = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
+
+                if (indicator && "input_params" in indicator) {
+                  return {
+                    timeperiod: indicator.input_params?.timeperiod || 20,
+                    input: indicator.input || "upperband",
+                    nbdevup: indicator.input_params?.nbdevup,
+                    nbdevdn: indicator.input_params?.nbdevdn,
+                    source: indicator.input_params?.source || "high",
+                  }
+                }
+              } else {
+                // Fallback: determine which indicator to use based on the same logic as handleAddComponent
+                // If there's an operator_name, we're editing inp2, otherwise inp1
+                const currentStatement = statements[activeStatementIndex]
+                const lastCondition = currentStatement?.strategy[currentStatement.strategy.length - 1]
+
+                let indicator = null
+
+                // Use the same logic as handleAddComponent: if inp1 exists and has operator, we're editing inp2
+                if (lastCondition?.inp1 && lastCondition?.operator_name) {
+                  // We're editing inp2
+                  if (lastCondition.inp2 && "name" in lastCondition.inp2 && lastCondition.inp2.name === "BBANDS") {
+                    indicator = lastCondition.inp2
+                  }
+                  // If inp2 doesn't have BBANDS yet, don't use inp1's settings - return undefined for new indicator
+                } else {
+                  // We're editing inp1
+                  if (lastCondition?.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
+                    indicator = lastCondition.inp1
+                  }
+                  // If inp1 doesn't have BBANDS yet, return undefined for new indicator
+                }
+
+                if (indicator && "input_params" in indicator) {
+                  return {
+                    timeperiod: indicator.input_params?.timeperiod || 20,
+                    input: indicator.input || "upperband",
+                    nbdevup: indicator.input_params?.nbdevup,
+                    nbdevdn: indicator.input_params?.nbdevdn,
+                    source: indicator.input_params?.source || "high",
+                  }
+                }
+              }
+              return undefined
+            })()}
+            onSave={(settings) => {
+              const newStatements = [...statements];
+
+              if (pendingBollingerForInp2) {
+                // Set inp2 of the correct condition
+                const { statementIndex, conditionIndex, timeframe } = pendingBollingerForInp2;
+                const condition = newStatements[statementIndex].strategy[conditionIndex];
+                condition.inp2 = {
+                  type: "I",
+                  name: "BBANDS",
+                  timeframe: timeframe,
+                  input: settings.input,
+                  input_params: settings.input_params,
+                };
+                setPendingBollingerForInp2(null);
+              } else if (editingComponent) {
+                const condition = newStatements[editingComponent.statementIndex].strategy[editingComponent.conditionIndex]
+                const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
+
+                if (targetIndicator && "name" in targetIndicator && targetIndicator.name === "BBANDS") {
+                  // Preserve the name and type when updating
+                  targetIndicator.input = settings.input
+                  targetIndicator.input_params = settings.input_params
+                  // Ensure name is always "BBANDS" (should already be set, but ensure it)
+                  targetIndicator.name = "BBANDS"
+                  if (!targetIndicator.type) {
+                    targetIndicator.type = "I"
+                  }
+                }
+              } else {
+                // Fallback: determine which input to update based on the same logic as handleAddComponent
+                // If there's an operator_name, we're updating inp2, otherwise inp1
+                const currentStatement = newStatements[activeStatementIndex]
+                const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+                let targetIndicator = null
+
+                // Use the same logic as handleAddComponent: if inp1 exists and has operator, we're adding to inp2
                 if (lastCondition.inp1 && lastCondition.operator_name) {
-                  // We're adding to inp2
-                  lastCondition.inp2 = {
-                    type: "I",
-                    name: "BBANDS",
-                    timeframe: settings.timeframe || "3h",
-                    input: settings.input,
-                    input_params: settings.input_params,
+                  // We're updating inp2
+                  if (lastCondition.inp2 && "name" in lastCondition.inp2 && lastCondition.inp2.name === "BBANDS") {
+                    targetIndicator = lastCondition.inp2
+                  } else if (!lastCondition.inp2) {
+                    // inp2 doesn't exist yet, create it
+                    lastCondition.inp2 = {
+                      type: "I",
+                      name: "BBANDS",
+                      timeframe: settings.timeframe || "3h",
+                      input: settings.input,
+                      input_params: settings.input_params,
+                    }
+                    setStatements(newStatements)
+                    setShowBollingerModal(false)
+                    setEditingComponent(null)
+                    setTimeout(() => {
+                      searchInputRefs.current[activeStatementIndex]?.focus()
+                    }, 100)
+                    return
                   }
                 } else {
-                  // We're adding to inp1
-                  lastCondition.inp1 = {
-                    type: "I",
-                    name: "BBANDS",
-                    timeframe: settings.timeframe || "3h",
-                    input: settings.input,
-                    input_params: settings.input_params,
+                  // We're updating inp1
+                  if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
+                    targetIndicator = lastCondition.inp1
+                  } else if (!lastCondition.inp1) {
+                    // inp1 doesn't exist yet, create it
+                    lastCondition.inp1 = {
+                      type: "I",
+                      name: "BBANDS",
+                      timeframe: settings.timeframe || "3h",
+                      input: settings.input,
+                      input_params: settings.input_params,
+                    }
+                    setStatements(newStatements)
+                    setShowBollingerModal(false)
+                    setEditingComponent(null)
+                    setTimeout(() => {
+                      searchInputRefs.current[activeStatementIndex]?.focus()
+                    }, 100)
+                    return
+                  }
+                }
+
+                if (targetIndicator) {
+                  // Preserve the name and type when updating
+                  targetIndicator.input = settings.input
+                  targetIndicator.input_params = settings.input_params
+                  // Ensure name is always "BBANDS" (should already be set, but ensure it)
+                  if ("name" in targetIndicator) {
+                    targetIndicator.name = "BBANDS"
+                  }
+                  if (!targetIndicator.type) {
+                    targetIndicator.type = "I"
+                  }
+                } else {
+                  // Creating a new indicator - determine if it should be inp1 or inp2
+                  if (lastCondition.inp1 && lastCondition.operator_name) {
+                    // We're adding to inp2
+                    lastCondition.inp2 = {
+                      type: "I",
+                      name: "BBANDS",
+                      timeframe: settings.timeframe || "3h",
+                      input: settings.input,
+                      input_params: settings.input_params,
+                    }
+                  } else {
+                    // We're adding to inp1
+                    lastCondition.inp1 = {
+                      type: "I",
+                      name: "BBANDS",
+                      timeframe: settings.timeframe || "3h",
+                      input: settings.input,
+                      input_params: settings.input_params,
+                    }
                   }
                 }
               }
-            }
 
-            setStatements(newStatements);
-            setShowBollingerModal(false);
-            setEditingComponent(null);
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus();
-            }, 100);
-          }}
-        />
-      )}
-      {showVolumeModal && (
-        <VolumeSettingsModal
-          onClose={() => {
-            setShowVolumeModal(false)
-            setPendingVolumeIndicatorType(null)
-          }}
-          initialIndicatorType={pendingVolumeIndicatorType || undefined}
-          onSave={(settings) => {
-            // Update Volume settings
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
+              setStatements(newStatements);
+              setShowBollingerModal(false);
+              setEditingComponent(null);
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus();
+              }, 100);
+            }}
+          />
+        )}
+        {showVolumeModal && (
+          <VolumeSettingsModal
+            onClose={() => {
+              setShowVolumeModal(false)
+              setPendingVolumeIndicatorType(null)
+            }}
+            initialIndicatorType={pendingVolumeIndicatorType || undefined}
+            onSave={(settings) => {
+              // Update Volume settings
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
 
-            if (editingComponent) {
-              const condition = currentStatement.strategy[editingComponent.conditionIndex]
-              const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
+              if (editingComponent) {
+                const condition = currentStatement.strategy[editingComponent.conditionIndex]
+                const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
 
-              if (targetIndicator && "timeframe" in targetIndicator) {
-                if (settings.indicatorType === "volume-ma") {
-                  // Update to Volume_MA
-                  const updatedIndicator = {
+                if (targetIndicator && "timeframe" in targetIndicator) {
+                  if (settings.indicatorType === "volume-ma") {
+                    // Update to Volume_MA
+                    const updatedIndicator = {
+                      type: "CUSTOM_I",
+                      name: "Volume_MA",
+                      timeframe: targetIndicator.timeframe,
+                      input_params: {
+                        ma_length: Number(settings.maLength),
+                      },
+                    }
+
+                    if (editingComponent.componentType === "inp1") {
+                      condition.inp1 = updatedIndicator
+                    } else {
+                      condition.inp2 = updatedIndicator
+                    }
+                  } else {
+                    // Regular Volume
+                    const updatedIndicator = createConstantInput("volume", targetIndicator.timeframe)
+
+                    if (editingComponent.componentType === "inp1") {
+                      condition.inp1 = updatedIndicator
+                    } else {
+                      condition.inp2 = updatedIndicator
+                    }
+                  }
+                }
+              } else if (pendingVolumeIndicatorType && pendingTimeframe) {
+                // Handle case when opened from "Other Indicator" section via onNext
+                const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+                const timeframe = pendingTimeframe
+
+                if (settings.indicatorType === "volume-ma" || pendingVolumeIndicatorType === "volume-ma") {
+                  // Create Volume_MA indicator in inp2
+                  lastCondition.inp2 = {
                     type: "CUSTOM_I",
                     name: "Volume_MA",
+                    timeframe: timeframe,
+                    input_params: {
+                      ma_length: Number(settings.maLength),
+                    },
+                  }
+                } else {
+                  // Create regular Volume indicator in inp2
+                  lastCondition.inp2 = createConstantInput("volume", timeframe)
+                }
+
+                setPendingVolumeIndicatorType(null)
+                setPendingTimeframe("3h")
+              } else {
+                // Fallback to original behavior
+                const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+                if (lastCondition.inp1 && "timeframe" in lastCondition.inp1) {
+                  if (settings.indicatorType === "volume-ma") {
+                    // Update to Volume_MA
+                    lastCondition.inp1 = {
+                      type: "CUSTOM_I",
+                      name: "Volume_MA",
+                      timeframe: lastCondition.inp1.timeframe,
+                      input_params: {
+                        ma_length: Number(settings.maLength),
+                      },
+                    }
+                  } else {
+                    // Regular Volume
+                    lastCondition.inp1 = createConstantInput("volume", lastCondition.inp1.timeframe)
+                  }
+                }
+              }
+
+              setStatements(newStatements)
+              setShowVolumeModal(false)
+              setEditingComponent(null)
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+          />
+        )}
+        {showVolumeDeltaModal && (
+          <VolumeDeltaSettingsModal
+            onClose={() => {
+              setShowVolumeDeltaModal(false)
+              setEditingComponent(null)
+            }}
+            onSave={(settings) => {
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
+
+              if (editingComponent) {
+                const condition = currentStatement.strategy[editingComponent.conditionIndex]
+                const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
+
+                if (targetIndicator && "timeframe" in targetIndicator) {
+                  const indicatorName = settings.indicatorType === "cumulative-volume-delta"
+                    ? "CumulativeVolumeDelta"
+                    : "VolumeDelta"
+
+                  const updatedIndicator: any = {
+                    type: "CUSTOM_I",
+                    name: indicatorName,
                     timeframe: targetIndicator.timeframe,
                     input_params: {
-                      ma_length: Number(settings.maLength),
+                      lower_timeframe: settings.lowerTimeframe,
                     },
                   }
 
-                  if (editingComponent.componentType === "inp1") {
-                    condition.inp1 = updatedIndicator
-                  } else {
-                    condition.inp2 = updatedIndicator
+                  if (settings.indicatorType === "cumulative-volume-delta" && settings.resetPeriod) {
+                    updatedIndicator.input_params.reset_period = settings.resetPeriod
                   }
-                } else {
-                  // Regular Volume
-                  const updatedIndicator = createConstantInput("volume", targetIndicator.timeframe)
 
                   if (editingComponent.componentType === "inp1") {
                     condition.inp1 = updatedIndicator
                   } else {
                     condition.inp2 = updatedIndicator
                   }
-                }
-              }
-            } else if (pendingVolumeIndicatorType && pendingTimeframe) {
-              // Handle case when opened from "Other Indicator" section via onNext
-              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-              const timeframe = pendingTimeframe
-
-              if (settings.indicatorType === "volume-ma" || pendingVolumeIndicatorType === "volume-ma") {
-                // Create Volume_MA indicator in inp2
-                lastCondition.inp2 = {
-                  type: "CUSTOM_I",
-                  name: "Volume_MA",
-                  timeframe: timeframe,
-                  input_params: {
-                    ma_length: Number(settings.maLength),
-                  },
                 }
               } else {
-                // Create regular Volume indicator in inp2
-                lastCondition.inp2 = createConstantInput("volume", timeframe)
-              }
+                // Adding new indicator
+                const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+                const timeframe = lastCondition.inp1?.timeframe || selectedTimeframe
 
-              setPendingVolumeIndicatorType(null)
-              setPendingTimeframe("3h")
-            } else {
-              // Fallback to original behavior
-              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-
-              if (lastCondition.inp1 && "timeframe" in lastCondition.inp1) {
-                if (settings.indicatorType === "volume-ma") {
-                  // Update to Volume_MA
-                  lastCondition.inp1 = {
-                    type: "CUSTOM_I",
-                    name: "Volume_MA",
-                    timeframe: lastCondition.inp1.timeframe,
-                    input_params: {
-                      ma_length: Number(settings.maLength),
-                    },
-                  }
-                } else {
-                  // Regular Volume
-                  lastCondition.inp1 = createConstantInput("volume", lastCondition.inp1.timeframe)
-                }
-              }
-            }
-
-            setStatements(newStatements)
-            setShowVolumeModal(false)
-            setEditingComponent(null)
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-        />
-      )}
-      {showVolumeDeltaModal && (
-        <VolumeDeltaSettingsModal
-          onClose={() => {
-            setShowVolumeDeltaModal(false)
-            setEditingComponent(null)
-          }}
-          onSave={(settings) => {
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-
-            if (editingComponent) {
-              const condition = currentStatement.strategy[editingComponent.conditionIndex]
-              const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
-
-              if (targetIndicator && "timeframe" in targetIndicator) {
                 const indicatorName = settings.indicatorType === "cumulative-volume-delta"
                   ? "CumulativeVolumeDelta"
                   : "VolumeDelta"
 
-                const updatedIndicator: any = {
+                const newIndicator: any = {
                   type: "CUSTOM_I",
                   name: indicatorName,
-                  timeframe: targetIndicator.timeframe,
+                  timeframe: timeframe,
                   input_params: {
                     lower_timeframe: settings.lowerTimeframe,
                   },
                 }
 
                 if (settings.indicatorType === "cumulative-volume-delta" && settings.resetPeriod) {
-                  updatedIndicator.input_params.reset_period = settings.resetPeriod
+                  newIndicator.input_params.reset_period = settings.resetPeriod
                 }
 
-                if (editingComponent.componentType === "inp1") {
-                  condition.inp1 = updatedIndicator
+                // Determine if we're adding to inp1 or inp2
+                if (lastCondition.inp1 && lastCondition.operator_name) {
+                  lastCondition.inp2 = newIndicator
                 } else {
-                  condition.inp2 = updatedIndicator
+                  lastCondition.inp1 = newIndicator
                 }
               }
-            } else {
-              // Adding new indicator
-              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-              const timeframe = lastCondition.inp1?.timeframe || selectedTimeframe
 
-              const indicatorName = settings.indicatorType === "cumulative-volume-delta"
-                ? "CumulativeVolumeDelta"
-                : "VolumeDelta"
+              setStatements(newStatements)
+              setShowVolumeDeltaModal(false)
+              setEditingComponent(null)
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+          />
+        )}
+        {showHistoricalPriceLevelModal && (
+          <HistoricalPriceLevelSettingsModal
+            onClose={() => {
+              setShowHistoricalPriceLevelModal(false)
+              setEditingComponent(null)
+            }}
+            onSave={(settings) => {
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
 
-              const newIndicator: any = {
-                type: "CUSTOM_I",
-                name: indicatorName,
-                timeframe: timeframe,
-                input_params: {
-                  lower_timeframe: settings.lowerTimeframe,
-                },
-              }
+              if (editingComponent) {
+                const condition = currentStatement.strategy[editingComponent.conditionIndex]
+                const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
 
-              if (settings.indicatorType === "cumulative-volume-delta" && settings.resetPeriod) {
-                newIndicator.input_params.reset_period = settings.resetPeriod
-              }
+                if (targetIndicator && "timeframe" in targetIndicator) {
+                  const updatedIndicator: any = {
+                    type: "CUSTOM_I",
+                    name: "HistoricalPriceLevel",
+                    timeframe: targetIndicator.timeframe,
+                    input_params: {
+                      period: settings.period,
+                      level: settings.level,
+                    },
+                  }
 
-              // Determine if we're adding to inp1 or inp2
-              if (lastCondition.inp1 && lastCondition.operator_name) {
-                lastCondition.inp2 = newIndicator
+                  if (editingComponent.componentType === "inp1") {
+                    condition.inp1 = updatedIndicator
+                  } else {
+                    condition.inp2 = updatedIndicator
+                  }
+                }
               } else {
-                lastCondition.inp1 = newIndicator
-              }
-            }
+                // Adding new indicator
+                const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+                const timeframe = lastCondition.inp1?.timeframe || selectedTimeframe
 
-            setStatements(newStatements)
-            setShowVolumeDeltaModal(false)
-            setEditingComponent(null)
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-        />
-      )}
-      {showHistoricalPriceLevelModal && (
-        <HistoricalPriceLevelSettingsModal
-          onClose={() => {
-            setShowHistoricalPriceLevelModal(false)
-            setEditingComponent(null)
-          }}
-          onSave={(settings) => {
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-
-            if (editingComponent) {
-              const condition = currentStatement.strategy[editingComponent.conditionIndex]
-              const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
-
-              if (targetIndicator && "timeframe" in targetIndicator) {
-                const updatedIndicator: any = {
+                const newIndicator: any = {
                   type: "CUSTOM_I",
                   name: "HistoricalPriceLevel",
-                  timeframe: targetIndicator.timeframe,
+                  timeframe: timeframe,
                   input_params: {
                     period: settings.period,
                     level: settings.level,
                   },
                 }
 
-                if (editingComponent.componentType === "inp1") {
-                  condition.inp1 = updatedIndicator
+                // Determine if we're adding to inp1 or inp2
+                if (lastCondition.inp1 && lastCondition.operator_name) {
+                  lastCondition.inp2 = newIndicator
                 } else {
-                  condition.inp2 = updatedIndicator
+                  lastCondition.inp1 = newIndicator
                 }
               }
-            } else {
-              // Adding new indicator
-              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-              const timeframe = lastCondition.inp1?.timeframe || selectedTimeframe
 
-              const newIndicator: any = {
-                type: "CUSTOM_I",
-                name: "HistoricalPriceLevel",
-                timeframe: timeframe,
-                input_params: {
-                  period: settings.period,
-                  level: settings.level,
-                },
-              }
+              setStatements(newStatements)
+              setShowHistoricalPriceLevelModal(false)
+              setEditingComponent(null)
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+          />
+        )}
+        {showCandleSizeModal && (
+          <CandleSizeSettingsModal
+            onClose={() => {
+              setShowCandleSizeModal(false)
+              setEditingComponent(null)
+            }}
+            onSave={(settings) => {
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
 
-              // Determine if we're adding to inp1 or inp2
-              if (lastCondition.inp1 && lastCondition.operator_name) {
-                lastCondition.inp2 = newIndicator
+              if (editingComponent) {
+                const condition = currentStatement.strategy[editingComponent.conditionIndex]
+                const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
+
+                if (targetIndicator && "timeframe" in targetIndicator) {
+                  const updatedIndicator: any = {
+                    type: "CUSTOM_I",
+                    name: "CandleSize",
+                    timeframe: targetIndicator.timeframe,
+                    input_params: {
+                      asset_type: settings.assetType,
+                      output: settings.output,
+                    },
+                  }
+
+                  if (editingComponent.componentType === "inp1") {
+                    condition.inp1 = updatedIndicator
+                  } else {
+                    condition.inp2 = updatedIndicator
+                  }
+                }
               } else {
-                lastCondition.inp1 = newIndicator
-              }
-            }
+                // Adding new indicator
+                const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+                const timeframe = lastCondition.inp1?.timeframe || selectedTimeframe
 
-            setStatements(newStatements)
-            setShowHistoricalPriceLevelModal(false)
-            setEditingComponent(null)
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-        />
-      )}
-      {showCandleSizeModal && (
-        <CandleSizeSettingsModal
-          onClose={() => {
-            setShowCandleSizeModal(false)
-            setEditingComponent(null)
-          }}
-          onSave={(settings) => {
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-
-            if (editingComponent) {
-              const condition = currentStatement.strategy[editingComponent.conditionIndex]
-              const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
-
-              if (targetIndicator && "timeframe" in targetIndicator) {
-                const updatedIndicator: any = {
+                const newIndicator: any = {
                   type: "CUSTOM_I",
                   name: "CandleSize",
-                  timeframe: targetIndicator.timeframe,
+                  timeframe: timeframe,
                   input_params: {
                     asset_type: settings.assetType,
                     output: settings.output,
                   },
                 }
 
-                if (editingComponent.componentType === "inp1") {
-                  condition.inp1 = updatedIndicator
+                // Determine if we're adding to inp1 or inp2
+                if (lastCondition.inp1 && lastCondition.operator_name) {
+                  lastCondition.inp2 = newIndicator
                 } else {
-                  condition.inp2 = updatedIndicator
+                  lastCondition.inp1 = newIndicator
                 }
               }
-            } else {
-              // Adding new indicator
-              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-              const timeframe = lastCondition.inp1?.timeframe || selectedTimeframe
 
-              const newIndicator: any = {
-                type: "CUSTOM_I",
-                name: "CandleSize",
-                timeframe: timeframe,
-                input_params: {
-                  asset_type: settings.assetType,
-                  output: settings.output,
-                },
-              }
+              setStatements(newStatements)
+              setShowCandleSizeModal(false)
+              setEditingComponent(null)
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+          />
+        )}
+        {showAtrModal && (
+          <AtrSettingsModal
+            onClose={() => {
+              setShowAtrModal(false)
+              setEditingComponent(null)
+              setAtrModalTarget(null)
+              setPendingTimeframe("3h")
+            }}
+            initialSettings={getAtrInitialSettings()}
+            onSave={applyAtrSettings}
+          />
+        )}
+        {showMacdModal && (
+          <MacdSettingsModal
+            onClose={() => {
+              setShowMacdModal(false)
+              setEditingComponent(null)
+            }}
+            initialSettings={(() => {
+              if (editingComponent) {
+                const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+                const indicator = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
 
-              // Determine if we're adding to inp1 or inp2
-              if (lastCondition.inp1 && lastCondition.operator_name) {
-                lastCondition.inp2 = newIndicator
+                if (indicator && "name" in indicator && indicator.name === "MACD" && "input_params" in indicator) {
+                  return {
+                    indicatorType: indicator.input_params?.macd_indicator_type || "MACD",
+                    fastLength: String(indicator.input_params?.macd_fast_length || 12),
+                    slowLength: String(indicator.input_params?.macd_slow_length || 26),
+                    source: indicator.input_params?.macd_source || "close",
+                    signalSmoothing: String(indicator.input_params?.macd_signal_smoothing || 9),
+                    oscillatorMaType: indicator.input_params?.macd_oscillator_ma_type || "EMA",
+                    signalLineMaType: indicator.input_params?.macd_signal_ma_type || "EMA",
+                  }
+                }
               } else {
-                lastCondition.inp1 = newIndicator
-              }
-            }
+                const currentStatement = statements[activeStatementIndex]
+                const lastCondition = currentStatement?.strategy[currentStatement.strategy.length - 1]
+                const indicator = lastCondition?.inp1
 
-            setStatements(newStatements)
-            setShowCandleSizeModal(false)
-            setEditingComponent(null)
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-        />
-      )}
-      {showAtrModal && (
-        <AtrSettingsModal
-          onClose={() => {
-            setShowAtrModal(false)
-            setEditingComponent(null)
-            setAtrModalTarget(null)
-            setPendingTimeframe("3h")
-          }}
-          initialSettings={getAtrInitialSettings()}
-          onSave={applyAtrSettings}
-        />
-      )}
-      {showMacdModal && (
-        <MacdSettingsModal
-          onClose={() => {
-            setShowMacdModal(false)
-            setEditingComponent(null)
-          }}
-          initialSettings={(() => {
-            if (editingComponent) {
-              const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
-              const indicator = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
-
-              if (indicator && "name" in indicator && indicator.name === "MACD" && "input_params" in indicator) {
-                return {
-                  indicatorType: indicator.input_params?.macd_indicator_type || "MACD",
-                  fastLength: String(indicator.input_params?.macd_fast_length || 12),
-                  slowLength: String(indicator.input_params?.macd_slow_length || 26),
-                  source: indicator.input_params?.macd_source || "close",
-                  signalSmoothing: String(indicator.input_params?.macd_signal_smoothing || 9),
-                  oscillatorMaType: indicator.input_params?.macd_oscillator_ma_type || "EMA",
-                  signalLineMaType: indicator.input_params?.macd_signal_ma_type || "EMA",
+                if (indicator && "name" in indicator && indicator.name === "MACD" && "input_params" in indicator) {
+                  return {
+                    indicatorType: indicator.input_params?.macd_indicator_type || "MACD",
+                    fastLength: String(indicator.input_params?.macd_fast_length || 12),
+                    slowLength: String(indicator.input_params?.macd_slow_length || 26),
+                    source: indicator.input_params?.macd_source || "close",
+                    signalSmoothing: String(indicator.input_params?.macd_signal_smoothing || 9),
+                    oscillatorMaType: indicator.input_params?.macd_oscillator_ma_type || "EMA",
+                    signalLineMaType: indicator.input_params?.macd_signal_ma_type || "EMA",
+                  }
                 }
               }
-            } else {
-              const currentStatement = statements[activeStatementIndex]
-              const lastCondition = currentStatement?.strategy[currentStatement.strategy.length - 1]
-              const indicator = lastCondition?.inp1
+              return undefined
+            })()}
+            onSave={(settings) => {
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
 
-              if (indicator && "name" in indicator && indicator.name === "MACD" && "input_params" in indicator) {
-                return {
-                  indicatorType: indicator.input_params?.macd_indicator_type || "MACD",
-                  fastLength: String(indicator.input_params?.macd_fast_length || 12),
-                  slowLength: String(indicator.input_params?.macd_slow_length || 26),
-                  source: indicator.input_params?.macd_source || "close",
-                  signalSmoothing: String(indicator.input_params?.macd_signal_smoothing || 9),
-                  oscillatorMaType: indicator.input_params?.macd_oscillator_ma_type || "EMA",
-                  signalLineMaType: indicator.input_params?.macd_signal_ma_type || "EMA",
-                }
-              }
-            }
-            return undefined
-          })()}
-          onSave={(settings) => {
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
+              if (editingComponent) {
+                const condition = currentStatement.strategy[editingComponent.conditionIndex]
+                const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
+                const timeframe = pendingTimeframe || "3h"
 
-            if (editingComponent) {
-              const condition = currentStatement.strategy[editingComponent.conditionIndex]
-              const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
-              const timeframe = pendingTimeframe || "3h"
-
-              if (targetIndicator && "name" in targetIndicator && targetIndicator.name === "MACD") {
-                // Update existing MACD indicator
-                targetIndicator.input_params = {
-                  macd_fast_length: Number(settings.fastLength),
-                  macd_slow_length: Number(settings.slowLength),
-                  macd_source: settings.source,
-                  macd_signal_smoothing: Number(settings.signalSmoothing),
-                  macd_oscillator_ma_type: settings.oscillatorMaType,
-                  macd_signal_ma_type: settings.signalLineMaType,
-                  macd_indicator_type: settings.indicatorType,
-                }
-              } else if (editingComponent.componentType === "inp2") {
-                // Create new MACD indicator in inp2
-                condition.inp2 = {
-                  type: "CUSTOM_I",
-                  name: "MACD",
-                  timeframe: timeframe,
-                  input_params: {
+                if (targetIndicator && "name" in targetIndicator && targetIndicator.name === "MACD") {
+                  // Update existing MACD indicator
+                  targetIndicator.input_params = {
                     macd_fast_length: Number(settings.fastLength),
                     macd_slow_length: Number(settings.slowLength),
                     macd_source: settings.source,
@@ -7053,1068 +7209,1084 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                     macd_oscillator_ma_type: settings.oscillatorMaType,
                     macd_signal_ma_type: settings.signalLineMaType,
                     macd_indicator_type: settings.indicatorType,
-                  },
+                  }
+                } else if (editingComponent.componentType === "inp2") {
+                  // Create new MACD indicator in inp2
+                  condition.inp2 = {
+                    type: "CUSTOM_I",
+                    name: "MACD",
+                    timeframe: timeframe,
+                    input_params: {
+                      macd_fast_length: Number(settings.fastLength),
+                      macd_slow_length: Number(settings.slowLength),
+                      macd_source: settings.source,
+                      macd_signal_smoothing: Number(settings.signalSmoothing),
+                      macd_oscillator_ma_type: settings.oscillatorMaType,
+                      macd_signal_ma_type: settings.signalLineMaType,
+                      macd_indicator_type: settings.indicatorType,
+                    },
+                  }
+                }
+              } else {
+                const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+                if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "MACD") {
+                  lastCondition.inp1.input_params = {
+                    macd_fast_length: Number(settings.fastLength),
+                    macd_slow_length: Number(settings.slowLength),
+                    macd_source: settings.source,
+                    macd_signal_smoothing: Number(settings.signalSmoothing),
+                    macd_oscillator_ma_type: settings.oscillatorMaType,
+                    macd_signal_ma_type: settings.signalLineMaType,
+                    macd_indicator_type: settings.indicatorType,
+                  }
                 }
               }
-            } else {
-              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
-              if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "MACD") {
-                lastCondition.inp1.input_params = {
-                  macd_fast_length: Number(settings.fastLength),
-                  macd_slow_length: Number(settings.slowLength),
-                  macd_source: settings.source,
-                  macd_signal_smoothing: Number(settings.signalSmoothing),
-                  macd_oscillator_ma_type: settings.oscillatorMaType,
-                  macd_signal_ma_type: settings.signalLineMaType,
-                  macd_indicator_type: settings.indicatorType,
+              setStatements(newStatements)
+              setShowMacdModal(false)
+              setEditingComponent(null)
+              setPendingTimeframe("3h")
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+          />
+        )}
+        {showSuperTrendModal && (
+          <SuperTrendSettingsModal
+            onClose={() => {
+              setShowSuperTrendModal(false)
+              setEditingComponent(null)
+            }}
+            initialSettings={(() => {
+              if (editingComponent) {
+                const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+                const indicator = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
+
+                if (indicator && "name" in indicator && indicator.name === "SupertrendIndicator" && "input_params" in indicator) {
+                  return {
+                    period: indicator.input_params?.period || 10,
+                    multiplier: indicator.input_params?.multiplier || 3.0,
+                    change_atr_method: indicator.input_params?.change_atr_method ?? true,
+                    output: indicator.input_params?.output || "SellSignal",
+                  }
+                }
+              } else {
+                const currentStatement = statements[activeStatementIndex]
+                const lastCondition = currentStatement?.strategy[currentStatement.strategy.length - 1]
+                const indicator = lastCondition?.inp1
+
+                if (indicator && "name" in indicator && indicator.name === "SupertrendIndicator" && "input_params" in indicator) {
+                  return {
+                    period: indicator.input_params?.period || 10,
+                    multiplier: indicator.input_params?.multiplier || 3.0,
+                    change_atr_method: indicator.input_params?.change_atr_method ?? true,
+                    output: indicator.input_params?.output || "SellSignal",
+                  }
                 }
               }
-            }
+              return undefined
+            })()}
+            onSave={(settings) => {
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
 
-            setStatements(newStatements)
-            setShowMacdModal(false)
-            setEditingComponent(null)
-            setPendingTimeframe("3h")
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-        />
-      )}
-      {showSuperTrendModal && (
-        <SuperTrendSettingsModal
-          onClose={() => {
-            setShowSuperTrendModal(false)
-            setEditingComponent(null)
-          }}
-          initialSettings={(() => {
-            if (editingComponent) {
-              const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
-              const indicator = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
+              if (editingComponent) {
+                const condition = currentStatement.strategy[editingComponent.conditionIndex]
+                const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
+                const timeframe = pendingTimeframe || "3h"
 
-              if (indicator && "name" in indicator && indicator.name === "SupertrendIndicator" && "input_params" in indicator) {
-                return {
-                  period: indicator.input_params?.period || 10,
-                  multiplier: indicator.input_params?.multiplier || 3.0,
-                  change_atr_method: indicator.input_params?.change_atr_method ?? true,
-                  output: indicator.input_params?.output || "SellSignal",
-                }
-              }
-            } else {
-              const currentStatement = statements[activeStatementIndex]
-              const lastCondition = currentStatement?.strategy[currentStatement.strategy.length - 1]
-              const indicator = lastCondition?.inp1
-
-              if (indicator && "name" in indicator && indicator.name === "SupertrendIndicator" && "input_params" in indicator) {
-                return {
-                  period: indicator.input_params?.period || 10,
-                  multiplier: indicator.input_params?.multiplier || 3.0,
-                  change_atr_method: indicator.input_params?.change_atr_method ?? true,
-                  output: indicator.input_params?.output || "SellSignal",
-                }
-              }
-            }
-            return undefined
-          })()}
-          onSave={(settings) => {
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-
-            if (editingComponent) {
-              const condition = currentStatement.strategy[editingComponent.conditionIndex]
-              const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
-              const timeframe = pendingTimeframe || "3h"
-
-              if (targetIndicator && "name" in targetIndicator && targetIndicator.name === "SupertrendIndicator") {
-                // Update existing Super Trend indicator
-                targetIndicator.input_params = {
-                  period: settings.period,
-                  multiplier: settings.multiplier,
-                  change_atr_method: settings.change_atr_method,
-                  output: settings.output,
-                }
-              } else if (editingComponent.componentType === "inp2") {
-                // Create new Super Trend indicator in inp2
-                condition.inp2 = {
-                  type: "CUSTOM_I",
-                  name: "SupertrendIndicator",
-                  timeframe: timeframe,
-                  input_params: {
+                if (targetIndicator && "name" in targetIndicator && targetIndicator.name === "SupertrendIndicator") {
+                  // Update existing Super Trend indicator
+                  targetIndicator.input_params = {
                     period: settings.period,
                     multiplier: settings.multiplier,
                     change_atr_method: settings.change_atr_method,
                     output: settings.output,
-                  },
-                }
-              }
-            } else {
-              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-
-              if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "SupertrendIndicator") {
-                lastCondition.inp1.input_params = {
-                  period: settings.period,
-                  multiplier: settings.multiplier,
-                  change_atr_method: settings.change_atr_method,
-                  output: settings.output,
-                }
-              }
-            }
-
-            setStatements(newStatements)
-            setShowSuperTrendModal(false)
-            setEditingComponent(null)
-            setPendingTimeframe("3h")
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-        />
-      )}
-      {showMaModal && (
-        <MaSettingsModal
-          onClose={() => {
-            setShowMaModal(false)
-            setEditingComponent(null)
-          }}
-          initialSettings={(() => {
-            if (editingComponent) {
-              const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
-              const indicator = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
-
-              if (indicator && "name" in indicator && (indicator.name === "MA" || indicator.name === "SMA" || indicator.name === "EMA" || indicator.name === "HMA") && "input_params" in indicator) {
-                return {
-                  maType: indicator.input_params?.ma_type || indicator.input_params?.maType || "SMA",
-                  maLength: indicator.input_params?.ma_length || indicator.input_params?.maLength || 20,
-                }
-              }
-            } else {
-              const currentStatement = statements[activeStatementIndex]
-              const lastCondition = currentStatement?.strategy[currentStatement.strategy.length - 1]
-              const indicator = lastCondition?.inp1
-
-              if (indicator && "name" in indicator && (indicator.name === "MA" || indicator.name === "SMA" || indicator.name === "EMA" || indicator.name === "HMA") && "input_params" in indicator) {
-                return {
-                  maType: indicator.input_params?.ma_type || indicator.input_params?.maType || "SMA",
-                  maLength: indicator.input_params?.ma_length || indicator.input_params?.maLength || 20,
-                }
-              }
-            }
-            return undefined
-          })()}
-          onSave={(settings) => {
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-
-            if (editingComponent) {
-              const condition = currentStatement.strategy[editingComponent.conditionIndex]
-              const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
-              const timeframe = pendingTimeframe || "3h"
-
-              if (targetIndicator && "name" in targetIndicator && (targetIndicator.name === "MA" || targetIndicator.name === "SMA" || targetIndicator.name === "EMA" || targetIndicator.name === "HMA")) {
-                // Update existing MA indicator
-                targetIndicator.input_params = {
-                  ma_type: settings.maType,
-                  ma_length: settings.maLength,
-                }
-                // Update name based on MA type
-                if (settings.maType === "SMA") {
-                  targetIndicator.name = "SMA"
-                } else if (settings.maType === "EMA") {
-                  targetIndicator.name = "EMA"
-                } else if (settings.maType === "HMA") {
-                  targetIndicator.name = "HMA"
-                } else {
-                  targetIndicator.name = "MA"
-                }
-              } else if (editingComponent.componentType === "inp2") {
-                // Create new MA indicator in inp2
-                const maName = settings.maType === "SMA" ? "SMA" : settings.maType === "EMA" ? "EMA" : settings.maType === "HMA" ? "HMA" : "MA"
-                condition.inp2 = {
-                  type: "CUSTOM_I",
-                  name: maName,
-                  timeframe: timeframe,
-                  input_params: {
-                    ma_type: settings.maType,
-                    ma_length: settings.maLength,
-                  },
-                }
-              } else if (editingComponent.componentType === "inp1") {
-                // Create new MA indicator in inp1
-                const maName = settings.maType === "SMA" ? "SMA" : settings.maType === "EMA" ? "EMA" : settings.maType === "HMA" ? "HMA" : "MA"
-                condition.inp1 = {
-                  type: "CUSTOM_I",
-                  name: maName,
-                  timeframe: timeframe,
-                  input_params: {
-                    ma_type: settings.maType,
-                    ma_length: settings.maLength,
-                  },
-                }
-              }
-            } else {
-              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-
-              if (lastCondition.inp1 && "name" in lastCondition.inp1 && (lastCondition.inp1.name === "MA" || lastCondition.inp1.name === "SMA" || lastCondition.inp1.name === "EMA" || lastCondition.inp1.name === "HMA")) {
-                lastCondition.inp1.input_params = {
-                  ma_type: settings.maType,
-                  ma_length: settings.maLength,
-                }
-                // Update name based on MA type
-                if (settings.maType === "SMA") {
-                  lastCondition.inp1.name = "SMA"
-                } else if (settings.maType === "EMA") {
-                  lastCondition.inp1.name = "EMA"
-                } else if (settings.maType === "HMA") {
-                  lastCondition.inp1.name = "HMA"
-                } else {
-                  lastCondition.inp1.name = "MA"
-                }
-              }
-            }
-
-            setStatements(newStatements)
-            setShowMaModal(false)
-            setEditingComponent(null)
-            setPendingTimeframe("3h")
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-        />
-      )}
-      {showChannelModal && (
-        <ChannelSettingsModal
-          onClose={() => setShowChannelModal(false)}
-          onSave={(settings) => {
-            // Update Channel settings
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-
-            if (editingComponent) {
-              const condition = currentStatement.strategy[editingComponent.conditionIndex]
-
-              if (condition.operator_name === "inside_channel") {
-                if (settings) {
+                  }
+                } else if (editingComponent.componentType === "inp2") {
+                  // Create new Super Trend indicator in inp2
                   condition.inp2 = {
-                    type: "channel",
-                    value: settings.value || 0,
+                    type: "CUSTOM_I",
+                    name: "SupertrendIndicator",
+                    timeframe: timeframe,
+                    input_params: {
+                      period: settings.period,
+                      multiplier: settings.multiplier,
+                      change_atr_method: settings.change_atr_method,
+                      output: settings.output,
+                    },
                   }
                 }
-              }
-            } else {
-              // Fallback to original behavior
-              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+              } else {
+                const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
-              if (lastCondition.operator_name === "inside_channel") {
-                if (settings) {
-                  lastCondition.inp2 = {
-                    type: "channel",
-                    value: settings.value || 0,
+                if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "SupertrendIndicator") {
+                  lastCondition.inp1.input_params = {
+                    period: settings.period,
+                    multiplier: settings.multiplier,
+                    change_atr_method: settings.change_atr_method,
+                    output: settings.output,
                   }
                 }
-              }
-            }
-
-            setStatements(newStatements)
-            setShowChannelModal(false)
-            setEditingComponent(null)
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-        />
-      )}
-      {/* Derivative Settings Modal */}
-      {showDerivativeModal && (
-        <DerivativeSettingsModal
-          onClose={() => setShowDerivativeModal(false)}
-          onSave={(settings) => {
-            handleDerivativeSettings(settings)
-            setShowDerivativeModal(false)
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-        />
-      )}
-      {/* SL/TP Settings Modal */}
-      {showSLTPSettings.show && (
-        <SLTPSettingsModal
-          type={showSLTPSettings.type}
-          onClose={() => {
-            setShowSLTPSettings({ show: false, type: "SL" })
-            setEditingEquityRule(null)
-          }}
-          initialSettings={editingEquityRule ? (() => {
-            const rule = statements[editingEquityRule.statementIndex]?.Equity[editingEquityRule.equityIndex]
-            if (!rule) return undefined
-
-            // Parse the operator string to extract settings
-            const operator = rule.operator || ""
-            const type = showSLTPSettings.type
-
-            // Parse different formats:
-            // Simple: "SL = Entry_Price - 100pips"
-            // Trailing: "inp1 = inp2 - 100pips" with TrailingStop
-            // Percentage: "SL = Entry_Price * 0.95"
-            // Fixed: "SL = 1800"
-
-            if (rule.inp1 && "name" in rule.inp1 && rule.inp1.input_params?.TrailingStop) {
-              // Trailing format
-              const pipsMatch = operator.match(/([+-])\s*(\d+)pips/)
-              return {
-                formatType: "trailing",
-                value: pipsMatch ? pipsMatch[2] : "100",
-                direction: pipsMatch ? pipsMatch[1] : "-",
-                trailingStop: true,
-                trailingStep: rule.inp1.input_params.TrailingStep?.replace("pips", "") || "0",
-                inp2: rule.inp2 && "name" in rule.inp2 ? rule.inp2.name : "Entry_Price",
-              }
-            } else if (operator.includes("pips")) {
-              // Simple pips format
-              const pipsMatch = operator.match(/([+-])\s*(\d+)pips/)
-              return {
-                formatType: "simple",
-                valueType: "pips",
-                value: pipsMatch ? pipsMatch[2] : "100",
-                direction: pipsMatch ? pipsMatch[1] : "-",
-              }
-            } else if (operator.includes("*")) {
-              // Percentage format
-              const multiplierMatch = operator.match(/\*\s*([\d.]+)/)
-              if (multiplierMatch) {
-                const multiplier = parseFloat(multiplierMatch[1])
-                const percentage = type === "SL" ? (1 - multiplier) * 100 : (multiplier - 1) * 100
-                return {
-                  formatType: "simple",
-                  valueType: "percentage",
-                  value: percentage.toFixed(2),
-                }
-              }
-            } else if (operator.match(/=\s*\d+/)) {
-              // Fixed price format
-              const valueMatch = operator.match(/=\s*(\d+)/)
-              return {
-                formatType: "simple",
-                valueType: "fixed",
-                value: valueMatch ? valueMatch[1] : "1800",
-              }
-            }
-
-            return undefined
-          })() : undefined}
-          onSave={(settings) => {
-            handleSLTPSettings(settings)
-            setShowSLTPSettings({ show: false, type: "SL" })
-            setEditingEquityRule(null)
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-        />
-      )}
-      {/* Pips Settings Modal */}
-      {showPipsModal.show && (
-        <PipsSettingsModal
-          initialValue={statements[showPipsModal.statementIndex]?.strategy[showPipsModal.conditionIndex]?.pips || 500}
-          onClose={() => setShowPipsModal({ show: false, statementIndex: 0, conditionIndex: 0 })}
-          currentInp1={statements[showPipsModal.statementIndex]?.strategy[showPipsModal.conditionIndex]?.inp1}
-          onSave={(settings) => {
-            const newStatements = [...statements]
-            const currentStatement = newStatements[showPipsModal.statementIndex]
-            const currentCondition = currentStatement.strategy[showPipsModal.conditionIndex]
-
-            if (
-              currentCondition.operator_name === "atmost_above_pips" ||
-              currentCondition.operator_name === "atmost_below_pips"
-            ) {
-              const tf = settings.timeframe || "3h"
-
-              if (settings.valueType === "value" && settings.customValue) {
-                currentCondition.inp2 = {
-                  type: "value",
-                  value: Number(settings.customValue),
-                }
-              } else if ((settings.valueType === "indicator" || settings.valueType === "other") && settings.indicator) {
-                switch (settings.indicator) {
-                  case "rsi":
-                    currentCondition.inp2 = {
-                      type: "I",
-                      name: "RSI",
-                      timeframe: tf,
-                      input_params: {
-                        timeperiod: settings.rsiLength || 14,
-                        source: settings.rsiSource?.toLowerCase() || "close",
-                      },
-                    }
-                    break
-
-                  case "rsi-ma":
-                    currentCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "RSI_MA",
-                      timeframe: tf,
-                      input_params: {
-                        rsi_length: settings.rsiMaLength || 14,
-                        rsi_source: settings.rsiSource || "Close",
-                        ma_type: settings.maType || "SMA",
-                        ma_length: settings.maLength || 14,
-                        bb_stddev: settings.bbStdDev || 2.0,
-                      },
-                    }
-                    break
-
-                  case "volume-ma":
-                    currentCondition.inp2 = {
-                      type: "CUSTOM_I",
-                      name: "Volume_MA",
-                      timeframe: tf,
-                      input_params: {
-                        ma_length: settings.volumeMaLength || 20,
-                      },
-                    }
-                    break
-
-                  case "bollinger":
-                    currentCondition.inp2 = {
-                      type: "I",
-                      name: "BBANDS",
-                      timeframe: tf,
-                      input: settings.band || "lowerband",
-                      input_params: {
-                        timeperiod: settings.timeperiod || 17,
-                        source: settings.bbSource || "close",
-                        ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
-                        ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
-                        ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
-                      },
-                    }
-                    break
-
-                  case "volume":
-                    currentCondition.inp2 = createConstantInput("volume", tf)
-                    break
-
-                  case "atr":
-                    // Use the same settings from inp1 if it's an ATR indicator
-                    if (currentCondition.inp1 && currentCondition.inp1.name === "ATR") {
-                      const inp1Params = currentCondition.inp1.input_params || {}
-                      currentCondition.inp2 = {
-                        type: "CUSTOM_I",
-                        name: "ATR",
-                        timeframe: tf || currentCondition.inp1.timeframe || "3h",
-                        input_params: {
-                          atr_length: inp1Params.atr_length || 14,
-                          atr_smoothing: inp1Params.atr_smoothing || "RMA",
-                        },
-                      }
-                    } else {
-                      // Default ATR settings
-                      currentCondition.inp2 = {
-                        type: "CUSTOM_I",
-                        name: "ATR",
-                        timeframe: tf,
-                        input_params: {
-                          atr_length: 14,
-                          atr_smoothing: "RMA",
-                        },
-                      }
-                    }
-                    break
-
-                  case "stochastic":
-                  case "Stochastic":
-                  case "stochastic-oscillator":
-                    // Use the same settings from inp1 if it's a Stochastic indicator
-                    if (currentCondition.inp1 && currentCondition.inp1.name === "Stochastic") {
-                      const inp1Params = currentCondition.inp1.input_params || {}
-                      // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
-                      const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
-                      currentCondition.inp2 = {
-                        type: "CUSTOM_I",
-                        name: "Stochastic",
-                        timeframe: tf || currentCondition.inp1.timeframe || "3h",
-                        input_params: {
-                          fastk_period: (settings as any).fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
-                          slowk_period: (settings as any).slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
-                          slowd_period: (settings as any).slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
-                          output: outputValue,
-                        },
-                      }
-                    } else {
-                      // Default Stochastic settings
-                      currentCondition.inp2 = {
-                        type: "CUSTOM_I",
-                        name: "Stochastic",
-                        timeframe: tf,
-                        input_params: {
-                          fastk_period: (settings as any).fastk_period || 14,
-                          slowk_period: (settings as any).slowk_period || 3,
-                          slowd_period: (settings as any).slowd_period || 3,
-                          output: (settings as any).stochasticOutput || "slowk",
-                        },
-                      }
-                    }
-                    break
-
-                  case "open":
-                  case "high":
-                  case "low":
-                  case "close":
-                    currentCondition.inp2 = createConstantInput(settings.indicator, tf)
-                    break
-
-                  default:
-                    currentCondition.inp2 = createConstantInput(settings.indicator, tf)
-                    break
-                }
-              }
-
-              currentCondition.pips = Number(settings.pips || 500)
-            }
-
-            setStatements(newStatements)
-            setShowPipsModal({ show: false, statementIndex: 0, conditionIndex: 0 })
-
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-          onNext={(indicator, timeframe) => {
-            setShowPipsModal({ show: false, statementIndex: 0, conditionIndex: 0 })
-            setPendingOtherIndicator(indicator)
-            setPendingTimeframe(timeframe)
-
-            const conditionIndex = showPipsModal.conditionIndex
-
-            if (indicator === "rsi") {
-              setShowIndicatorModal(true)
-            } else if (indicator === "rsi-ma") {
-              setShowIndicatorModal(true)
-            } else if (indicator === "bollinger") {
-              setPendingBollingerForInp2({
-                statementIndex: showPipsModal.statementIndex,
-                conditionIndex,
-                timeframe,
-              });
-              setShowBollingerModal(true);
-            } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
-              openStochasticModal(showPipsModal.statementIndex, conditionIndex, "inp2", timeframe)
-            } else if (indicator === "volume-ma" || indicator === "volume") {
-              setPendingVolumeIndicatorType(indicator === "volume-ma" ? "volume-ma" : "volume")
-              setShowVolumeModal(true)
-            } else if (indicator === "atr") {
-              // Open ATR modal for ATR indicator
-              openAtrModal(showPipsModal.statementIndex, conditionIndex, "inp2", timeframe)
-            } else if (indicator === "macd") {
-              // Open MACD modal for MACD indicator
-              setEditingComponent({
-                statementIndex: showPipsModal.statementIndex,
-                conditionIndex,
-                componentType: "inp2",
-              })
-              setPendingTimeframe(timeframe)
-              setShowMacdModal(true)
-            } else if (indicator === "supertrend") {
-              // Open Super Trend modal for Super Trend indicator
-              setEditingComponent({
-                statementIndex: showPipsModal.statementIndex,
-                conditionIndex,
-                componentType: "inp2",
-              })
-              setPendingTimeframe(timeframe)
-              setShowSuperTrendModal(true)
-            } else if (indicator === "ma") {
-              // Open MA modal for MA indicator
-              setEditingComponent({
-                statementIndex: showPipsModal.statementIndex,
-                conditionIndex,
-                componentType: "inp2",
-              })
-              setPendingTimeframe(timeframe)
-              setShowMaModal(true)
-            } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
-              setShowPriceSettingsModal(true)
-            }
-          }}
-        />
-      )}
-      {/* Partial TP Modal */}
-      {showPartialTPModal && (
-        <PartialTPSettingsModal
-          onClose={() => setShowPartialTPModal(false)}
-          initialLevels={(() => {
-            if (editingEquityRule) {
-              const rule = statements[editingEquityRule.statementIndex]?.Equity[editingEquityRule.equityIndex]
-              const levels = rule?.inp1?.partial_tp_list
-              if (levels && Array.isArray(levels)) {
-                return levels.map((lvl: any) => ({ Price: lvl.Price, Close: lvl.Close, Action: lvl.Action }))
-              }
-            }
-            return undefined
-          })()}
-          onSave={(settings: PartialTPSettings) => {
-            const newStatements = [...statements]
-            const targetStatementIndex = editingEquityRule ? editingEquityRule.statementIndex : activeStatementIndex
-            const currentStatement = newStatements[targetStatementIndex]
-            if (!currentStatement.Equity) currentStatement.Equity = []
-
-            const newRule: EquityRule = {
-              statement: "and",
-              inp1: {
-                name: "partial_tp",
-                partial_tp_list: settings.partialTpList.map((lvl) => ({
-                  Price: lvl.Price,
-                  Close: lvl.Close,
-                  ...(lvl.Action ? { Action: lvl.Action } : {}),
-                })),
-              },
-            }
-
-            if (editingEquityRule) {
-              currentStatement.Equity[editingEquityRule.equityIndex] = newRule
-            } else {
-              currentStatement.Equity.push(newRule)
-            }
-            setStatements(newStatements)
-            setShowPartialTPModal(false)
-            setEditingEquityRule(null)
-          }}
-        />
-      )}
-      {/* Manage Exit Modal */}
-      {showManageExitModal && (
-        <ManageExitSettingsModal
-          onClose={() => setShowManageExitModal(false)}
-          initialItems={(() => {
-            if (editingEquityRule) {
-              const rule = statements[editingEquityRule.statementIndex]?.Equity[editingEquityRule.equityIndex]
-              const list = (rule?.inp1 as any)?.manage_exit_list
-              if (list && Array.isArray(list)) {
-                return list.map((it: any) => ({ Price: it.Price, Action: it.Action }))
-              }
-            }
-            return undefined
-          })()}
-          onSave={(settings: ManageExitSettings) => {
-            const newStatements = [...statements]
-            const targetStatementIndex = editingEquityRule ? editingEquityRule.statementIndex : activeStatementIndex
-            const currentStatement = newStatements[targetStatementIndex]
-            if (!currentStatement.Equity) currentStatement.Equity = []
-
-            const newRule: EquityRule = {
-              statement: "and",
-              inp1: {
-                name: "manage_exit",
-                manage_exit_list: settings.items.map((it) => ({
-                  Price: it.Price,
-                  Action: it.Action,
-                })),
-              },
-            }
-
-            if (editingEquityRule) {
-              currentStatement.Equity[editingEquityRule.equityIndex] = newRule
-            } else {
-              currentStatement.Equity.push(newRule)
-            }
-            setStatements(newStatements)
-            setShowManageExitModal(false)
-            setEditingEquityRule(null)
-          }}
-        />
-      )}
-      {/* Save Strategy Modal */}
-      {showSaveStrategyModal && (
-        <SaveStrategyModal
-          initialName={strategyName}
-          onClose={() => setShowSaveStrategyModal(false)}
-          onSaveDraft={handleSaveDraft}
-          onProceedToTesting={handleProceedToTesting}
-          isSaving={isSavingDraft}
-        />
-      )}
-      {/* Price Settings Modal */}
-      {showPriceSettingsModal && (
-        <PriceSettingsModal
-          onClose={() => setShowPriceSettingsModal(false)}
-          onSave={(priceType: string) => {
-            setShowPriceSettingsModal(false)
-            handlePriceSelection(priceType)
-          }}
-        />
-      )}
-      {/* At Candle Modal */}
-      {showAtCandleModal && (
-        <AtCandleModal
-          initialValue={selectedCandleNumber || 1}
-          onClose={() => setShowAtCandleModal(false)}
-          onSave={(candleNumber) => {
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-
-            if (activeConditionIndex !== null) {
-              const condition = currentStatement.strategy[activeConditionIndex]
-
-              // Add index to the targeted input (inp1 or inp2)
-              if (targetInput === "inp1" && condition.inp1 && typeof condition.inp1 === "object") {
-                condition.inp1.index = -candleNumber // Store negative value of candle number
-              } else if (targetInput === "inp2" && condition.inp2 && typeof condition.inp2 === "object") {
-                condition.inp2.index = -candleNumber // Store negative value of candle number
               }
 
               setStatements(newStatements)
-              setSelectedCandleNumber(candleNumber)
-            } else {
-              // Fall back to the original handleAtCandleSelection if no specific condition is targeted
-              handleAtCandleSelection(candleNumber)
-            }
+              setShowSuperTrendModal(false)
+              setEditingComponent(null)
+              setPendingTimeframe("3h")
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+          />
+        )}
+        {showMaModal && (
+          <MaSettingsModal
+            onClose={() => {
+              setShowMaModal(false)
+              setEditingComponent(null)
+            }}
+            initialSettings={(() => {
+              if (editingComponent) {
+                const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+                const indicator = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
 
-            setShowAtCandleModal(false)
-          }}
-        />
-      )}
-      {/* Add the CustomTimeframeModal to the JSX, right before the closing div of the component */}
-      {showCustomTimeframeModal && (
-        <CustomTimeframeModal
-          handleTimeframeSelect={handleTimeframeSelect}
-          onClose={() => setShowCustomTimeframeModal(false)}
-          setSelectedTimeframe={setSelectedTimeframe}
-          selectedTimeframe={selectedTimeframe}
-          onSave={handleSaveCustomTimeframe}
-        />
-      )}
-      {/* Trading Session Modal */}
-      {showTradingSessionModal && (
-        <TradingSessionModal
-          onClose={() => setShowTradingSessionModal(false)}
-          initial={
-            statements[activeStatementIndex]?.TradingSession
-              ? {
-                startTime: statements[activeStatementIndex].TradingSession?.Time.input[0] || "09:00",
-                endTime: statements[activeStatementIndex].TradingSession?.Time.input[1] || "17:00",
-                selectedDays: statements[activeStatementIndex].TradingSession?.Day.input.split("") || ["M", "t", "W", "T", "F"],
+                if (indicator && "name" in indicator && (indicator.name === "MA" || indicator.name === "SMA" || indicator.name === "EMA" || indicator.name === "HMA") && "input_params" in indicator) {
+                  return {
+                    maType: indicator.input_params?.ma_type || indicator.input_params?.maType || "SMA",
+                    maLength: indicator.input_params?.ma_length || indicator.input_params?.maLength || 20,
+                  }
+                }
+              } else {
+                const currentStatement = statements[activeStatementIndex]
+                const lastCondition = currentStatement?.strategy[currentStatement.strategy.length - 1]
+                const indicator = lastCondition?.inp1
+
+                if (indicator && "name" in indicator && (indicator.name === "MA" || indicator.name === "SMA" || indicator.name === "EMA" || indicator.name === "HMA") && "input_params" in indicator) {
+                  return {
+                    maType: indicator.input_params?.ma_type || indicator.input_params?.maType || "SMA",
+                    maLength: indicator.input_params?.ma_length || indicator.input_params?.maLength || 20,
+                  }
+                }
               }
-              : undefined
-          }
-          onSave={(config: { startTime: string; endTime: string; selectedDays: string[] }) => {
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-            currentStatement.TradingSession = {
-              Timezone: "US/Eastern", // Default timezone
-              Day: {
-                Operator: "within",
-                input: config.selectedDays.join(""),
-              },
-              Time: {
-                Operator: "within",
-                input: [config.startTime, config.endTime],
-              },
+              return undefined
+            })()}
+            onSave={(settings) => {
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
+
+              if (editingComponent) {
+                const condition = currentStatement.strategy[editingComponent.conditionIndex]
+                const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
+                const timeframe = pendingTimeframe || "3h"
+
+                if (targetIndicator && "name" in targetIndicator && (targetIndicator.name === "MA" || targetIndicator.name === "SMA" || targetIndicator.name === "EMA" || targetIndicator.name === "HMA")) {
+                  // Update existing MA indicator
+                  targetIndicator.input_params = {
+                    ma_type: settings.maType,
+                    ma_length: settings.maLength,
+                  }
+                  // Update name based on MA type
+                  if (settings.maType === "SMA") {
+                    targetIndicator.name = "SMA"
+                  } else if (settings.maType === "EMA") {
+                    targetIndicator.name = "EMA"
+                  } else if (settings.maType === "HMA") {
+                    targetIndicator.name = "HMA"
+                  } else {
+                    targetIndicator.name = "MA"
+                  }
+                } else if (editingComponent.componentType === "inp2") {
+                  // Create new MA indicator in inp2
+                  const maName = settings.maType === "SMA" ? "SMA" : settings.maType === "EMA" ? "EMA" : settings.maType === "HMA" ? "HMA" : "MA"
+                  condition.inp2 = {
+                    type: "CUSTOM_I",
+                    name: maName,
+                    timeframe: timeframe,
+                    input_params: {
+                      ma_type: settings.maType,
+                      ma_length: settings.maLength,
+                    },
+                  }
+                } else if (editingComponent.componentType === "inp1") {
+                  // Create new MA indicator in inp1
+                  const maName = settings.maType === "SMA" ? "SMA" : settings.maType === "EMA" ? "EMA" : settings.maType === "HMA" ? "HMA" : "MA"
+                  condition.inp1 = {
+                    type: "CUSTOM_I",
+                    name: maName,
+                    timeframe: timeframe,
+                    input_params: {
+                      ma_type: settings.maType,
+                      ma_length: settings.maLength,
+                    },
+                  }
+                }
+              } else {
+                const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+                if (lastCondition.inp1 && "name" in lastCondition.inp1 && (lastCondition.inp1.name === "MA" || lastCondition.inp1.name === "SMA" || lastCondition.inp1.name === "EMA" || lastCondition.inp1.name === "HMA")) {
+                  lastCondition.inp1.input_params = {
+                    ma_type: settings.maType,
+                    ma_length: settings.maLength,
+                  }
+                  // Update name based on MA type
+                  if (settings.maType === "SMA") {
+                    lastCondition.inp1.name = "SMA"
+                  } else if (settings.maType === "EMA") {
+                    lastCondition.inp1.name = "EMA"
+                  } else if (settings.maType === "HMA") {
+                    lastCondition.inp1.name = "HMA"
+                  } else {
+                    lastCondition.inp1.name = "MA"
+                  }
+                }
+              }
+
+              setStatements(newStatements)
+              setShowMaModal(false)
+              setEditingComponent(null)
+              setPendingTimeframe("3h")
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+          />
+        )}
+        {showChannelModal && (
+          <ChannelSettingsModal
+            onClose={() => setShowChannelModal(false)}
+            onSave={(settings) => {
+              // Update Channel settings
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
+
+              if (editingComponent) {
+                const condition = currentStatement.strategy[editingComponent.conditionIndex]
+
+                if (condition.operator_name === "inside_channel") {
+                  if (settings) {
+                    condition.inp2 = {
+                      type: "channel",
+                      value: settings.value || 0,
+                    }
+                  }
+                }
+              } else {
+                // Fallback to original behavior
+                const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+                if (lastCondition.operator_name === "inside_channel") {
+                  if (settings) {
+                    lastCondition.inp2 = {
+                      type: "channel",
+                      value: settings.value || 0,
+                    }
+                  }
+                }
+              }
+
+              setStatements(newStatements)
+              setShowChannelModal(false)
+              setEditingComponent(null)
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+          />
+        )}
+        {/* Derivative Settings Modal */}
+        {showDerivativeModal && (
+          <DerivativeSettingsModal
+            onClose={() => setShowDerivativeModal(false)}
+            onSave={(settings) => {
+              handleDerivativeSettings(settings)
+              setShowDerivativeModal(false)
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+          />
+        )}
+        {/* SL/TP Settings Modal */}
+        {showSLTPSettings.show && (
+          <SLTPSettingsModal
+            type={showSLTPSettings.type}
+            onClose={() => {
+              setShowSLTPSettings({ show: false, type: "SL" })
+              setEditingEquityRule(null)
+            }}
+            initialSettings={editingEquityRule ? (() => {
+              const rule = statements[editingEquityRule.statementIndex]?.Equity[editingEquityRule.equityIndex]
+              if (!rule) return undefined
+
+              // Parse the operator string to extract settings
+              const operator = rule.operator || ""
+              const type = showSLTPSettings.type
+
+              // Parse different formats:
+              // Simple: "SL = Entry_Price - 100pips"
+              // Trailing: "inp1 = inp2 - 100pips" with TrailingStop
+              // Percentage: "SL = Entry_Price * 0.95"
+              // Fixed: "SL = 1800"
+
+              if (rule.inp1 && "name" in rule.inp1 && rule.inp1.input_params?.TrailingStop) {
+                // Trailing format
+                const pipsMatch = operator.match(/([+-])\s*(\d+)pips/)
+                return {
+                  formatType: "trailing",
+                  value: pipsMatch ? pipsMatch[2] : "100",
+                  direction: pipsMatch ? pipsMatch[1] : "-",
+                  trailingStop: true,
+                  trailingStep: rule.inp1.input_params.TrailingStep?.replace("pips", "") || "0",
+                  inp2: rule.inp2 && "name" in rule.inp2 ? rule.inp2.name : "Entry_Price",
+                }
+              } else if (operator.includes("pips")) {
+                // Simple pips format
+                const pipsMatch = operator.match(/([+-])\s*(\d+)pips/)
+                return {
+                  formatType: "simple",
+                  valueType: "pips",
+                  value: pipsMatch ? pipsMatch[2] : "100",
+                  direction: pipsMatch ? pipsMatch[1] : "-",
+                }
+              } else if (operator.includes("*")) {
+                // Percentage format
+                const multiplierMatch = operator.match(/\*\s*([\d.]+)/)
+                if (multiplierMatch) {
+                  const multiplier = parseFloat(multiplierMatch[1])
+                  const percentage = type === "SL" ? (1 - multiplier) * 100 : (multiplier - 1) * 100
+                  return {
+                    formatType: "simple",
+                    valueType: "percentage",
+                    value: percentage.toFixed(2),
+                  }
+                }
+              } else if (operator.match(/=\s*\d+/)) {
+                // Fixed price format
+                const valueMatch = operator.match(/=\s*(\d+)/)
+                return {
+                  formatType: "simple",
+                  valueType: "fixed",
+                  value: valueMatch ? valueMatch[1] : "1800",
+                }
+              }
+
+              return undefined
+            })() : undefined}
+            onSave={(settings) => {
+              handleSLTPSettings(settings)
+              setShowSLTPSettings({ show: false, type: "SL" })
+              setEditingEquityRule(null)
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+          />
+        )}
+        {/* Pips Settings Modal */}
+        {showPipsModal.show && (
+          <PipsSettingsModal
+            initialValue={statements[showPipsModal.statementIndex]?.strategy[showPipsModal.conditionIndex]?.pips || 500}
+            onClose={() => setShowPipsModal({ show: false, statementIndex: 0, conditionIndex: 0 })}
+            currentInp1={statements[showPipsModal.statementIndex]?.strategy[showPipsModal.conditionIndex]?.inp1}
+            onSave={(settings) => {
+              const newStatements = [...statements]
+              const currentStatement = newStatements[showPipsModal.statementIndex]
+              const currentCondition = currentStatement.strategy[showPipsModal.conditionIndex]
+
+              if (
+                currentCondition.operator_name === "atmost_above_pips" ||
+                currentCondition.operator_name === "atmost_below_pips"
+              ) {
+                const tf = settings.timeframe || "3h"
+
+                if (settings.valueType === "value" && settings.customValue) {
+                  currentCondition.inp2 = {
+                    type: "value",
+                    value: Number(settings.customValue),
+                  }
+                } else if ((settings.valueType === "indicator" || settings.valueType === "other") && settings.indicator) {
+                  switch (settings.indicator) {
+                    case "rsi":
+                      currentCondition.inp2 = {
+                        type: "I",
+                        name: "RSI",
+                        timeframe: tf,
+                        input_params: {
+                          timeperiod: settings.rsiLength || 14,
+                          source: settings.rsiSource?.toLowerCase() || "close",
+                        },
+                      }
+                      break
+
+                    case "rsi-ma":
+                      currentCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "RSI_MA",
+                        timeframe: tf,
+                        input_params: {
+                          rsi_length: settings.rsiMaLength || 14,
+                          rsi_source: settings.rsiSource || "Close",
+                          ma_type: settings.maType || "SMA",
+                          ma_length: settings.maLength || 14,
+                          bb_stddev: settings.bbStdDev || 2.0,
+                        },
+                      }
+                      break
+
+                    case "volume-ma":
+                      currentCondition.inp2 = {
+                        type: "CUSTOM_I",
+                        name: "Volume_MA",
+                        timeframe: tf,
+                        input_params: {
+                          ma_length: settings.volumeMaLength || 20,
+                        },
+                      }
+                      break
+
+                    case "bollinger":
+                      currentCondition.inp2 = {
+                        type: "I",
+                        name: "BBANDS",
+                        timeframe: tf,
+                        input: settings.band || "lowerband",
+                        input_params: {
+                          timeperiod: settings.timeperiod || 17,
+                          source: settings.bbSource || "close",
+                          ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
+                          ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
+                          ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
+                        },
+                      }
+                      break
+
+                    case "volume":
+                      currentCondition.inp2 = createConstantInput("volume", tf)
+                      break
+
+                    case "atr":
+                      // Use the same settings from inp1 if it's an ATR indicator
+                      if (currentCondition.inp1 && currentCondition.inp1.name === "ATR") {
+                        const inp1Params = currentCondition.inp1.input_params || {}
+                        currentCondition.inp2 = {
+                          type: "CUSTOM_I",
+                          name: "ATR",
+                          timeframe: tf || currentCondition.inp1.timeframe || "3h",
+                          input_params: {
+                            atr_length: inp1Params.atr_length || 14,
+                            atr_smoothing: inp1Params.atr_smoothing || "RMA",
+                          },
+                        }
+                      } else {
+                        // Default ATR settings
+                        currentCondition.inp2 = {
+                          type: "CUSTOM_I",
+                          name: "ATR",
+                          timeframe: tf,
+                          input_params: {
+                            atr_length: 14,
+                            atr_smoothing: "RMA",
+                          },
+                        }
+                      }
+                      break
+
+                    case "stochastic":
+                    case "Stochastic":
+                    case "stochastic-oscillator":
+                      // Use the same settings from inp1 if it's a Stochastic indicator
+                      if (currentCondition.inp1 && currentCondition.inp1.name === "Stochastic") {
+                        const inp1Params = currentCondition.inp1.input_params || {}
+                        // Use stochasticOutput if provided (for %K/%D selection), otherwise use inp1's output
+                        const outputValue = (settings as any).stochasticOutput || inp1Params.output || "slowk"
+                        currentCondition.inp2 = {
+                          type: "CUSTOM_I",
+                          name: "Stochastic",
+                          timeframe: tf || currentCondition.inp1.timeframe || "3h",
+                          input_params: {
+                            fastk_period: (settings as any).fastk_period || inp1Params.fastk_period || inp1Params.kLength || 14,
+                            slowk_period: (settings as any).slowk_period || inp1Params.slowk_period || inp1Params.kSmoothing || 3,
+                            slowd_period: (settings as any).slowd_period || inp1Params.slowd_period || inp1Params.dSmoothing || 3,
+                            output: outputValue,
+                          },
+                        }
+                      } else {
+                        // Default Stochastic settings
+                        currentCondition.inp2 = {
+                          type: "CUSTOM_I",
+                          name: "Stochastic",
+                          timeframe: tf,
+                          input_params: {
+                            fastk_period: (settings as any).fastk_period || 14,
+                            slowk_period: (settings as any).slowk_period || 3,
+                            slowd_period: (settings as any).slowd_period || 3,
+                            output: (settings as any).stochasticOutput || "slowk",
+                          },
+                        }
+                      }
+                      break
+
+                    case "open":
+                    case "high":
+                    case "low":
+                    case "close":
+                      currentCondition.inp2 = createConstantInput(settings.indicator, tf)
+                      break
+
+                    default:
+                      currentCondition.inp2 = createConstantInput(settings.indicator, tf)
+                      break
+                  }
+                }
+
+                currentCondition.pips = Number(settings.pips || 500)
+              }
+
+              setStatements(newStatements)
+              setShowPipsModal({ show: false, statementIndex: 0, conditionIndex: 0 })
+
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+            onNext={(indicator, timeframe) => {
+              setShowPipsModal({ show: false, statementIndex: 0, conditionIndex: 0 })
+              setPendingOtherIndicator(indicator)
+              setPendingTimeframe(timeframe)
+
+              const conditionIndex = showPipsModal.conditionIndex
+
+              if (indicator === "rsi") {
+                setShowIndicatorModal(true)
+              } else if (indicator === "rsi-ma") {
+                setShowIndicatorModal(true)
+              } else if (indicator === "bollinger") {
+                setPendingBollingerForInp2({
+                  statementIndex: showPipsModal.statementIndex,
+                  conditionIndex,
+                  timeframe,
+                });
+                setShowBollingerModal(true);
+              } else if (indicator === "stochastic" || indicator === "stochastic-oscillator" || indicator === "Stochastic") {
+                openStochasticModal(showPipsModal.statementIndex, conditionIndex, "inp2", timeframe)
+              } else if (indicator === "volume-ma" || indicator === "volume") {
+                setPendingVolumeIndicatorType(indicator === "volume-ma" ? "volume-ma" : "volume")
+                setShowVolumeModal(true)
+              } else if (indicator === "atr") {
+                // Open ATR modal for ATR indicator
+                openAtrModal(showPipsModal.statementIndex, conditionIndex, "inp2", timeframe)
+              } else if (indicator === "macd") {
+                // Open MACD modal for MACD indicator
+                setEditingComponent({
+                  statementIndex: showPipsModal.statementIndex,
+                  conditionIndex,
+                  componentType: "inp2",
+                })
+                setPendingTimeframe(timeframe)
+                setShowMacdModal(true)
+              } else if (indicator === "supertrend") {
+                // Open Super Trend modal for Super Trend indicator
+                setEditingComponent({
+                  statementIndex: showPipsModal.statementIndex,
+                  conditionIndex,
+                  componentType: "inp2",
+                })
+                setPendingTimeframe(timeframe)
+                setShowSuperTrendModal(true)
+              } else if (indicator === "ma") {
+                // Open MA modal for MA indicator
+                setEditingComponent({
+                  statementIndex: showPipsModal.statementIndex,
+                  conditionIndex,
+                  componentType: "inp2",
+                })
+                setPendingTimeframe(timeframe)
+                setShowMaModal(true)
+              } else if (["close", "open", "high", "low", "price"].includes(indicator)) {
+                setShowPriceSettingsModal(true)
+              }
+            }}
+          />
+        )}
+        {/* Partial TP Modal */}
+        {showPartialTPModal && (
+          <PartialTPSettingsModal
+            onClose={() => setShowPartialTPModal(false)}
+            initialLevels={(() => {
+              if (editingEquityRule) {
+                const rule = statements[editingEquityRule.statementIndex]?.Equity[editingEquityRule.equityIndex]
+                const levels = rule?.inp1?.partial_tp_list
+                if (levels && Array.isArray(levels)) {
+                  return levels.map((lvl: any) => ({ Price: lvl.Price, Close: lvl.Close, Action: lvl.Action }))
+                }
+              }
+              return undefined
+            })()}
+            onSave={(settings: PartialTPSettings) => {
+              const newStatements = [...statements]
+              const targetStatementIndex = editingEquityRule ? editingEquityRule.statementIndex : activeStatementIndex
+              const currentStatement = newStatements[targetStatementIndex]
+              if (!currentStatement.Equity) currentStatement.Equity = []
+
+              const newRule: EquityRule = {
+                statement: "and",
+                inp1: {
+                  name: "partial_tp",
+                  partial_tp_list: settings.partialTpList.map((lvl) => ({
+                    Price: lvl.Price,
+                    Close: lvl.Close,
+                    ...(lvl.Action ? { Action: lvl.Action } : {}),
+                  })),
+                },
+              }
+
+              if (editingEquityRule) {
+                currentStatement.Equity[editingEquityRule.equityIndex] = newRule
+              } else {
+                currentStatement.Equity.push(newRule)
+              }
+              setStatements(newStatements)
+              setShowPartialTPModal(false)
+              setEditingEquityRule(null)
+            }}
+          />
+        )}
+        {/* Manage Exit Modal */}
+        {showManageExitModal && (
+          <ManageExitSettingsModal
+            onClose={() => setShowManageExitModal(false)}
+            initialItems={(() => {
+              if (editingEquityRule) {
+                const rule = statements[editingEquityRule.statementIndex]?.Equity[editingEquityRule.equityIndex]
+                const list = (rule?.inp1 as any)?.manage_exit_list
+                if (list && Array.isArray(list)) {
+                  return list.map((it: any) => ({ Price: it.Price, Action: it.Action }))
+                }
+              }
+              return undefined
+            })()}
+            onSave={(settings: ManageExitSettings) => {
+              const newStatements = [...statements]
+              const targetStatementIndex = editingEquityRule ? editingEquityRule.statementIndex : activeStatementIndex
+              const currentStatement = newStatements[targetStatementIndex]
+              if (!currentStatement.Equity) currentStatement.Equity = []
+
+              const newRule: EquityRule = {
+                statement: "and",
+                inp1: {
+                  name: "manage_exit",
+                  manage_exit_list: settings.items.map((it) => ({
+                    Price: it.Price,
+                    Action: it.Action,
+                  })),
+                },
+              }
+
+              if (editingEquityRule) {
+                currentStatement.Equity[editingEquityRule.equityIndex] = newRule
+              } else {
+                currentStatement.Equity.push(newRule)
+              }
+              setStatements(newStatements)
+              setShowManageExitModal(false)
+              setEditingEquityRule(null)
+            }}
+          />
+        )}
+        {/* Save Strategy Modal */}
+        {showSaveStrategyModal && (
+          <SaveStrategyModal
+            initialName={strategyName}
+            onClose={() => setShowSaveStrategyModal(false)}
+            onSaveDraft={handleSaveDraft}
+            onProceedToTesting={handleProceedToTesting}
+            isSaving={isSavingDraft}
+          />
+        )}
+        {/* Price Settings Modal */}
+        {showPriceSettingsModal && (
+          <PriceSettingsModal
+            onClose={() => setShowPriceSettingsModal(false)}
+            onSave={(priceType: string) => {
+              setShowPriceSettingsModal(false)
+              handlePriceSelection(priceType)
+            }}
+          />
+        )}
+        {/* At Candle Modal */}
+        {showAtCandleModal && (
+          <AtCandleModal
+            initialValue={selectedCandleNumber || 1}
+            onClose={() => setShowAtCandleModal(false)}
+            onSave={(candleNumber) => {
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
+
+              if (activeConditionIndex !== null) {
+                const condition = currentStatement.strategy[activeConditionIndex]
+
+                // Add index to the targeted input (inp1 or inp2)
+                if (targetInput === "inp1" && condition.inp1 && typeof condition.inp1 === "object") {
+                  condition.inp1.index = -candleNumber // Store negative value of candle number
+                } else if (targetInput === "inp2" && condition.inp2 && typeof condition.inp2 === "object") {
+                  condition.inp2.index = -candleNumber // Store negative value of candle number
+                }
+
+                setStatements(newStatements)
+                setSelectedCandleNumber(candleNumber)
+              } else {
+                // Fall back to the original handleAtCandleSelection if no specific condition is targeted
+                handleAtCandleSelection(candleNumber)
+              }
+
+              setShowAtCandleModal(false)
+            }}
+          />
+        )}
+        {/* Add the CustomTimeframeModal to the JSX, right before the closing div of the component */}
+        {showCustomTimeframeModal && (
+          <CustomTimeframeModal
+            handleTimeframeSelect={handleTimeframeSelect}
+            onClose={() => setShowCustomTimeframeModal(false)}
+            setSelectedTimeframe={setSelectedTimeframe}
+            selectedTimeframe={selectedTimeframe}
+            onSave={handleSaveCustomTimeframe}
+          />
+        )}
+        {/* Trading Session Modal */}
+        {showTradingSessionModal && (
+          <TradingSessionModal
+            onClose={() => setShowTradingSessionModal(false)}
+            initial={
+              statements[activeStatementIndex]?.TradingSession
+                ? {
+                  startTime: statements[activeStatementIndex].TradingSession?.Time.input[0] || "09:00",
+                  endTime: statements[activeStatementIndex].TradingSession?.Time.input[1] || "17:00",
+                  selectedDays: statements[activeStatementIndex].TradingSession?.Day.input.split("") || ["M", "t", "W", "T", "F"],
+                }
+                : undefined
             }
-            setStatements(newStatements)
-            setShowTradingSessionModal(false)
-          }}
-        />
-      )}
-      {/* Tooltip */}
-      {hoveredComponent.show && hoveredComponent.content && (
-        <div
-          className="fixed z-50 pointer-events-none "
-          style={{
-            left: hoveredComponent.position.x,
-            top: hoveredComponent.position.y,
-            transform: "translate(-50%, -100%)", // Position above the element
-          }}
-        >
-          <div className="bg-[#C5C5C5] text-black px-3 py-2 mt-3 rounded-md mr-2 mb-2  px-3 py-2 rounded-lg shadow-lg border border-[#4A4D62] animate-in fade-in-0 zoom-in-95 duration-200">
-            <div className="text-xs space-y-1">
-              {Object.entries(hoveredComponent.content.details).map(([key, value]) => (
-                <div key={key} className="flex justify-between gap-2">
-                  <span className=" text-black capitalize">{key.replace("_", " ")}:</span>
-                  <span className=" text-black">{String(value)}</span>
-                </div>
-              ))}
-            </div>
-            {/* Tooltip arrow pointing downward */}
-            <div className="absolute top-full left-1/2 transform -translate-x-1/2">
-              <div className="w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-[#2A2D42]"></div>
+            onSave={(config: { startTime: string; endTime: string; selectedDays: string[] }) => {
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
+              currentStatement.TradingSession = {
+                Timezone: "US/Eastern", // Default timezone
+                Day: {
+                  Operator: "within",
+                  input: config.selectedDays.join(""),
+                },
+                Time: {
+                  Operator: "within",
+                  input: [config.startTime, config.endTime],
+                },
+              }
+              setStatements(newStatements)
+              setShowTradingSessionModal(false)
+            }}
+          />
+        )}
+        {/* Tooltip */}
+        {hoveredComponent.show && hoveredComponent.content && (
+          <div
+            className="fixed z-50 pointer-events-none "
+            style={{
+              left: hoveredComponent.position.x,
+              top: hoveredComponent.position.y,
+              transform: "translate(-50%, -100%)", // Position above the element
+            }}
+          >
+            <div className="bg-[#C5C5C5] text-black px-4 py-2 rounded-lg shadow-xl border border-[#4A4D62] animate-in fade-in-0 zoom-in-95 duration-200">
+              <div className="text-xs space-y-1">
+                {Object.entries(hoveredComponent.content.details).map(([key, value]) => (
+                  <div key={key} className="flex justify-between gap-4">
+                    <span className="text-black/60 capitalize font-medium">{key.replace("_", " ")}:</span>
+                    <span className="text-black font-semibold">{String(value)}</span>
+                  </div>
+                ))}
+              </div>
+              {/* Tooltip arrow pointing downward */}
+              <div className="absolute top-full left-1/2 transform -translate-x-1/2">
+                <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-transparent border-t-[#C5C5C5]"></div>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-      {/* Accumulator Settings Modal */}
-      {showAccumulatorModal.show && (
-        <AccumulatorSettingsModal
-          onClose={() => setShowAccumulatorModal({ show: false, statementIndex: 0, conditionIndex: 0 })}
-          initialSettings={(() => {
-            const cond = statements[showAccumulatorModal.statementIndex]?.strategy[showAccumulatorModal.conditionIndex]
-            const fp = cond?.Accumulate?.forPeriod as string | undefined
-            if (!fp) return undefined
-            if (fp.startsWith("exactly ")) return { type: "exactly" as const, value: Number(fp.replace("exactly ", "")) }
-            if (fp.startsWith("at least ")) return { type: "at least" as const, value: Number(fp.replace("at least ", "")) }
-            if (fp.startsWith("up to ")) return { type: "up to" as const, value: Number(fp.replace("up to ", "")) }
-            return undefined
-          })()}
-          onSave={(settings) => {
-            const newStatements = [...statements]
-            const condition =
-              newStatements[showAccumulatorModal.statementIndex].strategy[showAccumulatorModal.conditionIndex]
+        )}
+        {/* Accumulator Settings Modal */}
+        {showAccumulatorModal.show && (
+          <AccumulatorSettingsModal
+            onClose={() => setShowAccumulatorModal({ show: false, statementIndex: 0, conditionIndex: 0 })}
+            initialSettings={(() => {
+              const cond = statements[showAccumulatorModal.statementIndex]?.strategy[showAccumulatorModal.conditionIndex]
+              const fp = cond?.Accumulate?.forPeriod as string | undefined
+              if (!fp) return undefined
+              if (fp.startsWith("exactly ")) return { type: "exactly" as const, value: Number(fp.replace("exactly ", "")) }
+              if (fp.startsWith("at least ")) return { type: "at least" as const, value: Number(fp.replace("at least ", "")) }
+              if (fp.startsWith("up to ")) return { type: "up to" as const, value: Number(fp.replace("up to ", "")) }
+              return undefined
+            })()}
+            onSave={(settings) => {
+              const newStatements = [...statements]
+              const condition =
+                newStatements[showAccumulatorModal.statementIndex].strategy[showAccumulatorModal.conditionIndex]
 
-            // Add the accumulator to the condition
-            condition.Accumulate = {
-              forPeriod: `${settings.type} ${settings.value}`,
-            }
-
-            setStatements(newStatements)
-            setShowAccumulatorModal({ show: false, statementIndex: 0, conditionIndex: 0 })
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-        />
-      )}
-      {/* Then Settings Modal */}
-      {showThenModal.show && (
-        <ThenSettingsModal
-          onClose={() => setShowThenModal({ show: false, statementIndex: 0, conditionIndex: 0 })}
-          onSave={(settings) => {
-            const newStatements = [...statements]
-            const condition = newStatements[showThenModal.statementIndex].strategy[showThenModal.conditionIndex]
-
-            // Add the then to the condition
-            condition.Then = {
-              Wait: settings.wait,
-              count: settings.count,
-              candle: settings.candle,
-            }
-
-            setStatements(newStatements)
-            setShowThenModal({ show: false, statementIndex: 0, conditionIndex: 0 })
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-          customTimeframes={customTimeframes}
-          onSaveCustomTimeframe={handleSaveCustomTimeframe}
-        />
-      )}
-      {showIndicatorModal && pendingOtherIndicator === "rsi" && (
-        <RsiSettingsModal
-          onClose={() => setShowIndicatorModal(false)}
-          initialSettings={{
-            indicatorType: "rsi",
-            rsiLength: "14",
-            source: "Close",
-            maLength: "14",
-            maType: "SMA",
-            bbStdDev: "2.0",
-            timeframe: pendingTimeframe,
-          }}
-          onSave={(settings: any) => {
-            setShowIndicatorModal(false)
-            // Save the indicator settings to inp2 as needed
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-
-            if (settings.indicatorType === "rsi-ma") {
-              lastCondition.inp2 = {
-                type: "CUSTOM_I",
-                name: "RSI_MA",
-                timeframe: pendingTimeframe,
-                input_params: {
-                  rsi_length: Number(settings.rsiLength),
-                  rsi_source: settings.source || "Close",
-                  ma_type: settings.maType || "SMA",
-                  ma_length: Number(settings.maLength) || 14,
-                  bb_stddev: Number(settings.bbStdDev) || 2.0,
-                },
+              // Add the accumulator to the condition
+              condition.Accumulate = {
+                forPeriod: `${settings.type} ${settings.value}`,
               }
-            } else {
-              lastCondition.inp2 = {
-                type: "I",
-                name: "RSI",
-                timeframe: pendingTimeframe,
-                input_params: {
-                  timeperiod: Number(settings.rsiLength),
-                  source: settings.source?.toLowerCase() || "close",
 
-                },
-              }
-            }
-            setStatements(newStatements)
-          }}
-        />
-      )}
-      {showIndicatorModal && pendingOtherIndicator === "rsi-ma" && (
-        <RsiSettingsModal
-          onClose={() => setShowIndicatorModal(false)}
-          initialSettings={{
-            indicatorType: "rsi-ma",
-            rsiLength: "14",
-            source: "Close",
-            maLength: "14",
-            maType: "SMA",
-            bbStdDev: "2.0",
-            timeframe: pendingTimeframe,
-          }}
-          onSave={(settings: any) => {
-            setShowIndicatorModal(false)
-            // Save the indicator settings to inp2 as needed
-            const newStatements = [...statements]
-            const currentStatement = newStatements[activeStatementIndex]
-            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-
-            if (settings.indicatorType === "rsi-ma") {
-              lastCondition.inp2 = {
-                type: "CUSTOM_I",
-                name: "RSI_MA",
-                timeframe: pendingTimeframe,
-                input_params: {
-                  rsi_length: Number(settings.rsiLength),
-                  rsi_source: settings.source || "Close",
-                  ma_type: settings.maType || "SMA",
-                  ma_length: Number(settings.maLength) || 14,
-                  bb_stddev: Number(settings.bbStdDev) || 2.0,
-                },
-              }
-            } else {
-              lastCondition.inp2 = {
-                type: "I",
-                name: "RSI",
-                timeframe: pendingTimeframe,
-                input_params: {
-                  timeperiod: Number(settings.rsiLength),
-                  source: settings.source?.toLowerCase() || "close",
-                },
-              }
-            }
-            setStatements(newStatements)
-          }}
-        />
-      )}
-
-      {/* Moving Operator Settings Modal */}
-      {showMovingOperatorModal.show && (
-        <MovingOperatorSettingsModal
-          onClose={() => setShowMovingOperatorModal({ show: false, statementIndex: 0, conditionIndex: 0 })}
-          operatorType={(() => {
-            const condition = statements[showMovingOperatorModal.statementIndex]?.strategy[showMovingOperatorModal.conditionIndex]
-            return condition?.operator_name as "moving_up" | "moving_down"
-          })()}
-          initialSettings={(() => {
-            const condition = statements[showMovingOperatorModal.statementIndex]?.strategy[showMovingOperatorModal.conditionIndex]
-            if (condition?.Operator) {
-              return {
-                logical_operator: condition.Operator.params.logical_operator,
-                value: condition.Operator.params.value,
-                unit: condition.Operator.params.unit,
-              }
-            }
-            return undefined
-          })()}
-          onSave={(settings) => {
-            const newStatements = [...statements]
-            const condition = newStatements[showMovingOperatorModal.statementIndex].strategy[showMovingOperatorModal.conditionIndex]
-            const operatorType = condition.operator_name as "moving_up" | "moving_down"
-
-            // Update the operator structure
-            condition.Operator = {
-              operator_name: operatorType,
-              params: {
-                logical_operator: settings.logical_operator,
-                value: settings.value,
-                unit: settings.unit,
-              },
-            }
-
-            setStatements(newStatements)
-            setShowMovingOperatorModal({ show: false, statementIndex: 0, conditionIndex: 0 })
-            setTimeout(() => {
-              searchInputRefs.current[activeStatementIndex]?.focus()
-            }, 100)
-          }}
-        />
-      )}
-
-      {showStochasticModal && (
-        <StochasticSettingsModal
-          onClose={() => {
-            setShowStochasticModal(false)
-            setEditingComponent(null)
-            setStochasticModalTarget(null)
-            setPendingTimeframe("3h")
-          }}
-          initialSettings={getStochasticInitialSettings()}
-          onSave={applyStochasticSettings}
-        />
-      )}
-
-      {/* Edit Strategy Name Modal */}
-      {showEditNameModal && (
-        <EditStrategyModal
-          strategy={{
-            id: strategyId || localStorage.getItem("strategy_id") || "0",
-            name: strategyName,
-            instrument: initialInstrument || "XAU/USD",
-            side: statements[0]?.side || "S",
-            strategy: statements[0]?.strategy || [],
-            equity: statements[0]?.Equity || [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          }}
-          isEdit={true}
-          onClose={() => setShowEditNameModal(false)}
-          onSave={handleEditStrategyName}
-        />
-      )}
-
-      {/* Developer Mode Full Page */}
-      {showDeveloperModeModal && (
-        <div className="fixed inset-0 z-50 bg-[#141721]">
-          <DeveloperModePage
-            onBack={async () => {
-              setShowDeveloperModeModal(false)
-              setEditingCustomComponent(null)
-              setCurrentComponentId(null)
-              // Refresh custom components list when returning from developer mode
-              try {
-                const components = await listCustomComponents()
-                // Dispatch event to notify sidebar to refresh
-                window.dispatchEvent(new CustomEvent('refresh-custom-components', { detail: components }))
-              } catch (error) {
-                console.error('Failed to refresh custom components:', error)
-              }
+              setStatements(newStatements)
+              setShowAccumulatorModal({ show: false, statementIndex: 0, conditionIndex: 0 })
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
             }}
-            onCompile={handleDeveloperModeCompile}
-            onSave={handleDeveloperModeSave}
-            onGoToBacktest={(strategyId) => {
-              // Close developer mode and navigate to backtesting
-              setShowDeveloperModeModal(false)
-              setEditingCustomComponent(null)
-              setCurrentComponentId(null)
-              // Navigate to strategy testing page with the custom strategy ID
-              router.push(`/strategy-testing?id=${strategyId}&custom=true`)
-            }}
-            onLoadStrategies={async () => {
-              // Load custom strategies list
-              const strategies = await listCustomStrategies()
-              return strategies
-            }}
-            onDeleteStrategy={async (strategyId) => {
-              // Delete a custom strategy
-              await deleteCustomStrategy(strategyId)
-            }}
-            onLoadStrategy={async (strategyId) => {
-              // Load a specific custom strategy for editing
-              const strategy = await getCustomStrategy(strategyId)
-              return { code: strategy.code || strategy.compiled_code || "", name: strategy.name }
-            }}
-            editingComponent={editingCustomComponent}
           />
-        </div>
-      )}
-    </div>
+        )}
+        {/* Then Settings Modal */}
+        {showThenModal.show && (
+          <ThenSettingsModal
+            onClose={() => setShowThenModal({ show: false, statementIndex: 0, conditionIndex: 0 })}
+            onSave={(settings) => {
+              const newStatements = [...statements]
+              const condition = newStatements[showThenModal.statementIndex].strategy[showThenModal.conditionIndex]
+
+              // Add the then to the condition
+              condition.Then = {
+                Wait: settings.wait,
+                count: settings.count,
+                candle: settings.candle,
+              }
+
+              setStatements(newStatements)
+              setShowThenModal({ show: false, statementIndex: 0, conditionIndex: 0 })
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+            customTimeframes={customTimeframes}
+            onSaveCustomTimeframe={handleSaveCustomTimeframe}
+          />
+        )}
+        {showIndicatorModal && pendingOtherIndicator === "rsi" && (
+          <RsiSettingsModal
+            onClose={() => setShowIndicatorModal(false)}
+            initialSettings={{
+              indicatorType: "rsi",
+              rsiLength: "14",
+              source: "Close",
+              maLength: "14",
+              maType: "SMA",
+              bbStdDev: "2.0",
+              timeframe: pendingTimeframe,
+            }}
+            onSave={(settings: any) => {
+              setShowIndicatorModal(false)
+              // Save the indicator settings to inp2 as needed
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
+              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+              if (settings.indicatorType === "rsi-ma") {
+                lastCondition.inp2 = {
+                  type: "CUSTOM_I",
+                  name: "RSI_MA",
+                  timeframe: pendingTimeframe,
+                  input_params: {
+                    rsi_length: Number(settings.rsiLength),
+                    rsi_source: settings.source || "Close",
+                    ma_type: settings.maType || "SMA",
+                    ma_length: Number(settings.maLength) || 14,
+                    bb_stddev: Number(settings.bbStdDev) || 2.0,
+                  },
+                }
+              } else {
+                lastCondition.inp2 = {
+                  type: "I",
+                  name: "RSI",
+                  timeframe: pendingTimeframe,
+                  input_params: {
+                    timeperiod: Number(settings.rsiLength),
+                    source: settings.source?.toLowerCase() || "close",
+
+                  },
+                }
+              }
+              setStatements(newStatements)
+            }}
+          />
+        )}
+        {showIndicatorModal && pendingOtherIndicator === "rsi-ma" && (
+          <RsiSettingsModal
+            onClose={() => setShowIndicatorModal(false)}
+            initialSettings={{
+              indicatorType: "rsi-ma",
+              rsiLength: "14",
+              source: "Close",
+              maLength: "14",
+              maType: "SMA",
+              bbStdDev: "2.0",
+              timeframe: pendingTimeframe,
+            }}
+            onSave={(settings: any) => {
+              setShowIndicatorModal(false)
+              // Save the indicator settings to inp2 as needed
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
+              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+
+              if (settings.indicatorType === "rsi-ma") {
+                lastCondition.inp2 = {
+                  type: "CUSTOM_I",
+                  name: "RSI_MA",
+                  timeframe: pendingTimeframe,
+                  input_params: {
+                    rsi_length: Number(settings.rsiLength),
+                    rsi_source: settings.source || "Close",
+                    ma_type: settings.maType || "SMA",
+                    ma_length: Number(settings.maLength) || 14,
+                    bb_stddev: Number(settings.bbStdDev) || 2.0,
+                  },
+                }
+              } else {
+                lastCondition.inp2 = {
+                  type: "I",
+                  name: "RSI",
+                  timeframe: pendingTimeframe,
+                  input_params: {
+                    timeperiod: Number(settings.rsiLength),
+                    source: settings.source?.toLowerCase() || "close",
+                  },
+                }
+              }
+              setStatements(newStatements)
+            }}
+          />
+        )}
+
+        {/* Moving Operator Settings Modal */}
+        {showMovingOperatorModal.show && (
+          <MovingOperatorSettingsModal
+            onClose={() => setShowMovingOperatorModal({ show: false, statementIndex: 0, conditionIndex: 0 })}
+            operatorType={(() => {
+              const condition = statements[showMovingOperatorModal.statementIndex]?.strategy[showMovingOperatorModal.conditionIndex]
+              return condition?.operator_name as "moving_up" | "moving_down"
+            })()}
+            initialSettings={(() => {
+              const condition = statements[showMovingOperatorModal.statementIndex]?.strategy[showMovingOperatorModal.conditionIndex]
+              if (condition?.Operator) {
+                return {
+                  logical_operator: condition.Operator.params.logical_operator,
+                  value: condition.Operator.params.value,
+                  unit: condition.Operator.params.unit,
+                }
+              }
+              return undefined
+            })()}
+            onSave={(settings) => {
+              const newStatements = [...statements]
+              const condition = newStatements[showMovingOperatorModal.statementIndex].strategy[showMovingOperatorModal.conditionIndex]
+              const operatorType = condition.operator_name as "moving_up" | "moving_down"
+
+              // Update the operator structure
+              condition.Operator = {
+                operator_name: operatorType,
+                params: {
+                  logical_operator: settings.logical_operator,
+                  value: settings.value,
+                  unit: settings.unit,
+                },
+              }
+
+              setStatements(newStatements)
+              setShowMovingOperatorModal({ show: false, statementIndex: 0, conditionIndex: 0 })
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+          />
+        )}
+
+        {showStochasticModal && (
+          <StochasticSettingsModal
+            onClose={() => {
+              setShowStochasticModal(false)
+              setEditingComponent(null)
+              setStochasticModalTarget(null)
+              setPendingTimeframe("3h")
+            }}
+            initialSettings={getStochasticInitialSettings()}
+            onSave={applyStochasticSettings}
+          />
+        )}
+
+        {/* Edit Strategy Name Modal */}
+        {showEditNameModal && (
+          <EditStrategyModal
+            strategy={{
+              id: strategyId || localStorage.getItem("strategy_id") || "0",
+              name: strategyName,
+              instrument: initialInstrument || "XAU/USD",
+              side: statements[0]?.side || "S",
+              strategy: statements[0]?.strategy || [],
+              equity: statements[0]?.Equity || [],
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            }}
+            isEdit={true}
+            onClose={() => setShowEditNameModal(false)}
+            onSave={handleEditStrategyName}
+          />
+        )}
+
+        {/* Developer Mode Full Page */}
+        {showDeveloperModeModal && (
+          <div className="fixed inset-0 z-50 bg-[#141721]">
+            <DeveloperModePage
+              onBack={async () => {
+                setShowDeveloperModeModal(false)
+                setEditingCustomComponent(null)
+                setCurrentComponentId(null)
+                // Refresh custom components list when returning from developer mode
+                try {
+                  const components = await listCustomComponents()
+                  // Dispatch event to notify sidebar to refresh
+                  window.dispatchEvent(new CustomEvent('refresh-custom-components', { detail: components }))
+                } catch (error) {
+                  console.error('Failed to refresh custom components:', error)
+                }
+              }}
+              onCompile={handleDeveloperModeCompile}
+              onSave={handleDeveloperModeSave}
+              onGoToBacktest={(strategyId) => {
+                // Close developer mode and navigate to backtesting
+                setShowDeveloperModeModal(false)
+                setEditingCustomComponent(null)
+                setCurrentComponentId(null)
+                // Navigate to strategy testing page with the custom strategy ID
+                router.push(`/strategy-testing?id=${strategyId}&custom=true`)
+              }}
+              onLoadStrategies={async () => {
+                // Load custom strategies list
+                const strategies = await listCustomStrategies()
+                return strategies
+              }}
+              onDeleteStrategy={async (strategyId) => {
+                // Delete a custom strategy
+                await deleteCustomStrategy(strategyId)
+              }}
+              onLoadStrategy={async (strategyId) => {
+                // Load a specific custom strategy for editing
+                const strategy = await getCustomStrategy(strategyId)
+                return { code: strategy.code || strategy.compiled_code || "", name: strategy.name }
+              }}
+              editingComponent={editingCustomComponent}
+            />
+          </div>
+        )}
+      </div>
+    </TooltipProvider>
   )
 }

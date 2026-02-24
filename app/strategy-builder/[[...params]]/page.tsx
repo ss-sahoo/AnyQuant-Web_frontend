@@ -1,13 +1,13 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useParams,useSearchParams, useRouter } from "next/navigation"
+import { useParams, useSearchParams, useRouter } from "next/navigation"
 import { Sidebar } from "@/components/sidebar"
 import { MobileSidebar } from "@/components/mobile-sidebar"
 import { StrategyBuilder } from "@/components/strategy-builder"
 import { ComponentsSidebar } from "@/components/components-sidebar"
 import AuthGuard from "@/hooks/useAuthGuard"
-import { fetchStatementDetail } from "@/app/AllApiCalls" 
+import { fetchStatementDetail } from "@/app/AllApiCalls"
 
 export default function StrategyBuilderPage() {
   const params = useParams()
@@ -20,20 +20,22 @@ export default function StrategyBuilderPage() {
   const [error, setError] = useState<string | null>(null)
   const [strategyName, setStrategyName] = useState("")
   const [instrument, setInstrument] = useState("")
+  const [sidebarWidth, setSidebarWidth] = useState(300)
+  const [isResizing, setIsResizing] = useState(false)
 
   const fetchStrategyData = async (id: string) => {
     try {
-     
+
       const data = await fetchStatementDetail(id)
       setStrategyData(data)
-      
+
     } catch (err: any) {
       setError("Failed to load strategy")
-     
+
       console.error("Error fetching strategy:", err)
     }
   }
- 
+
   useEffect(() => {
     const name = searchParams.get("name")
     const inst = searchParams.get("instrument")
@@ -65,7 +67,7 @@ export default function StrategyBuilderPage() {
         window.sessionStorage.removeItem('builder_return')
         setStrategyId(storedId)
         fetchStrategyData(storedId)
-        try { router.replace(`/strategy-builder/${storedId}` as any) } catch {}
+        try { router.replace(`/strategy-builder/${storedId}` as any) } catch { }
         return
       }
 
@@ -84,7 +86,7 @@ export default function StrategyBuilderPage() {
       if (storedId) {
         setStrategyId(storedId)
         fetchStrategyData(storedId)
-        try { router.replace(`/strategy-builder/${storedId}` as any) } catch {}
+        try { router.replace(`/strategy-builder/${storedId}` as any) } catch { }
       } else {
         setStrategyId(null)
         setStrategyData(null)
@@ -94,9 +96,40 @@ export default function StrategyBuilderPage() {
       setStrategyId(null)
       setStrategyData(null)
     }
-  }, [params,searchParams])
+  }, [params, searchParams])
 
-  
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsResizing(true)
+  }
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return
+
+      const newWidth = window.innerWidth - e.clientX
+      // Set min and max limits
+      if (newWidth >= 250 && newWidth <= 600) {
+        setSidebarWidth(newWidth)
+      }
+    }
+
+    const handleMouseUp = () => {
+      setIsResizing(false)
+    }
+
+    if (isResizing) {
+      window.addEventListener("mousemove", handleMouseMove)
+      window.addEventListener("mouseup", handleMouseUp)
+    }
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove)
+      window.removeEventListener("mouseup", handleMouseUp)
+    }
+  }, [isResizing])
+
+
 
   return (
     <AuthGuard>
@@ -106,40 +139,46 @@ export default function StrategyBuilderPage() {
 
         <div className="flex flex-1 pl-16">
           <div className="flex-1 flex flex-col">
-          <div className="flex">
-            <div
-              className={`relative flex-1 py-3 text-center font-medium cursor-pointer ${
-                activeTab === "create" ? "bg-[#c7c7c7] text-black" : "bg-[#9d9d9d] text-white"
-              }`}
-              onClick={() => setActiveTab("create")}
-            >
-              CREATE
-              {activeTab === "create" && (
-                <div className="absolute right-0 top-0 border-t-[24px] border-r-[24px] border-t-[#c7c7c7] border-r-transparent h-full"></div>
-              )}
+            <div className="flex">
+              <div
+                className={`relative flex-1 py-3 text-center font-medium cursor-pointer ${activeTab === "create" ? "bg-[#c7c7c7] text-black" : "bg-[#9d9d9d] text-white"
+                  }`}
+                onClick={() => setActiveTab("create")}
+              >
+                CREATE
+                {activeTab === "create" && (
+                  <div className="absolute right-0 top-0 border-t-[24px] border-r-[24px] border-t-[#c7c7c7] border-r-transparent h-full"></div>
+                )}
+              </div>
+              <div
+                className={`flex-1 py-3 text-center font-medium cursor-pointer ${activeTab === "test" ? "bg-[#c7c7c7] text-black" : "bg-[#9d9d9d] text-white"
+                  }`}
+                onClick={() => setActiveTab("test")}
+              >
+                TEST & OPTIMISE
+              </div>
             </div>
-            <div
-              className={`flex-1 py-3 text-center font-medium cursor-pointer ${
-                activeTab === "test" ? "bg-[#c7c7c7] text-black" : "bg-[#9d9d9d] text-white"
-              }`}
-              onClick={() => setActiveTab("test")}
-            >
-              TEST & OPTIMISE
-            </div>
-          </div>
 
-          
-                <StrategyBuilder initialName={strategyName || ""} initialInstrument={instrument || "XAU/USD"} 
-                strategyData={strategyData} strategyId={strategyId} />
+
+            <StrategyBuilder initialName={strategyName || ""} initialInstrument={instrument || "XAU/USD"}
+              strategyData={strategyData} strategyId={strategyId} />
 
           </div>
+
+          {/* Resizer Handle */}
+          <div
+            className={`w-1 cursor-col-resize hover:bg-blue-500 transition-colors z-20 ${isResizing ? "bg-blue-600 w-1.5" : "bg-gray-800"
+              }`}
+            onMouseDown={handleMouseDown}
+          />
 
           <ComponentsSidebar
+            width={sidebarWidth}
             onComponentSelect={(component, customComponentData) => {
               // Find the statement that has the active input field (focused search input)
               const activeInput = document.activeElement as HTMLInputElement
               let activeIndex = 0
-              
+
               // Check if the active element is a search input field
               if (activeInput && activeInput.type === "text" && activeInput.placeholder?.includes("component name")) {
                 // Find the parent statement container
@@ -160,7 +199,7 @@ export default function StrategyBuilderPage() {
                   }
                 }
               }
-              
+
               const event = new CustomEvent("component-selected", {
                 detail: { component, statementIndex: activeIndex, customComponentData },
               })
