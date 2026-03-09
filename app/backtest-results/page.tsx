@@ -18,6 +18,7 @@ interface Trade {
   EntryTime: string
   ExitTime: string
   Duration: string
+  [key: string]: any // Allow additional trade fields from backend
 }
 
 interface BacktestDetail {
@@ -27,6 +28,7 @@ interface BacktestDetail {
   account_username: string
   backtest_date: string
   execution_time_seconds: number
+  chart_data: Record<string, any>[] | null // OHLC + indicator data from FullDF.csv
   final_equity: number
   return_percent: number
   return_ann_percent: number
@@ -36,8 +38,8 @@ interface BacktestDetail {
   sharpe_ratio: number
   sortino_ratio: number
   calmar_ratio: number
-  max_drawdown_duration: number
-  avg_drawdown_duration: number
+  max_drawdown_duration: string | number
+  avg_drawdown_duration: string | number
   num_trades: number
   best_trade_percent: number
   worst_trade_percent: number
@@ -49,13 +51,25 @@ interface BacktestDetail {
   data_end_date: string
   status: string
   error_message: string | null
+  // Additional stats that may come from backend
+  exposure_time_percent?: number
+  equity_peak?: number
+  buy_hold_return_percent?: number
+  volatility_ann_percent?: number
+  avg_trade_percent?: number
+  max_trade_duration?: string | number
+  avg_trade_duration?: string | number
+  profit_factor?: number
+  expectancy_percent?: number
+  sqn?: number
+  [key: string]: any // Allow any additional fields from backend
 }
 
 function BacktestResultsClient() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const backtestId = searchParams.get('id')
-  
+
   const [backtestDetail, setBacktestDetail] = useState<BacktestDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -70,12 +84,102 @@ function BacktestResultsClient() {
     }
   }, [backtestId])
 
+  // Normalize raw API response to handle different field naming conventions
+  // Backend may send e.g. `win_rate` (0.55) or `win_rate_percent` (55)
+  const normalizeBacktestResult = (raw: any): BacktestDetail => {
+    // Helper: if a field is a decimal ratio (0-1), convert to percent
+    const toPercent = (val: number | undefined | null): number | undefined => {
+      if (val == null) return undefined
+      // If value is between -1 and 1 (exclusive), it's likely a ratio → convert to %
+      // Exception: values like 0 should stay as 0
+      if (val !== 0 && Math.abs(val) <= 1) return val * 100
+      return val
+    }
+
+    // Helper: pick first defined value from candidate field names (case-insensitive)
+    const pick = (...keys: string[]) => {
+      // Find all keys in the raw object
+      const rawKeys = Object.keys(raw)
+      for (const key of keys) {
+        // Try exact match
+        if (raw[key] != null) return raw[key]
+        // Try case-insensitive match
+        const foundKey = rawKeys.find(rk => rk.toLowerCase() === key.toLowerCase())
+        if (foundKey && raw[foundKey] != null) return raw[foundKey]
+      }
+      return undefined
+    }
+
+    return {
+      ...raw,
+      // Core identifiers
+      id: raw.id ?? raw.backtest_result_id,
+      strategy_statement_name: raw.strategy_statement_name ?? raw.name ?? raw._strategy ?? 'Unknown Strategy',
+
+      // Chart & plot data
+      chart_data: raw.chart_data ?? null,
+      trades_data: raw.trades_data ?? [],
+      plot_html: raw.plot_html ?? '',
+
+      // Equity & returns
+      final_equity: pick('final_equity', 'equity_final', 'balance'),
+      return_percent: pick('return_percent', 'return_pct', 'total_return', 'return'),
+      return_ann_percent: pick('return_ann_percent', 'return_ann', 'annual_return', 'return_ann_percent_value'),
+
+      // Win rate
+      win_rate_percent: (() => {
+        const v = pick('win_rate_percent', 'win_rate', 'win_rate_pct')
+        if (v == null) return undefined
+        return (v > 0 && v <= 1) ? v * 100 : v
+      })(),
+
+      // Drawdown
+      max_drawdown_percent: pick('max_drawdown_percent', 'max_drawdown', 'max_drawdown_pct'),
+      avg_drawdown_percent: pick('avg_drawdown_percent', 'avg_drawdown', 'avg_drawdown_pct'),
+      max_drawdown_duration: pick('max_drawdown_duration'),
+      avg_drawdown_duration: pick('avg_drawdown_duration'),
+
+      // Ratios
+      sharpe_ratio: pick('sharpe_ratio', 'sharpe'),
+      sortino_ratio: pick('sortino_ratio', 'sortino'),
+      calmar_ratio: pick('calmar_ratio', 'calmar'),
+
+      // Trade counts & stats
+      num_trades: pick('num_trades', 'total_trades', 'trades_count'),
+      best_trade_percent: pick('best_trade_percent', 'best_trade', 'best_trade_pct'),
+      worst_trade_percent: pick('worst_trade_percent', 'worst_trade', 'worst_trade_pct'),
+
+      // Additional stats
+      exposure_time_percent: pick('exposure_time_percent', 'exposure_time', 'exposure'),
+      equity_peak: pick('equity_peak', 'peak_equity', 'peak'),
+      buy_hold_return_percent: pick('buy_hold_return_percent', 'buy_hold_return'),
+      volatility_ann_percent: pick('volatility_ann_percent', 'volatility_ann', 'volatility'),
+      avg_trade_percent: pick('avg_trade_percent', 'avg_trade', 'avg_trade_pct'),
+      max_trade_duration: pick('max_trade_duration'),
+      avg_trade_duration: pick('avg_trade_duration'),
+      profit_factor: pick('profit_factor'),
+      expectancy_percent: pick('expectancy_percent', 'expectancy'),
+      sqn: pick('sqn', 'SQN'),
+
+      // Meta
+      data_source: raw.data_source ?? '',
+      symbol: raw.symbol ?? '',
+      data_start_date: raw.data_start_date ?? '',
+      data_end_date: raw.data_end_date ?? '',
+      status: raw.status ?? 'completed',
+      error_message: raw.error_message ?? null,
+    }
+  }
+
   const loadBacktestDetail = async () => {
     try {
       setLoading(true)
       setError(null)
-      const result = await getBacktestResultDetail(backtestId!)
-      setBacktestDetail(result)
+      const raw = await getBacktestResultDetail(backtestId!)
+      console.log('📊 Raw backtest API response:', raw)
+      const normalized = normalizeBacktestResult(raw)
+      console.log('📊 Normalized backtest data:', normalized)
+      setBacktestDetail(normalized)
     } catch (err: any) {
       setError(err.message || 'Failed to load backtest details')
       console.error('Error loading backtest detail:', err)
@@ -137,7 +241,7 @@ function BacktestResultsClient() {
               <div className="text-center">
                 <p className="text-red-400 text-lg font-semibold mb-2">Error loading backtest results</p>
                 <p className="text-gray-400 text-sm mb-4">{error}</p>
-                <button 
+                <button
                   onClick={() => router.push('/strategy-testing')}
                   className="bg-[#85e1fe] text-black px-4 py-2 rounded-md hover:bg-[#6bcae2]"
                 >
@@ -158,8 +262,8 @@ function BacktestResultsClient() {
           <Sidebar currentPage="home" />
         </div>
         <MobileSidebar currentPage="home" />
-        
-        <main className="flex-1 flex flex-col relative ml-[63px]">
+
+        <main className="flex-1 flex flex-col relative ml-[63px] w-0 min-w-0 min-h-screen">
           {/* Header */}
           <div className="p-6 border-b border-gray-700">
             <h1 className="text-2xl font-bold text-white">
@@ -171,25 +275,27 @@ function BacktestResultsClient() {
           </div>
 
           {/* Top Tabs */}
-          <div className="flex justify-around border-b border-gray-700">
-            <button
-              className={`px-6 py-3 font-semibold ${activeTab === 'chart_data' ? 'text-[#85e1fe] border-b-2 border-[#85e1fe]' : 'text-gray-400'}`}
-              onClick={() => setActiveTab('chart_data')}
-            >
-              Chart Data
-            </button>
-            <button
-              className={`px-6 py-3 font-semibold ${activeTab === 'trades' ? 'text-[#85e1fe] border-b-2 border-[#85e1fe]' : 'text-gray-400'}`}
-              onClick={() => setActiveTab('trades')}
-            >
-              Trades
-            </button>
-            <button
-              className={`px-6 py-3 font-semibold ${activeTab === 'summary' ? 'text-[#85e1fe] border-b-2 border-[#85e1fe]' : 'text-gray-400'}`}
-              onClick={() => setActiveTab('summary')}
-            >
-              Summary
-            </button>
+          <div className="flex justify-center border-b border-gray-700 bg-[#121420] sticky top-0 z-20 overflow-x-auto no-scrollbar">
+            <div className="flex space-x-8 px-6">
+              <button
+                className={`px-4 py-3 font-semibold whitespace-nowrap transition-all ${activeTab === 'chart_data' ? 'text-[#85e1fe] border-b-2 border-[#85e1fe]' : 'text-gray-400 hover:text-gray-200'}`}
+                onClick={() => setActiveTab('chart_data')}
+              >
+                Chart Data
+              </button>
+              <button
+                className={`px-4 py-3 font-semibold whitespace-nowrap transition-all ${activeTab === 'trades' ? 'text-[#85e1fe] border-b-2 border-[#85e1fe]' : 'text-gray-400 hover:text-gray-200'}`}
+                onClick={() => setActiveTab('trades')}
+              >
+                Trades
+              </button>
+              <button
+                className={`px-4 py-3 font-semibold whitespace-nowrap transition-all ${activeTab === 'summary' ? 'text-[#85e1fe] border-b-2 border-[#85e1fe]' : 'text-gray-400 hover:text-gray-200'}`}
+                onClick={() => setActiveTab('summary')}
+              >
+                Summary
+              </button>
+            </div>
           </div>
 
           {/* Main Content */}
@@ -198,7 +304,7 @@ function BacktestResultsClient() {
             {activeTab === 'summary' && (
               <div className="p-6 space-y-6">
                 {/* Three Column Statistics Layout */}
-                <div className="grid grid-cols-3 gap-8">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                   {/* Column 1 - Chart Data */}
                   <div className="space-y-4">
                     <h3 className="text-lg font-semibold text-white mb-4">Chart Data</h3>
@@ -232,7 +338,7 @@ function BacktestResultsClient() {
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Duration:</span>
                         <span className="text-white font-semibold">
-                          {backtestDetail.data_start_date && backtestDetail.data_end_date 
+                          {backtestDetail.data_start_date && backtestDetail.data_end_date
                             ? formatDuration(backtestDetail.data_start_date, backtestDetail.data_end_date)
                             : 'N/A'
                           }
@@ -240,35 +346,43 @@ function BacktestResultsClient() {
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Exposure Time (%):</span>
-                        <span className="text-white font-semibold">84.79263909</span>
+                        <span className="text-white font-semibold">
+                          {backtestDetail.exposure_time_percent != null ? backtestDetail.exposure_time_percent.toFixed(8) : 'N/A'}
+                        </span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Equity Final ($):</span>
-                        <span className="text-white font-semibold">{backtestDetail.final_equity?.toFixed(4) || "N/A"}</span>
+                        <span className="text-white font-semibold">{backtestDetail.final_equity != null ? backtestDetail.final_equity.toFixed(4) : 'N/A'}</span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Equity Peak ($):</span>
-                        <span className="text-white font-semibold">{((backtestDetail.final_equity || 0) * 1.05).toFixed(4)}</span>
+                        <span className="text-white font-semibold">
+                          {backtestDetail.equity_peak != null ? backtestDetail.equity_peak.toFixed(4) : 'N/A'}
+                        </span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Return (%):</span>
                         <span className={`font-semibold ${(backtestDetail.return_percent || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                          {backtestDetail.return_percent?.toFixed(8) || "N/A"}
+                          {backtestDetail.return_percent != null ? backtestDetail.return_percent.toFixed(8) : 'N/A'}
                         </span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Buy & Hold Return (%):</span>
-                        <span className="text-white font-semibold">16.48924650</span>
+                        <span className="text-white font-semibold">
+                          {backtestDetail.buy_hold_return_percent != null ? backtestDetail.buy_hold_return_percent.toFixed(8) : 'N/A'}
+                        </span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Return (Ann.) (%):</span>
                         <span className={`font-semibold ${(backtestDetail.return_ann_percent || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                          {backtestDetail.return_ann_percent?.toFixed(8) || "N/A"}
+                          {backtestDetail.return_ann_percent != null ? backtestDetail.return_ann_percent.toFixed(8) : 'N/A'}
                         </span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Volatility (Ann.) (%):</span>
-                        <span className="text-white font-semibold">14.59038576</span>
+                        <span className="text-white font-semibold">
+                          {backtestDetail.volatility_ann_percent != null ? backtestDetail.volatility_ann_percent.toFixed(8) : 'N/A'}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -279,35 +393,35 @@ function BacktestResultsClient() {
                     <div className="space-y-3">
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Sharpe Ratio:</span>
-                        <span className="text-white font-semibold">{backtestDetail.sharpe_ratio?.toFixed(9) || "N/A"}</span>
+                        <span className="text-white font-semibold">{backtestDetail.sharpe_ratio != null ? backtestDetail.sharpe_ratio.toFixed(9) : 'N/A'}</span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Sortino Ratio:</span>
-                        <span className="text-white font-semibold">{backtestDetail.sortino_ratio?.toFixed(9) || "N/A"}</span>
+                        <span className="text-white font-semibold">{backtestDetail.sortino_ratio != null ? backtestDetail.sortino_ratio.toFixed(9) : 'N/A'}</span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Calmar Ratio:</span>
-                        <span className="text-white font-semibold">{backtestDetail.calmar_ratio?.toFixed(9) || "N/A"}</span>
+                        <span className="text-white font-semibold">{backtestDetail.calmar_ratio != null ? backtestDetail.calmar_ratio.toFixed(9) : 'N/A'}</span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Max. Drawdown (%):</span>
-                        <span className="text-red-500 font-semibold">{backtestDetail.max_drawdown_percent?.toFixed(9) || "N/A"}</span>
+                        <span className="text-red-500 font-semibold">{backtestDetail.max_drawdown_percent != null ? backtestDetail.max_drawdown_percent.toFixed(9) : 'N/A'}</span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Avg. Drawdown (%):</span>
-                        <span className="text-red-500 font-semibold">{backtestDetail.avg_drawdown_percent?.toFixed(9) || "N/A"}</span>
+                        <span className="text-red-500 font-semibold">{backtestDetail.avg_drawdown_percent != null ? backtestDetail.avg_drawdown_percent.toFixed(9) : 'N/A'}</span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Max. Drawdown Duration:</span>
-                        <span className="text-white font-semibold">{backtestDetail.max_drawdown_duration || "N/A"} days 23:00:00</span>
+                        <span className="text-white font-semibold">{backtestDetail.max_drawdown_duration ?? 'N/A'}</span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Avg. Drawdown Duration:</span>
-                        <span className="text-white font-semibold">{backtestDetail.avg_drawdown_duration || "N/A"} days 21:00:00</span>
+                        <span className="text-white font-semibold">{backtestDetail.avg_drawdown_duration ?? 'N/A'}</span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400"># Trades:</span>
-                        <span className="text-white font-semibold">{backtestDetail.num_trades || "N/A"}</span>
+                        <span className="text-white font-semibold">{backtestDetail.num_trades ?? 'N/A'}</span>
                       </div>
                     </div>
                   </div>
@@ -318,39 +432,51 @@ function BacktestResultsClient() {
                     <div className="space-y-3">
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Win Rate (%):</span>
-                        <span className="text-white font-semibold">{backtestDetail.win_rate_percent?.toFixed(8) || "N/A"}</span>
+                        <span className="text-white font-semibold">{backtestDetail.win_rate_percent != null ? backtestDetail.win_rate_percent.toFixed(8) : 'N/A'}</span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Best Trade (%):</span>
-                        <span className="text-green-500 font-semibold">{backtestDetail.best_trade_percent?.toFixed(8) || "N/A"}</span>
+                        <span className="text-green-500 font-semibold">{backtestDetail.best_trade_percent != null ? backtestDetail.best_trade_percent.toFixed(8) : 'N/A'}</span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Worst Trade (%):</span>
-                        <span className="text-red-500 font-semibold">{backtestDetail.worst_trade_percent?.toFixed(8) || "N/A"}</span>
+                        <span className="text-red-500 font-semibold">{backtestDetail.worst_trade_percent != null ? backtestDetail.worst_trade_percent.toFixed(8) : 'N/A'}</span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Avg. Trade (%):</span>
-                        <span className="text-white font-semibold">0.421537988</span>
+                        <span className="text-white font-semibold">
+                          {backtestDetail.avg_trade_percent != null ? backtestDetail.avg_trade_percent.toFixed(9) : 'N/A'}
+                        </span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Max. Trade Duration:</span>
-                        <span className="text-white font-semibold">14 days 04:00:00</span>
+                        <span className="text-white font-semibold">
+                          {backtestDetail.max_trade_duration ?? 'N/A'}
+                        </span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Avg. Trade Duration:</span>
-                        <span className="text-white font-semibold">4 days 09:00:00</span>
+                        <span className="text-white font-semibold">
+                          {backtestDetail.avg_trade_duration ?? 'N/A'}
+                        </span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Profit Factor:</span>
-                        <span className="text-white font-semibold">2.22190489</span>
+                        <span className="text-white font-semibold">
+                          {backtestDetail.profit_factor != null ? backtestDetail.profit_factor.toFixed(9) : 'N/A'}
+                        </span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">Expectancy (%):</span>
-                        <span className="text-white font-semibold">0.4350848</span>
+                        <span className="text-white font-semibold">
+                          {backtestDetail.expectancy_percent != null ? backtestDetail.expectancy_percent.toFixed(7) : 'N/A'}
+                        </span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">SQN:</span>
-                        <span className="text-white font-semibold">1.314742940</span>
+                        <span className="text-white font-semibold">
+                          {backtestDetail.sqn != null ? backtestDetail.sqn.toFixed(9) : 'N/A'}
+                        </span>
                       </div>
                       <div className="flex justify-between border-b border-gray-800 py-2">
                         <span className="text-gray-400">_strategy:</span>
@@ -365,11 +491,6 @@ function BacktestResultsClient() {
                   <div className="mt-8">
                     <div className="flex justify-between items-center mb-4">
                       <h3 className="text-lg font-semibold text-white">Equity Curve</h3>
-                      <button className="text-gray-400 hover:text-white">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 10l7-7m0 0l7 7m-7-7v18" />
-                        </svg>
-                      </button>
                     </div>
                     <div className="bg-[#141721] rounded-lg overflow-hidden">
                       <iframe
@@ -389,40 +510,45 @@ function BacktestResultsClient() {
                 {/* Trades Table */}
                 {backtestDetail.trades_data && backtestDetail.trades_data.length > 0 ? (
                   <div>
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-lg font-semibold text-white">Trades ({backtestDetail.trades_data.length})</h3>
+                    </div>
                     <div className="bg-[#141721] rounded-lg overflow-hidden">
                       <div className="overflow-x-auto">
                         <table className="min-w-full text-sm">
                           <thead className="bg-[#1A1D2D] text-white">
                             <tr>
                               <th className="px-4 py-3 text-left">#</th>
-                              <th className="px-4 py-3 text-left">Time</th>
-                              <th className="px-4 py-3 text-left">Type</th>
-                              <th className="px-4 py-3 text-left">Order</th>
+                              <th className="px-4 py-3 text-left">Entry Time</th>
+                              <th className="px-4 py-3 text-left">Exit Time</th>
                               <th className="px-4 py-3 text-left">Size</th>
-                              <th className="px-4 py-3 text-left">Price</th>
-                              <th className="px-4 py-3 text-left">S/L</th>
-                              <th className="px-4 py-3 text-left">T/P</th>
-                              <th className="px-4 py-3 text-left">Profit</th>
-                              <th className="px-4 py-3 text-left">Balance</th>
+                              <th className="px-4 py-3 text-left">Entry Price</th>
+                              <th className="px-4 py-3 text-left">Exit Price</th>
+                              <th className="px-4 py-3 text-left">PnL</th>
+                              <th className="px-4 py-3 text-left">Return (%)</th>
+                              <th className="px-4 py-3 text-left">Duration</th>
+                              <th className="px-4 py-3 text-left">Entry Bar</th>
+                              <th className="px-4 py-3 text-left">Exit Bar</th>
                             </tr>
                           </thead>
                           <tbody>
                             {backtestDetail.trades_data.map((trade, index) => (
                               <tr key={index} className="border-t border-gray-700 hover:bg-[#1e2132]">
                                 <td className="px-4 py-3 text-white">{index + 1}</td>
-                                <td className="px-4 py-3 text-white">{trade.EntryTime}</td>
-                                <td className="px-4 py-3 text-white">buy</td>
-                                <td className="px-4 py-3 text-white">{index + 1}</td>
-                                <td className="px-4 py-3 text-white">{trade.Size || "0.10"}</td>
-                                <td className="px-4 py-3 text-white">{trade.EntryPrice?.toFixed(5) || "N/A"}</td>
-                                <td className="px-4 py-3 text-white">{(trade.EntryPrice * 0.98)?.toFixed(5) || "N/A"}</td>
-                                <td className="px-4 py-3 text-white">{(trade.EntryPrice * 1.02)?.toFixed(5) || "N/A"}</td>
+                                <td className="px-4 py-3 text-white">{trade.EntryTime || 'N/A'}</td>
+                                <td className="px-4 py-3 text-white">{trade.ExitTime || 'N/A'}</td>
+                                <td className="px-4 py-3 text-white">{trade.Size ?? 'N/A'}</td>
+                                <td className="px-4 py-3 text-white">{trade.EntryPrice != null ? trade.EntryPrice.toFixed(5) : 'N/A'}</td>
+                                <td className="px-4 py-3 text-white">{trade.ExitPrice != null ? trade.ExitPrice.toFixed(5) : 'N/A'}</td>
                                 <td className={`px-4 py-3 font-semibold ${(trade.PnL || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                  {trade.PnL ? `$${trade.PnL.toFixed(2)}` : "N/A"}
+                                  {trade.PnL != null ? `$${trade.PnL.toFixed(2)}` : 'N/A'}
                                 </td>
-                                <td className="px-4 py-3 text-white">
-                                  ${((backtestDetail.final_equity || 100000) + (trade.PnL || 0)).toFixed(2)}
+                                <td className={`px-4 py-3 font-semibold ${(trade.ReturnPct || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                  {trade.ReturnPct != null ? `${trade.ReturnPct.toFixed(4)}%` : 'N/A'}
                                 </td>
+                                <td className="px-4 py-3 text-white">{trade.Duration || 'N/A'}</td>
+                                <td className="px-4 py-3 text-gray-400">{trade.EntryBar ?? 'N/A'}</td>
+                                <td className="px-4 py-3 text-gray-400">{trade.ExitBar ?? 'N/A'}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -436,28 +562,17 @@ function BacktestResultsClient() {
                   </div>
                 )}
 
-                {/* Charts Section */}
-                <div className="grid grid-cols-1 gap-6">
-                  {/* RSI_MA Chart */}
-                  {/* <div className="bg-[#141721] rounded-lg p-4">
-                    <h3 className="text-lg font-semibold text-white mb-4">RSI_MA</h3>
-                    <div className="h-64 bg-gray-800 rounded flex items-center justify-center">
-                      <p className="text-gray-400">RSI_MA Chart Placeholder</p>
-                    </div>
-                  </div> */}
-
-                  {/* Equity Chart */}
-                  {backtestDetail.plot_html && (
-                    <div className="bg-[#141721] rounded-lg p-4">
-                      <h3 className="text-lg font-semibold text-white mb-4">Equity</h3>
-                      <iframe
-                        title="Equity Chart"
-                        style={{ width: "100%", height: "300px", border: "none", backgroundColor: "#f8f8f8" }}
-                        srcDoc={backtestDetail.plot_html}
-                      />
-                    </div>
-                  )}
-                </div>
+                {/* Equity Chart */}
+                {backtestDetail.plot_html && (
+                  <div className="bg-[#141721] rounded-lg p-4 mt-6">
+                    <h3 className="text-lg font-semibold text-white mb-4">Equity</h3>
+                    <iframe
+                      title="Equity Chart"
+                      style={{ width: "100%", height: "300px", border: "none", backgroundColor: "#f8f8f8" }}
+                      srcDoc={backtestDetail.plot_html}
+                    />
+                  </div>
+                )}
               </div>
             )}
 
@@ -465,93 +580,63 @@ function BacktestResultsClient() {
             {activeTab === 'chart_data' && (
               <div className="p-6 space-y-6">
                 {/* Chart Data Table */}
-                <div className="bg-[#141721] rounded-lg overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full text-sm">
-                      <thead className="bg-[#1A1D2D] text-white">
-                        <tr>
-                          <th className="px-4 py-3 text-left">
-                            <input type="checkbox" className="rounded" />
-                          </th>
-                          <th className="px-4 py-3 text-left">Date time</th>
-                          <th className="px-4 py-3 text-left">open_1h</th>
-                          <th className="px-4 py-3 text-left">high_1h</th>
-                          <th className="px-4 py-3 text-left">low_1h</th>
-                          <th className="px-4 py-3 text-left">close_1h</th>
-                          <th className="px-4 py-3 text-left">volume_1h</th>
-                          <th className="px-4 py-3 text-left">Open</th>
-                          <th className="px-4 py-3 text-left">High</th>
-                          <th className="px-4 py-3 text-left">Low</th>
-                          <th className="px-4 py-3 text-left">Close</th>
-                          <th className="px-4 py-3 text-left">Volume</th>
-                          <th className="px-4 py-3 text-left">Open_1h</th>
-                          <th className="px-4 py-3 text-left">High_1h</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {/* Sample data rows */}
-                        {Array.from({ length: 5 }, (_, index) => (
-                          <tr key={index} className="border-t border-gray-700 hover:bg-[#1e2132]">
-                            <td className="px-4 py-3">
-                              <input type="checkbox" className="rounded" />
-                            </td>
-                            <td className="px-4 py-3 text-white">2024-06-28 14:00</td>
-                            <td className="px-4 py-3 text-white">2324.54</td>
-                            <td className="px-4 py-3 text-white">2325.6</td>
-                            <td className="px-4 py-3 text-white">2324.54</td>
-                            <td className="px-4 py-3 text-white">2325.6</td>
-                            <td className="px-4 py-3 text-white">2324.54</td>
-                            <td className="px-4 py-3 text-white">2325.6</td>
-                            <td className="px-4 py-3 text-white">2324.54</td>
-                            <td className="px-4 py-3 text-white">2325.6</td>
-                            <td className="px-4 py-3 text-white">2324.54</td>
-                            <td className="px-4 py-3 text-white">2325.6</td>
-                            <td className="px-4 py-3 text-white">2324.54</td>
-                            <td className="px-4 py-3 text-white">2325.6</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                {backtestDetail.chart_data && backtestDetail.chart_data.length > 0 ? (
+                  <div>
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-lg font-semibold text-white">
+                        Chart Data ({backtestDetail.chart_data.length} rows)
+                      </h3>
+                    </div>
+                    <div className="bg-[#141721] rounded-lg overflow-hidden">
+                      <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+                        <table className="min-w-full text-sm">
+                          <thead className="bg-[#1A1D2D] text-white sticky top-0 z-10">
+                            <tr>
+                              <th className="px-4 py-3 text-left">#</th>
+                              {Object.keys(backtestDetail.chart_data[0]).map((colName) => (
+                                <th key={colName} className="px-4 py-3 text-left whitespace-nowrap">
+                                  {colName}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {backtestDetail.chart_data.map((row, index) => (
+                              <tr key={index} className="border-t border-gray-700 hover:bg-[#1e2132]">
+                                <td className="px-4 py-3 text-gray-400">{index + 1}</td>
+                                {Object.keys(row).map((colName) => {
+                                  const value = row[colName]
+                                  return (
+                                    <td key={colName} className="px-4 py-3 text-white whitespace-nowrap">
+                                      {value != null
+                                        ? (typeof value === 'number'
+                                          ? (Number.isInteger(value) ? value : value.toFixed(5))
+                                          : String(value))
+                                        : (['PnL', 'Size', 'ExitBar', 'low_3h', 'Open_3h', 'high_3h', 'Low_3h'].some(c => colName.toLowerCase().includes(c.toLowerCase()))
+                                          ? '0'
+                                          : 'N/A')}
+                                    </td>
+                                  )
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
                   </div>
-                </div>
-
-                {/* Charts Section */}
-                <div className="grid grid-cols-1 gap-6">
-                  {/* Volume Chart */}
-                  {/* <div className="bg-[#141721] rounded-lg p-4">
-                    <h3 className="text-lg font-semibold text-white mb-4">Volume</h3>
-                    <div className="h-64 bg-gray-800 rounded flex items-center justify-center">
-                      <p className="text-gray-400">Volume Chart Placeholder</p>
-                    </div>
-                  </div> */}
-
-                  {/* RSI_MA Chart */}
-                  {/* <div className="bg-[#141721] rounded-lg p-4">
-                    <h3 className="text-lg font-semibold text-white mb-4">RSI_MA</h3>
-                    <div className="h-64 bg-gray-800 rounded flex items-center justify-center">
-                      <p className="text-gray-400">RSI_MA Chart Placeholder</p>
-                    </div>
-                  </div> */}
-
-                  {/* Equity Chart */}
-                  {backtestDetail.plot_html && (
-                    <div className="bg-[#141721] rounded-lg p-4">
-                      <h3 className="text-lg font-semibold text-white mb-4">Equity</h3>
-                      <iframe
-                        title="Equity Chart"
-                        style={{ width: "100%", height: "600px", border: "none", backgroundColor: "#f8f8f8" }}
-                        srcDoc={backtestDetail.plot_html}
-                      />
-                    </div>
-                  )}
-                </div>
+                ) : (
+                  <div className="text-center text-gray-400 py-8">
+                    <p>No chart data available</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
 
           {/* Bottom Navigation Tabs */}
           <div className="flex border-t border-gray-700">
-            <button 
+            <button
               onClick={() => router.push('/strategy-testing')}
               className="flex-1 py-3 text-center font-medium bg-[#1A1D2D] text-gray-400 hover:text-white"
             >
@@ -560,13 +645,13 @@ function BacktestResultsClient() {
             <button className="flex-1 py-3 text-center font-medium bg-[#141721] text-[#85e1fe]">
               Backtest
             </button>
-            <button 
+            <button
               onClick={() => router.push('/strategy-testing')}
               className="flex-1 py-3 text-center font-medium bg-[#1A1D2D] text-gray-400 hover:text-white"
             >
               Optimisation
             </button>
-            <button 
+            <button
               onClick={() => router.push('/strategy-testing')}
               className="flex-1 py-3 text-center font-medium bg-[#1A1D2D] text-gray-400 hover:text-white"
             >
