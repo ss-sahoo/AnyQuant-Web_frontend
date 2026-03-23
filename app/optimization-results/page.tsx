@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Sidebar } from "@/components/sidebar"
 import { MobileSidebar } from "@/components/mobile-sidebar"
 import { getOptimizationJob, getOptimizationResultDetail } from "../AllApiCalls"
+import { Fetch } from "../usefetch"
 import { ArrowLeft, RefreshCw } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
 
@@ -52,12 +53,8 @@ function OptimizationResultsContent() {
       
       if (isDroplet) {
         // For droplet optimizations, use the job-status endpoint with run_id
-        const response = await fetch(`http://127.0.0.1:8000/api/job-status/${jobId}/`, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${localStorage.getItem("auth_token") || ""}`
-          }
+        const response = await Fetch(`/api/job-status/${jobId}/`, {
+          method: "GET"
         })
         
         if (!response.ok) {
@@ -135,12 +132,8 @@ function OptimizationResultsContent() {
         
         try {
           // Use job-status endpoint for droplet jobs
-          const response = await fetch(`http://127.0.0.1:8000/api/job-status/${jobId}/`, {
-            method: "GET",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${localStorage.getItem("auth_token") || ""}`
-            }
+          const response = await Fetch(`/api/job-status/${jobId}/`, {
+            method: "GET"
           })
           
           if (!response.ok) {
@@ -355,12 +348,8 @@ function OptimizationResultsContent() {
                 <button
                   onClick={async () => {
                     try {
-                      const token = localStorage.getItem('auth_token');
-                      const response = await fetch(`http://127.0.0.1:8000/api/optimization-results/${jobId}/download/`, {
-                        headers: { 
-                          'Authorization': `Bearer ${token}`,
-                          'Content-Type': 'application/json'
-                        }
+                      const response = await Fetch(`/api/optimization-results/${jobId}/download/`, {
+                        method: "GET"
                       });
                       
                       if (!response.ok) {
@@ -873,11 +862,9 @@ function OptimizationResultsContent() {
                               className="ml-2 px-3 py-1 bg-[#85e1fe] text-black rounded text-xs font-semibold hover:bg-[#6bcae2] transition-colors whitespace-nowrap"
                               onClick={(e) => {
                                 e.preventDefault();
-                                // Use fetch to download the file
-                                fetch(downloadUrl, {
-                                  headers: {
-                                    'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
-                                  }
+                                // Use Fetch to download the file
+                                Fetch(`/api/download-optimization-file/?path=${encodeURIComponent(file)}`, {
+                                  method: "GET"
                                 })
                                 .then(response => response.blob())
                                 .then(blob => {
