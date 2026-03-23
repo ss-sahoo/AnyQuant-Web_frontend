@@ -34,6 +34,10 @@ import {
   getSymbolTimeframes,
   getAllBrokerSymbols,
   findSymbolsWithTimeframe,
+  // Cancel API functions
+  cancelBacktest,
+  cancelOptimisationRun,
+  pollJobStatus,
   // Custom strategy API
   getCustomStrategy,
   runCustomStrategyBacktest,
@@ -82,6 +86,21 @@ export default function StrategyTestingPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [isLoading2, setIsLoading2] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+
+  // Abort controllers for cancellation
+  const backtestAbortRef = useRef<AbortController | null>(null)
+  const optimisationAbortRef = useRef<AbortController | null>(null)
+  const walkForwardAbortRef = useRef<AbortController | null>(null)
+
+  // run_id refs for server-side cancellation
+  const backtestRunIdRef = useRef<string | null>(null)
+  const optimisationRunIdRef = useRef<string | null>(null)
+  const walkForwardRunIdRef = useRef<string | null>(null)
+
+  // poller stop refs
+  const backtestPollerRef = useRef<(() => void) | null>(null)
+  const optimisationPollerRef = useRef<(() => void) | null>(null)
+  const walkForwardPollerRef = useRef<(() => void) | null>(null)
 
   const [isDragging, setIsDragging] = useState(false)
 
@@ -990,9 +1009,6 @@ export default function StrategyTestingPage() {
           showToast("Custom strategy backtest completed!", 'success')
         }
       } else if (useMetaAPI) {
-        // Removed MetaAPI pre-validation per request
-
-        // Use MetaAPI for backtesting with environment variables
         const symbol = metaAPIConfig?.symbol || "XAUUSD"
         const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
         const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
@@ -1005,146 +1021,97 @@ export default function StrategyTestingPage() {
           throw new Error("MetaAPI credentials not configured. Please check environment variables.")
         }
 
-        result = await runBacktestWithMetaAPI(
+        // Fire the request — if backend is async it returns {run_id} immediately,
+        // if sync it blocks until done. Either way we handle both.
+        const backtestPromise = runBacktestWithMetaAPI(
           parsedStatement,
           token,
           accountId,
-          symbol
+          symbol,
+          null as any
         )
 
-        console.log("Backtest result:", result)
+        // Wait for response — async backend resolves fast with run_id, sync backend blocks
+        const startData = await backtestPromise
+        console.log("Backtest response:", startData)
+        console.log("run_id:", startData?.run_id, "| status:", startData?.status)
+
+        if (startData?.run_id && startData?.status === 'started') {
+          backtestRunIdRef.current = startData.run_id
+          console.log("✅ Async mode — stored run_id:", startData.run_id)
+          const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000 })
+          backtestPollerRef.current = stop
+          try {
+            result = await promise
+          } catch (e: any) {
+            if (e?.message === 'cancelled') return // user cancelled — stop processing
+            throw e
+          }
+          backtestPollerRef.current = null
+        } else {
+          console.log("ℹ️ Sync mode — full result returned directly (cancel not supported in sync mode)")
+          result = startData
+        }
 
         // Handle plot HTML
         if (result?.plot_html) {
           setPlotHtml(result.plot_html)
         }
 
-        // Handle trades CSV data
-        if (result?.trades_csv) {
-          setTradesData({
-            tradesCsv: result.trades_csv,
-            tradesCsvFilename: result.trades_csv_filename || 'trades.csv',
-            tradesCsvDownloadUrl: result.trades_csv_download_url || '',
-            stdout: result.stdout || '',
-            stderr: result.stderr || ''
-          })
-          setShowTradesSummary(true)
-
-          // Check if trades CSV has actual data
-          const csvLines = result.trades_csv.trim().split('\n')
-          if (csvLines.length >= 2) {
-            showToast("Backtest completed! Redirecting to results...", 'success')
-            // Navigate to backtest results page if we have a backtest ID
-            if (result.backtest_id) {
-              setTimeout(() => {
-                router.push(`/backtest-results?id=${result.backtest_id}`)
-              }, 1000)
-            }
-          } else {
-            showToast("Backtest completed but no trades were executed.", 'warning')
-          }
-        } else {
-          // No trades CSV data
-          setTradesData({
-            tradesCsv: '',
-            tradesCsvFilename: '',
-            tradesCsvDownloadUrl: '',
-            stdout: result?.stdout || '',
-            stderr: result?.stderr || ''
-          })
-          setShowTradesSummary(true)
-          showToast("Backtest completed but no trades data available.", 'warning')
-        }
-
-        // Handle stdout/stderr
-        if (result?.stdout) {
-          console.log("Backtest stdout:", result.stdout)
-        }
-        if (result?.stderr) {
-          console.log("Backtest stderr:", result.stderr)
-        }
-
-        if (!result?.plot_html && !result?.trades_csv) {
+        // Handle trades CSV data — redirect to results page
+        const resultId = result?.backtest_result_id || result?.backtest_id || result?.result?.backtest_result_id
+        if (resultId) {
+          showToast("Backtest completed! Redirecting to results...", 'success')
+          setTimeout(() => { router.push(`/backtest-results?id=${resultId}`) }, 800)
+        } else if (result?.trades_csv) {
+          showToast("Backtest completed but no result ID returned.", 'warning')
+        } else if (!result?.plot_html) {
           showToast("Backtest completed but no data returned", 'error')
         }
       } else {
-        // Use traditional file upload method
+        // File upload method
         const timeframeFiles: Record<string, File> = {}
-
-        // Directly map each required timeframe to the uploaded file in order
         requiredTimeframes.forEach((timeframe, index) => {
           const filename = uploadedFiles[index]
-          if (filename && fileObjects[filename]) {
-            timeframeFiles[timeframe] = fileObjects[filename]
-          }
+          if (filename && fileObjects[filename]) timeframeFiles[timeframe] = fileObjects[filename]
         })
-
-        // Add unmatched remaining files to the form with filename as key (optional fallback)
         uploadedFiles.forEach((filename) => {
           if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
-            const key = filename.split(".")[0]
-            timeframeFiles[key] = fileObjects[filename]
+            timeframeFiles[filename.split(".")[0]] = fileObjects[filename]
           }
         })
 
-        result = await runBacktest({
-          statement: parsedStatement,
-          files: timeframeFiles,
-        })
+        // Step 1: start the job
+        const startData = await (runBacktest as any)({ statement: parsedStatement, files: timeframeFiles })
+        console.log("Backtest response:", startData)
+        console.log("run_id:", startData?.run_id, "| status:", startData?.status)
 
-        console.log("Backtest result:", result)
-
-        // Handle plot HTML
-        if (result?.plot_html) {
-          setPlotHtml(result.plot_html)
-        }
-
-        // Handle trades CSV data
-        if (result?.trades_csv) {
-          setTradesData({
-            tradesCsv: result.trades_csv,
-            tradesCsvFilename: result.trades_csv_filename || 'trades.csv',
-            tradesCsvDownloadUrl: result.trades_csv_download_url || '',
-            stdout: result.stdout || '',
-            stderr: result.stderr || ''
-          })
-          setShowTradesSummary(true)
-
-          // Check if trades CSV has actual data
-          const csvLines = result.trades_csv.trim().split('\n')
-          if (csvLines.length >= 2) {
-            showToast("Backtest completed! Redirecting to results...", 'success')
-            // Navigate to backtest results page if we have a backtest ID
-            if (result.backtest_id) {
-              setTimeout(() => {
-                router.push(`/backtest-results?id=${result.backtest_id}`)
-              }, 1000)
-            }
-          } else {
-            showToast("Backtest completed but no trades were executed.", 'warning')
+        if (startData?.run_id && startData?.status === 'started') {
+          backtestRunIdRef.current = startData.run_id
+          console.log("✅ Async mode — stored run_id:", startData.run_id)
+          const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000 })
+          backtestPollerRef.current = stop
+          try {
+            result = await promise
+          } catch (e: any) {
+            if (e?.message === 'cancelled') return
+            throw e
           }
+          backtestPollerRef.current = null
         } else {
-          // No trades CSV data
-          setTradesData({
-            tradesCsv: '',
-            tradesCsvFilename: '',
-            tradesCsvDownloadUrl: '',
-            stdout: result?.stdout || '',
-            stderr: result?.stderr || ''
-          })
-          setShowTradesSummary(true)
-          showToast("Backtest completed but no trades data available.", 'warning')
+          console.log("ℹ️ Sync mode — full result returned directly")
+          result = startData
         }
 
-        // Handle stdout/stderr
-        if (result?.stdout) {
-          console.log("Backtest stdout:", result.stdout)
-        }
-        if (result?.stderr) {
-          console.log("Backtest stderr:", result.stderr)
-        }
+        if (result?.plot_html) setPlotHtml(result.plot_html)
 
-        if (!result?.plot_html && !result?.trades_csv) {
+        const resultId2 = result?.backtest_result_id || result?.backtest_id || result?.result?.backtest_result_id
+        if (resultId2) {
+          showToast("Backtest completed! Redirecting to results...", 'success')
+          setTimeout(() => { router.push(`/backtest-results?id=${resultId2}`) }, 800)
+        } else if (result?.trades_csv) {
+          showToast("Backtest completed but no result ID returned.", 'warning')
+        } else if (!result?.plot_html) {
           showToast("Backtest completed but no data returned", 'error')
         }
       }
@@ -1181,7 +1148,22 @@ export default function StrategyTestingPage() {
       }
     } finally {
       setIsLoading(false)
+      backtestRunIdRef.current = null
     }
+  }
+
+  const cancelBacktestRun = () => {
+    backtestPollerRef.current?.()
+    backtestPollerRef.current = null
+    const runId = backtestRunIdRef.current
+    backtestRunIdRef.current = null
+    if (runId) {
+      cancelBacktest(runId as any)
+        .then((r) => console.log("✅ cancel-backtest:", r))
+        .catch((e) => console.error("❌ cancel-backtest failed:", e))
+    }
+    setIsLoading(false)
+    showToast("Backtest cancelled", 'warning')
   }
 
   const handleOptimisation = async (wait = false) => {
@@ -1267,20 +1249,16 @@ export default function StrategyTestingPage() {
 
       // Use MetaAPI or file upload based on the mode
       if (useMetaAPI) {
-        // Use MetaAPI for optimization
         const symbol = metaAPIConfig?.symbol || "XAUUSD"
         const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
         const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
 
         console.log("🔍 Using trading symbol for MetaAPI optimization:", symbol)
-        console.log("🔍 MetaAPI Token available:", !!token)
-        console.log("🔍 MetaAPI Account ID available:", !!accountId)
-
         if (!token || !accountId) {
           throw new Error("MetaAPI credentials not configured. Please check environment variables.")
         }
 
-        result = await runOptimisation({
+        const startData = await (runOptimisation as any)({
           statement: optimisationStatement,
           strategy_statement_id: strategy_id ? strategy_id : null,
           wait,
@@ -1288,72 +1266,77 @@ export default function StrategyTestingPage() {
           metaapi_account_id: accountId,
           symbol: symbol,
         })
+
+        if (startData?.run_id && startData?.status === 'started') {
+          optimisationRunIdRef.current = startData.run_id
+          console.log("✅ Stored optimisation run_id for cancel:", startData.run_id)
+          const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000 })
+          optimisationPollerRef.current = stop
+          try {
+            result = await promise
+          } catch (e: any) {
+            if (e?.message === 'cancelled') return
+            throw e
+          }
+          optimisationPollerRef.current = null
+        } else {
+          result = startData
+        }
       } else {
-        // Use file upload for optimization
-        result = await runOptimisation({
+        const startData = await (runOptimisation as any)({
           statement: optimisationStatement,
           files: timeframeFiles,
           strategy_statement_id: strategy_id ? strategy_id : null,
           wait,
         })
+
+        if (startData?.run_id && startData?.status === 'started') {
+          optimisationRunIdRef.current = startData.run_id
+          console.log("✅ Stored optimisation run_id for cancel:", startData.run_id)
+          const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000 })
+          optimisationPollerRef.current = stop
+          try {
+            result = await promise
+          } catch (e: any) {
+            if (e?.message === 'cancelled') return
+            throw e
+          }
+          optimisationPollerRef.current = null
+        } else {
+          result = startData
+        }
       }
 
       console.log("Full optimization response:", result)
 
+      // Unwrap polled result — pollJobStatus resolves with { status, result: {...} }
+      const polledResult = result?.result ?? result
+
       // Capture optional message/stdout/stderr from response
-      setOptimisationMessage(result?.message || "")
-      setOptimisationStdout(result?.stdout || "")
-      setOptimisationStderr(result?.stderr || "")
+      setOptimisationMessage(polledResult?.message || result?.message || "")
+      setOptimisationStdout(polledResult?.stdout || result?.stdout || "")
+      setOptimisationStderr(polledResult?.stderr || result?.stderr || "")
 
-      // Handle the response based on whether it's sync or async
-      if (wait && result?.result) {
-        // Sync mode: use result.result directly
-        setOptimisationResult(result.result)
+      // Handle the response — treat polledResult as the actual result data
+      if (polledResult) {
+        setOptimisationResult(polledResult)
         setActiveTab("optimisation")
         setShowPreviousOptimisationView(true)
-        setOptimizationResults(prev => Array.isArray(prev) ? [...prev, result.result] : [result.result])
-        if (result.result.heatmap_plot_html) {
-          setPlotHeatmapHtml(result.result.heatmap_plot_html)
+        setOptimizationResults(prev => Array.isArray(prev) ? [...prev, polledResult] : [polledResult])
+        if (polledResult.heatmap_plot_html) {
+          setPlotHeatmapHtml(polledResult.heatmap_plot_html)
         } else {
           setPlotHeatmapHtml(null)
         }
-        if (result.result.trades_plot_html) {
-          setPlotHtml(result.result.trades_plot_html)
+        if (polledResult.trades_plot_html) {
+          setPlotHtml(polledResult.trades_plot_html)
         }
         setOptimizationStatus("completed")
-        setCurrentOptimizationId(result.optimization_id || null)
+        setCurrentOptimizationId(result?.optimization_id || polledResult?.optimization_id || null)
         return
       }
 
-      // Async mode: Check if we have immediate results
-      if (result?.result) {
-        // We have results immediately (even in async mode)
-        setOptimisationResult(result.result)
-        setActiveTab("optimisation")
-        setShowPreviousOptimisationView(true)
-        setOptimizationResults(prev => Array.isArray(prev) ? [...prev, result.result] : [result.result])
-        if (result.result.heatmap_plot_html) {
-          setPlotHeatmapHtml(result.result.heatmap_plot_html)
-        } else {
-          setPlotHeatmapHtml(null)
-        }
-        if (result.result.trades_plot_html) {
-          setPlotHtml(result.result.trades_plot_html)
-        }
-        setOptimizationStatus("completed")
-        setCurrentOptimizationId(result.optimization_id || null)
-        return
-      }
-
-      // Pure async mode: Start polling for optimisation status if optimization_id exists
-      const pollId = result?.optimization_id
-      if (pollId) {
-        setCurrentOptimizationId(pollId)
-        setOptimizationStatus("running")
-        startStatusPolling(pollId)
-      } else {
-        showToast("No optimization ID received for polling", 'error')
-      }
+      showToast("No optimisation result received", 'error')
     } catch (error: any) {
       console.error("Optimisation Error:", error)
 
@@ -1387,7 +1370,22 @@ export default function StrategyTestingPage() {
       }
     } finally {
       setIsLoading2(false)
+      optimisationRunIdRef.current = null
     }
+  }
+
+  const cancelOptimisation = () => {
+    optimisationPollerRef.current?.()
+    optimisationPollerRef.current = null
+    const runId = optimisationRunIdRef.current
+    optimisationRunIdRef.current = null
+    if (runId) {
+      cancelOptimisationRun(runId as any)
+        .then((r) => console.log("✅ cancel-optimisation:", r))
+        .catch((e) => console.error("❌ cancel-optimisation failed:", e))
+    }
+    setIsLoading2(false)
+    showToast("Optimisation cancelled", 'warning')
   }
 
   const handleWalkForwardOptimisation = async (wait = false) => {
@@ -1519,14 +1517,31 @@ export default function StrategyTestingPage() {
         apiParams.files = timeframeFiles
       }
 
-      const result = await runWalkForwardOptimisation(apiParams)
+      const startData = await runWalkForwardOptimisation(apiParams)
+
+      let result: any
+      if (startData?.run_id && startData?.status === 'started') {
+        walkForwardRunIdRef.current = startData.run_id
+        console.log("✅ Stored walk forward run_id for cancel:", startData.run_id)
+        const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000 })
+        walkForwardPollerRef.current = stop
+        try {
+          result = await promise
+        } catch (e: any) {
+          if (e?.message === 'cancelled') return
+          throw e
+        }
+        walkForwardPollerRef.current = null
+      } else {
+        result = startData
+      }
 
       console.log("Walk Forward optimization response:", result)
       console.log("Result status:", result?.status)
       console.log("Result message:", result?.message)
 
-      // The API response structure is direct, not nested under 'result'
-      const resultData = result;
+      // Unwrap polled result — pollJobStatus resolves with { status, result: {...} }
+      const resultData = result?.result ?? result;
 
       console.log("🔍 DEBUG: Full result data:", resultData);
       console.log("🔍 DEBUG: Available fields:", Object.keys(resultData || {}));
@@ -1626,7 +1641,22 @@ export default function StrategyTestingPage() {
       }
     } finally {
       setIsLoading3(false)
+      walkForwardRunIdRef.current = null
     }
+  }
+
+  const cancelWalkForward = () => {
+    walkForwardPollerRef.current?.()
+    walkForwardPollerRef.current = null
+    const runId = walkForwardRunIdRef.current
+    walkForwardRunIdRef.current = null
+    if (runId) {
+      cancelOptimisationRun(runId as any)
+        .then((r) => console.log("✅ cancel-walk-forward:", r))
+        .catch((e) => console.error("❌ cancel-walk-forward failed:", e))
+    }
+    setIsLoading3(false)
+    showToast("Walk Forward Optimisation cancelled", 'warning')
   }
 
   // Add function to start status polling
@@ -2610,21 +2640,32 @@ export default function StrategyTestingPage() {
       })
 
       const jobResult = await createOptimizationJob(apiParams)
-
       console.log("Optimization job created:", jobResult)
 
-      // Store job ID and start polling
-      setDropletJobId(jobResult.job_id)
-      setDropletJobStatus(jobResult.status || 'running')
+      // Backend returns { status: 'creating', run_id: 'droplet_272_xxx' }
+      // The run_id is the job identifier
+      const runId = jobResult.run_id
+      const jobId = jobResult.job_id || jobResult.id // Try multiple fields
 
-      showToast(`Optimization job created! Job ID: ${jobResult.job_id}`, 'success')
+      if (!runId) {
+        throw new Error("No run_id returned from optimization job creation")
+      }
 
-      // Start polling for job status
-      startDropletJobPolling(jobResult.job_id)
+      // Use run_id as the job identifier if job_id is not available
+      const jobIdentifier = jobId || runId
 
-      // Navigate to results page with job_id parameter
+      setDropletJobId(jobId || null)
+      setDropletJobStatus(jobResult.status || 'creating')
+      // Store run_id for cancel
+      optimisationRunIdRef.current = runId
+
+      showToast(`Optimization job created! Redirecting to results page...`, 'success')
+
+      // Redirect immediately to optimization results page
+      // The results page will handle polling and showing progress
+      // Use run_id as the job identifier in the URL
       setTimeout(() => {
-        router.push(`/optimization-results?job_id=${jobResult.job_id}&type=droplet`)
+        router.push(`/optimization-results?job_id=${jobIdentifier}&type=droplet`)
       }, 500)
 
     } catch (error: any) {
@@ -2696,6 +2737,8 @@ export default function StrategyTestingPage() {
       }
     } finally {
       setIsCreatingOptimizationJob(false)
+      setIsLoading2(false)
+      optimisationRunIdRef.current = null
     }
   }
 
@@ -3236,6 +3279,7 @@ export default function StrategyTestingPage() {
                       onShowWalkForwardResults={() => setShowWalkForwardOptimizationResults(true)}
                       onRunWalkForwardOptimisation={() => handleWalkForwardOptimisation(false)}
                       onRunWalkForwardOptimisationDroplets={() => handleOptimizationWithDroplets('walk_forward')}
+                      onCancelWalkForward={cancelWalkForward}
                       isLoading3={isLoading3}
                     />
                   </>
@@ -3274,40 +3318,40 @@ export default function StrategyTestingPage() {
                 {/* Action Buttons */}
                 <div className="p-4 flex gap-4">
                   <button
-                    className={`flex-1 py-3 rounded-full transition-colors ${isLoading || (!useMetaAPI && (requiredTimeframes.length > uploadedFiles.length))
-                      ? 'bg-gray-600 cursor-not-allowed text-gray-300'
-                      : (activeTab === 'strategy' || activeTab === 'backtest')
-                        ? 'bg-[#85e1fe] text-black hover:bg-[#6bcae2] font-semibold'
-                        : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
+                    className={`flex-1 py-3 rounded-full transition-colors ${isLoading
+                      ? 'bg-red-600 hover:bg-red-700 text-white font-semibold'
+                      : (!useMetaAPI && (requiredTimeframes.length > uploadedFiles.length))
+                        ? 'bg-gray-600 cursor-not-allowed text-gray-300'
+                        : (activeTab === 'strategy' || activeTab === 'backtest')
+                          ? 'bg-[#85e1fe] text-black hover:bg-[#6bcae2] font-semibold'
+                          : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
                       }`}
-                    onClick={handleRunBacktest}
-                    disabled={isLoading || (!useMetaAPI && (requiredTimeframes.length > uploadedFiles.length))}
+                    onClick={isLoading ? cancelBacktestRun : handleRunBacktest}
+                    disabled={!isLoading && (!useMetaAPI && (requiredTimeframes.length > uploadedFiles.length))}
                   >
-                    {isLoading ? 'Running...' : 'Run Backtest'}
+                    {isLoading ? 'Cancel Backtest' : 'Run Backtest'}
                   </button>
                   <button
-                    onClick={() => handleOptimisation(false)}
+                    onClick={isLoading2 ? cancelOptimisation : () => handleOptimisation(false)}
                     className={`flex-1 py-3 rounded-full transition-colors ${isLoading2
-                      ? 'bg-gray-600 cursor-not-allowed text-gray-300'
+                      ? 'bg-red-600 hover:bg-red-700 text-white font-semibold'
                       : (activeTab === 'optimisation' || activeTab === 'properties')
                         ? 'bg-[#85e1fe] text-black hover:bg-[#6bcae2] font-semibold'
                         : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
                       }`}
-                    disabled={isLoading2}
                   >
-                    Run Optimisation (Legacy)
+                    {isLoading2 ? 'Cancel Optimisation' : 'Run Optimisation (Legacy)'}
                   </button>
                   <button
-                    onClick={() => handleOptimizationWithDroplets('regular')}
+                    onClick={isLoading2 || isCreatingOptimizationJob ? cancelOptimisation : () => handleOptimizationWithDroplets('regular')}
                     className={`flex-1 py-3 rounded-full font-semibold transition-colors ${isLoading2 || isCreatingOptimizationJob
-                      ? 'bg-gray-600 cursor-not-allowed text-gray-400'
+                      ? 'bg-red-600 hover:bg-red-700 text-white'
                       : (activeTab === 'optimisation' || activeTab === 'properties')
                         ? 'bg-[#85e1fe] text-black hover:bg-[#6bcae2]'
                         : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
                       }`}
-                    disabled={isLoading2 || isCreatingOptimizationJob}
                   >
-                    {isCreatingOptimizationJob ? 'Creating Job...' : 'Run Optimization (Droplets)'}
+                    {isLoading2 || isCreatingOptimizationJob ? 'Cancel Optimization' : 'Run Optimization (Droplets)'}
                   </button>
                 </div>
               </div>
@@ -3651,24 +3695,6 @@ export default function StrategyTestingPage() {
           />
         )}
 
-        {/* Trades Summary Modal */}
-        {showTradesSummary && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-6xl max-h-[90vh] overflow-hidden">
-              <div className="p-6 overflow-y-auto max-h-[90vh]">
-                <TradesSummary
-                  tradesCsv={tradesData.tradesCsv}
-                  tradesCsvFilename={tradesData.tradesCsvFilename}
-                  tradesCsvDownloadUrl={tradesData.tradesCsvDownloadUrl}
-                  stdout={tradesData.stdout}
-                  stderr={tradesData.stderr}
-                  onClose={() => setShowTradesSummary(false)}
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Optimization Cost Dialog */}
         <OptimizationCostDialog
           isOpen={showCostDialog}
@@ -3701,6 +3727,12 @@ export default function StrategyTestingPage() {
                 <p className="text-sm text-gray-500 text-center mt-2">
                   Please wait, this may take a few moments
                 </p>
+                <button
+                  onClick={cancelOptimisation}
+                  className="mt-6 px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-full font-medium transition-colors"
+                >
+                  Cancel
+                </button>
               </div>
             </div>
           </div>

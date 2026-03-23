@@ -51,9 +51,21 @@ function OptimizationResultsContent() {
       let data;
       
       if (isDroplet) {
-        // For droplet optimizations, call the jobs API
-        data = await getOptimizationJob(jobId)
-        console.log("📊 Droplet job data:", data)
+        // For droplet optimizations, use the job-status endpoint with run_id
+        const response = await fetch(`http://127.0.0.1:8000/api/job-status/${jobId}/`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${localStorage.getItem("auth_token") || ""}`
+          }
+        })
+        
+        if (!response.ok) {
+          throw new Error(`Failed to fetch job status: ${response.status}`)
+        }
+        
+        data = await response.json()
+        console.log("📊 Droplet job data from job-status:", data)
       } else {
         // For legacy optimizations, call the results API
         data = await getOptimizationResultDetail(jobId)
@@ -67,8 +79,10 @@ function OptimizationResultsContent() {
       // If job is completed, process results
       if (['completed', 'success'].includes(normalizedStatus)) {
         if (data.results) {
-          // For regular optimization, use optimisation_preview as the main table data
-          const tableData = data.results.optimisation_preview || data.results.convergence_data || []
+          // ✅ Use full optimization results instead of preview (which is limited to 20 rows)
+          const tableData = data.results.optimisation_results || data.results.full_optimization_results || data.results.optimisation_preview || data.results.convergence_data || []
+          
+          console.log(`📊 Loaded ${tableData.length} optimization results`)
           
           const transformedResult = {
             convergence_data: tableData,
@@ -120,7 +134,21 @@ function OptimizationResultsContent() {
         if (!jobId) return
         
         try {
-          const data = await getOptimizationJob(jobId)
+          // Use job-status endpoint for droplet jobs
+          const response = await fetch(`http://127.0.0.1:8000/api/job-status/${jobId}/`, {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${localStorage.getItem("auth_token") || ""}`
+            }
+          })
+          
+          if (!response.ok) {
+            console.error("Polling error:", response.status)
+            return
+          }
+          
+          const data = await response.json()
           const normalizedStatus = (data.status || '').toLowerCase()
           
           if (['completed', 'failed', 'cancelled', 'success'].includes(normalizedStatus)) {
@@ -313,13 +341,55 @@ function OptimizationResultsContent() {
       <main className="flex-1 p-6 ml-0 md:ml-[63px]">
           {/* Header with Back Button */}
           <div className="mb-6">
-            <button
-              onClick={() => router.back()}
-              className="flex items-center gap-2 text-[#85e1fe] hover:text-[#6bcae2] mb-4"
-            >
-              <ArrowLeft className="w-5 h-5" />
-              <span>Back to Strategy Testing</span>
-            </button>
+            <div className="flex justify-between items-center mb-4">
+              <button
+                onClick={() => router.back()}
+                className="flex items-center gap-2 text-[#85e1fe] hover:text-[#6bcae2]"
+              >
+                <ArrowLeft className="w-5 h-5" />
+                <span>Back to Strategy Testing</span>
+              </button>
+              
+              {/* Download All Files Button */}
+              {jobData && ['completed', 'success'].includes((jobData.status || '').toLowerCase()) && (
+                <button
+                  onClick={async () => {
+                    try {
+                      const token = localStorage.getItem('auth_token');
+                      const response = await fetch(`http://127.0.0.1:8000/api/optimization-results/${jobId}/download/`, {
+                        headers: { 
+                          'Authorization': `Bearer ${token}`,
+                          'Content-Type': 'application/json'
+                        }
+                      });
+                      
+                      if (!response.ok) {
+                        throw new Error('Failed to download files');
+                      }
+                      
+                      const blob = await response.blob();
+                      const url = window.URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `optimization_${jobId}_results.zip`;
+                      document.body.appendChild(a);
+                      a.click();
+                      window.URL.revokeObjectURL(url);
+                      document.body.removeChild(a);
+                      
+                      showToast('Download started!', 'success');
+                    } catch (error) {
+                      console.error('Download failed:', error);
+                      showToast('Failed to download files. Please try downloading individual files.', 'error');
+                    }
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-[#85e1fe] text-black rounded-lg font-semibold hover:bg-[#6bcae2] transition-colors"
+                >
+                  <span>📥</span>
+                  <span>Download All Files (ZIP)</span>
+                </button>
+              )}
+            </div>
             <h1 className="text-3xl font-bold text-white">Optimization Results</h1>
           </div>
 
@@ -642,23 +712,31 @@ function OptimizationResultsContent() {
 
               {/* Results Tab */}
               {selectedTab === 'results' && (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-xs border-separate border-spacing-y-2">
-                    <thead>
-                      <tr className="bg-[#1A1D2D] text-white">
-                        <th className="px-2 py-2">#</th>
-                        <th className="px-2 py-2">Return [%]</th>
-                        <th className="px-2 py-2">Equity Final [$]</th>
-                        <th className="px-2 py-2"># Trades</th>
-                        <th className="px-2 py-2">Win Rate [%]</th>
-                        <th className="px-2 py-2">Profit Factor</th>
-                        <th className="px-2 py-2">Max. Drawdown [%]</th>
-                        <th className="px-2 py-2">Sharpe Ratio</th>
-                        <th className="px-2 py-2">Parameters</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(optimisationResult.convergence_data || []).map((row: any, idx: number) => {
+                <div>
+                  {/* Show total count */}
+                  <div className="mb-4 flex justify-between items-center">
+                    <p className="text-gray-400 text-sm">
+                      Showing {(optimisationResult.convergence_data || []).length} results
+                    </p>
+                  </div>
+                  
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-xs border-separate border-spacing-y-2">
+                      <thead>
+                        <tr className="bg-[#1A1D2D] text-white">
+                          <th className="px-2 py-2">#</th>
+                          <th className="px-2 py-2">Return [%]</th>
+                          <th className="px-2 py-2">Equity Final [$]</th>
+                          <th className="px-2 py-2"># Trades</th>
+                          <th className="px-2 py-2">Win Rate [%]</th>
+                          <th className="px-2 py-2">Profit Factor</th>
+                          <th className="px-2 py-2">Max. Drawdown [%]</th>
+                          <th className="px-2 py-2">Sharpe Ratio</th>
+                          <th className="px-2 py-2">Parameters</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(optimisationResult.convergence_data || []).map((row: any, idx: number) => {
                         const standardFields = ['Return [%]', 'Equity Final [$]', '# Trades', 'Win Rate [%]', 
                           'Profit Factor', 'Max. Drawdown [%]', 'Sharpe Ratio', 'Sortino Ratio', 'Calmar Ratio',
                           'Return (Ann.) [%]', 'Volatility (Ann.) [%]', 'Start', 'End', 'Duration', 'SQN',
@@ -696,6 +774,7 @@ function OptimizationResultsContent() {
                     </tbody>
                   </table>
                 </div>
+              </div>
               )}
 
               {/* Graph Tab */}
@@ -774,13 +853,54 @@ function OptimizationResultsContent() {
                 <div className="mt-6">
                   <h3 className="text-lg font-semibold text-white mb-4">Generated Files</h3>
                   <div className="bg-[#141721] rounded-lg p-4">
-                    <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      {optimisationResult.results_output_listing.map((file: string, idx: number) => (
-                        <li key={idx} className="text-gray-300 text-sm flex items-center gap-2">
-                          <span className="text-[#85e1fe]">📄</span>
-                          {file}
-                        </li>
-                      ))}
+                    <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {optimisationResult.results_output_listing.map((file: string, idx: number) => {
+                        // Extract filename from path
+                        const filename = file.split('/').pop() || file;
+                        const downloadUrl = `http://127.0.0.1:8000/api/download-optimization-file/?path=${encodeURIComponent(file)}`;
+                        
+                        return (
+                          <li key={idx} className="bg-[#0e1018] rounded-lg p-3 flex items-center justify-between">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <span className="text-[#85e1fe] text-lg">📄</span>
+                              <span className="text-gray-300 text-sm truncate" title={filename}>
+                                {filename}
+                              </span>
+                            </div>
+                            <a
+                              href={downloadUrl}
+                              download={filename}
+                              className="ml-2 px-3 py-1 bg-[#85e1fe] text-black rounded text-xs font-semibold hover:bg-[#6bcae2] transition-colors whitespace-nowrap"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                // Use fetch to download the file
+                                fetch(downloadUrl, {
+                                  headers: {
+                                    'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
+                                  }
+                                })
+                                .then(response => response.blob())
+                                .then(blob => {
+                                  const url = window.URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = filename;
+                                  document.body.appendChild(a);
+                                  a.click();
+                                  window.URL.revokeObjectURL(url);
+                                  document.body.removeChild(a);
+                                })
+                                .catch(err => {
+                                  console.error('Download failed:', err);
+                                  alert('Failed to download file. Please try again.');
+                                });
+                              }}
+                            >
+                              Download
+                            </a>
+                          </li>
+                        );
+                      })}
                     </ul>
                     <p className="text-gray-400 text-xs mt-3">
                       Output directory: {optimisationResult.output_dir || 'N/A'}

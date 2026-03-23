@@ -73,7 +73,9 @@ function BacktestResultsClient() {
   const [backtestDetail, setBacktestDetail] = useState<BacktestDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'chart_data' | 'trades' | 'summary'>('summary')
+  const [activeTab, setActiveTab] = useState<'chart_data' | 'trades' | 'summary'>('chart_data')
+  const [isPlotExpanded, setIsPlotExpanded] = useState(false)
+  const [iframeLoaded, setIframeLoaded] = useState(false)
 
   useEffect(() => {
     if (backtestId) {
@@ -175,10 +177,22 @@ function BacktestResultsClient() {
     try {
       setLoading(true)
       setError(null)
+
+      // Check sessionStorage cache first — instant load on revisit
+      const cacheKey = `backtest_result_${backtestId}`
+      const cached = sessionStorage.getItem(cacheKey)
+      if (cached) {
+        setBacktestDetail(JSON.parse(cached))
+        setLoading(false)
+        return
+      }
+
       const raw = await getBacktestResultDetail(backtestId!)
       console.log('📊 Raw backtest API response:', raw)
       const normalized = normalizeBacktestResult(raw)
       console.log('📊 Normalized backtest data:', normalized)
+      // Cache for this session
+      try { sessionStorage.setItem(cacheKey, JSON.stringify(normalized)) } catch {}
       setBacktestDetail(normalized)
     } catch (err: any) {
       setError(err.message || 'Failed to load backtest details')
@@ -578,25 +592,66 @@ function BacktestResultsClient() {
 
             {/* Chart Data Tab */}
             {activeTab === 'chart_data' && (
-              <div className="p-6 space-y-6">
-                {/* Chart Data Table */}
-                {backtestDetail.chart_data && backtestDetail.chart_data.length > 0 ? (
-                  <div>
-                    <div className="flex justify-between items-center mb-4">
-                      <h3 className="text-lg font-semibold text-white">
-                        Chart Data ({backtestDetail.chart_data.length} rows)
-                      </h3>
+              <div className="space-y-0">
+                {/* Main Plot — full width, tall, expandable */}
+                {backtestDetail.plot_html ? (
+                  <div className="relative bg-[#121420]">
+                    <div className="flex items-center justify-between px-4 py-2 bg-[#141721] border-b border-gray-700">
+                      <span className="text-white font-semibold text-sm">Equity Curve</span>
+                      <button
+                        onClick={() => setIsPlotExpanded(!isPlotExpanded)}
+                        className="text-gray-400 hover:text-white text-xs px-3 py-1 rounded border border-gray-600 hover:border-gray-400 transition-colors"
+                      >
+                        {isPlotExpanded ? '⊡ Collapse' : '⊞ Expand'}
+                      </button>
                     </div>
+                    {/* Dark placeholder shown while iframe loads */}
+                    {!iframeLoaded && (
+                      <div
+                        className="absolute inset-0 top-[37px] flex items-center justify-center bg-[#121420] z-10"
+                        style={{ height: isPlotExpanded ? "calc(100vh - 160px)" : "520px" }}
+                      >
+                        <div className="flex flex-col items-center gap-3">
+                          <div className="w-6 h-6 border-2 border-gray-600 border-t-[#85e1fe] rounded-full animate-spin" />
+                          <span className="text-gray-500 text-sm">Loading chart...</span>
+                        </div>
+                      </div>
+                    )}
+                    <iframe
+                      title="Equity Curve"
+                      onLoad={() => setIframeLoaded(true)}
+                      style={{
+                        width: "100%",
+                        height: isPlotExpanded ? "calc(100vh - 160px)" : "520px",
+                        border: "none",
+                        backgroundColor: "#121420",
+                        display: "block",
+                        transition: "height 0.3s ease, opacity 0.4s ease",
+                        opacity: iframeLoaded ? 1 : 0,
+                      }}
+                      srcDoc={backtestDetail.plot_html}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center h-64 text-gray-400">
+                    No chart available
+                  </div>
+                )}
+
+                {/* Chart Data Table below the plot */}
+                {backtestDetail.chart_data && backtestDetail.chart_data.length > 0 && (
+                  <div className="p-6">
+                    <h3 className="text-sm font-semibold text-gray-400 mb-3">
+                      Raw Chart Data ({backtestDetail.chart_data.length} rows)
+                    </h3>
                     <div className="bg-[#141721] rounded-lg overflow-hidden">
-                      <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+                      <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
                         <table className="min-w-full text-sm">
                           <thead className="bg-[#1A1D2D] text-white sticky top-0 z-10">
                             <tr>
                               <th className="px-4 py-3 text-left">#</th>
                               {Object.keys(backtestDetail.chart_data[0]).map((colName) => (
-                                <th key={colName} className="px-4 py-3 text-left whitespace-nowrap">
-                                  {colName}
-                                </th>
+                                <th key={colName} className="px-4 py-3 text-left whitespace-nowrap">{colName}</th>
                               ))}
                             </tr>
                           </thead>
@@ -608,13 +663,7 @@ function BacktestResultsClient() {
                                   const value = row[colName]
                                   return (
                                     <td key={colName} className="px-4 py-3 text-white whitespace-nowrap">
-                                      {value != null
-                                        ? (typeof value === 'number'
-                                          ? (Number.isInteger(value) ? value : value.toFixed(5))
-                                          : String(value))
-                                        : (['PnL', 'Size', 'ExitBar', 'low_3h', 'Open_3h', 'high_3h', 'Low_3h'].some(c => colName.toLowerCase().includes(c.toLowerCase()))
-                                          ? '0'
-                                          : 'N/A')}
+                                      {value != null ? (typeof value === 'number' ? (Number.isInteger(value) ? value : value.toFixed(5)) : String(value)) : 'N/A'}
                                     </td>
                                   )
                                 })}
@@ -625,14 +674,30 @@ function BacktestResultsClient() {
                       </div>
                     </div>
                   </div>
-                ) : (
-                  <div className="text-center text-gray-400 py-8">
-                    <p>No chart data available</p>
-                  </div>
                 )}
               </div>
             )}
           </div>
+
+          {/* Expanded plot overlay */}
+          {isPlotExpanded && backtestDetail.plot_html && (
+            <div className="fixed inset-0 z-50 bg-[#121420] flex flex-col">
+              <div className="flex items-center justify-between px-4 py-2 bg-[#141721] border-b border-gray-700">
+                <span className="text-white font-semibold">Equity Curve — {backtestDetail.strategy_statement_name}</span>
+                <button
+                  onClick={() => setIsPlotExpanded(false)}
+                  className="text-gray-400 hover:text-white text-sm px-3 py-1 rounded border border-gray-600 hover:border-gray-400"
+                >
+                  ✕ Close
+                </button>
+              </div>
+              <iframe
+                title="Equity Curve Expanded"
+                style={{ flex: 1, border: "none", backgroundColor: "#121420" }}
+                srcDoc={backtestDetail.plot_html}
+              />
+            </div>
+          )}
 
           {/* Bottom Navigation Tabs */}
           <div className="flex border-t border-gray-700">

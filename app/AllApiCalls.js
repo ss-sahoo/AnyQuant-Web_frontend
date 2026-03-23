@@ -237,14 +237,12 @@ export const sendOtp = async (email) => {
 
 // src/api/runBacktest.js or .ts
 
-export const runBacktest = async ({ statement, files }) => {
+export const runBacktest = async ({ statement, files, run_id = null }) => {
   const formData = new FormData()
 
-  // Attach the statement JSON as a string
   formData.append("statement", JSON.stringify(statement))
+  if (run_id) formData.append("run_id", run_id)
 
-  // Attach each file using its timeframe key
-  // Example: files = { "3h": File, "15min": File }
   for (const [timeframe, file] of Object.entries(files)) {
     formData.append(timeframe, file)
   }
@@ -266,8 +264,7 @@ export const runBacktest = async ({ statement, files }) => {
 // If you want to use the native fetch, replace all 'Fetch' with 'fetch'.
 
 // Add this new function for MetaAPI integration
-export const runBacktestWithMetaAPI = async (strategy, token, accountId, symbol) => {
-  // Debug logging
+export const runBacktestWithMetaAPI = async (strategy, token, accountId, symbol, run_id = null) => {
   console.log('🔍 MetaAPI Debug Info:', {
     tokenLength: token?.length || 0,
     accountId: accountId,
@@ -282,6 +279,7 @@ export const runBacktestWithMetaAPI = async (strategy, token, accountId, symbol)
   formData.append('metaapi_token', token);
   formData.append('metaapi_account_id', accountId);
   formData.append('symbol', symbol);
+  if (run_id) formData.append('run_id', run_id);
 
   try {
     const response = await Fetch('/api/run-backtest/', {
@@ -295,7 +293,11 @@ export const runBacktestWithMetaAPI = async (strategy, token, accountId, symbol)
       throw new Error(error?.error || error?.message || 'Failed to start backtest with MetaAPI');
     }
 
-    return response.json();
+    const data = await response.json();
+
+    // If backend returned run_id immediately (async mode), return as-is for polling
+    // If backend returned full result (sync mode), return as-is for direct use
+    return data;
   } catch (error) {
     console.error('🔍 MetaAPI Request Error:', error);
     throw error;
@@ -388,7 +390,8 @@ export const runOptimisation = async ({
   wait = false,
   metaapi_token = null,
   metaapi_account_id = null,
-  symbol = null
+  symbol = null,
+  run_id = null,
 }) => {
   // Validate input: either files OR MetaAPI credentials must be provided
   const isMetaAPIMode = metaapi_token && metaapi_account_id && symbol;
@@ -412,10 +415,9 @@ export const runOptimisation = async ({
 
   const formData = new FormData()
 
-  // Attach the statement JSON as a string
   formData.append("statement", JSON.stringify(statement))
+  if (run_id) formData.append("run_id", run_id)
 
-  // Attach strategy statement ID if provided
   if (strategy_statement_id) {
     formData.append("strategy_statement_id", strategy_statement_id)
   }
@@ -461,6 +463,76 @@ export const runOptimisation = async ({
   }
 }
 
+export const cancelBacktest = async (runId) => {
+  const formData = new FormData()
+  formData.append("run_id", runId)
+  const authToken = typeof localStorage !== 'undefined' ? localStorage.getItem("auth_token") : null
+  const headers = new Headers()
+  if (authToken) headers.append("Authorization", `Bearer ${authToken}`)
+  console.log("📡 cancel-backtest →", runId)
+  const response = await fetch("http://127.0.0.1:8000/api/cancel-backtest/", { method: "POST", headers, body: formData })
+  console.log("📡 cancel-backtest status:", response.status)
+  return response.json().catch(() => ({}))
+}
+
+export const cancelOptimisationRun = async (runId) => {
+  const formData = new FormData()
+  formData.append("run_id", runId)
+  const authToken = typeof localStorage !== 'undefined' ? localStorage.getItem("auth_token") : null
+  const headers = new Headers()
+  if (authToken) headers.append("Authorization", `Bearer ${authToken}`)
+  console.log("📡 cancel-optimisation →", runId)
+  const response = await fetch("http://127.0.0.1:8000/api/cancel-optimisation/", { method: "POST", headers, body: formData })
+  console.log("📡 cancel-optimisation status:", response.status)
+  return response.json().catch(() => ({}))
+}
+
+// Poll job status until completed/failed/cancelled
+// Returns { stop, promise }
+// stop() clears the interval AND rejects the promise (call on cancel)
+// promise resolves with final data or rejects on failure/cancel
+export const pollJobStatus = (runId, { intervalMs = 3000, onStatus } = {}) => {
+  let intervalId = null
+  let rejectFn = null
+
+  const promise = new Promise((resolve, reject) => {
+    rejectFn = reject
+
+    intervalId = setInterval(async () => {
+      try {
+        const response = await Fetch(`/api/job-status/${runId}/`, { method: "GET" })
+        if (!response.ok) {
+          clearInterval(intervalId)
+          reject(new Error("Failed to poll job status"))
+          return
+        }
+        const data = await response.json()
+        if (onStatus) onStatus(data)
+
+        if (data.status === "completed") {
+          clearInterval(intervalId)
+          resolve(data)
+        } else if (data.status === "failed") {
+          clearInterval(intervalId)
+          reject(new Error(data.error || data.message || "Job failed"))
+        } else if (data.status === "cancelled") {
+          clearInterval(intervalId)
+          reject(new Error("cancelled"))
+        }
+      } catch (err) {
+        clearInterval(intervalId)
+        reject(err)
+      }
+    }, intervalMs)
+  })
+
+  const stop = () => {
+    if (intervalId) clearInterval(intervalId)
+    if (rejectFn) rejectFn(new Error("cancelled"))
+  }
+
+  return { promise, stop }
+}
 
 // AllApiCalls.ts
 export const createStatement = async ({ account, statement }) => {

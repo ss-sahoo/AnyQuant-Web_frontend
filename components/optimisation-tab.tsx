@@ -25,6 +25,7 @@ interface OptimisationTabProps {
   onShowWalkForwardResults?: () => void // Callback to show walk forward results
   onRunWalkForwardOptimisation?: () => void // Callback to run walk forward optimisation
   onRunWalkForwardOptimisationDroplets?: () => void // New callback for droplets
+  onCancelWalkForward?: () => void // Callback to cancel walk forward
   isLoading3?: boolean // Loading state for walk forward optimisation
 }
 
@@ -63,6 +64,7 @@ export function OptimisationTab({
   onShowWalkForwardResults, // Callback to show walk forward results
   onRunWalkForwardOptimisation, // Callback to run walk forward optimisation
   onRunWalkForwardOptimisationDroplets, // New callback for droplets
+  onCancelWalkForward, // Callback to cancel walk forward
   isLoading3, // Loading state for walk forward optimisation
 }: OptimisationTabProps) {
   // Remove local states for selectedMaximiseOption and selectedAlgorithm
@@ -484,20 +486,24 @@ export function OptimisationTab({
             <div className="flex gap-3">
               {onRunWalkForwardOptimisation && (
                 <button
-                  className="flex-1 py-3 bg-[#141721] text-white rounded-full hover:bg-[#2B2E38] font-medium"
-                  onClick={onRunWalkForwardOptimisation}
-                  disabled={isLoading3}
+                  className={`flex-1 py-3 rounded-full font-medium ${isLoading3
+                    ? 'bg-red-600 hover:bg-red-700 text-white'
+                    : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
+                  }`}
+                  onClick={isLoading3 ? onCancelWalkForward : onRunWalkForwardOptimisation}
                 >
-                  {isLoading3 ? "Running..." : "Run Walk Forward (Legacy)"}
+                  {isLoading3 ? "Cancel Walk Forward" : "Run Walk Forward (Legacy)"}
                 </button>
               )}
               {onRunWalkForwardOptimisationDroplets && (
                 <button
-                  className="flex-1 py-3 bg-[#85e1fe] text-black rounded-full hover:bg-[#6bcae2] font-medium"
-                  onClick={onRunWalkForwardOptimisationDroplets}
-                  disabled={isLoading3}
+                  className={`flex-1 py-3 rounded-full font-medium ${isLoading3
+                    ? 'bg-red-600 hover:bg-red-700 text-white'
+                    : 'bg-[#85e1fe] text-black hover:bg-[#6bcae2]'
+                  }`}
+                  onClick={isLoading3 ? onCancelWalkForward : onRunWalkForwardOptimisationDroplets}
                 >
-                  Run Walk Forward (Droplets)
+                  {isLoading3 ? "Cancel Walk Forward" : "Run Walk Forward (Droplets)"}
                 </button>
               )}
             </div>
