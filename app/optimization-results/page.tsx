@@ -422,7 +422,19 @@ function OptimizationResultsContent() {
               <div className="mb-4">
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-sm text-gray-400">Progress</span>
-                  <span className="text-sm text-gray-400">{getProgressPercentage()}%</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-400">{getProgressPercentage()}%</span>
+                    {jobData.status?.toLowerCase() === 'running' && jobData.started_at && (
+                      <span className="text-xs text-gray-500">
+                        • Running for {(() => {
+                          const startTime = new Date(jobData.started_at).getTime();
+                          const now = Date.now();
+                          const minutes = Math.floor((now - startTime) / 60000);
+                          return minutes > 0 ? `${minutes} min` : 'less than 1 min';
+                        })()}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="w-full bg-gray-700 h-3 rounded-full overflow-hidden">
                   <div
@@ -430,21 +442,41 @@ function OptimizationResultsContent() {
                     style={{ width: `${getProgressPercentage()}%` }}
                   ></div>
                 </div>
+                {jobData.status?.toLowerCase() === 'running' && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Estimated time: 5-15 minutes depending on complexity
+                  </p>
+                )}
               </div>
 
               {/* Job Details */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
                   <p className="text-gray-400 text-sm">Estimated Cost</p>
-                  <p className="text-white font-semibold">${jobData.estimated_cost || '-'}</p>
+                  <p className="text-white font-semibold">
+                    {jobData.estimated_cost ? `$${jobData.estimated_cost}` : 
+                     jobData.status?.toLowerCase() === 'running' ? '$0.10 - $0.50' : '-'}
+                  </p>
                 </div>
                 <div>
                   <p className="text-gray-400 text-sm">Actual Cost</p>
-                  <p className="text-white font-semibold">${jobData.actual_cost || '-'}</p>
+                  <p className="text-white font-semibold">
+                    {jobData.actual_cost ? `$${jobData.actual_cost}` : 
+                     ['completed', 'success'].includes(jobData.status?.toLowerCase()) ? 'Calculating...' : '-'}
+                  </p>
                 </div>
                 <div>
                   <p className="text-gray-400 text-sm">Runtime</p>
-                  <p className="text-white font-semibold">{jobData.runtime_minutes ? `${jobData.runtime_minutes} min` : '-'}</p>
+                  <p className="text-white font-semibold">
+                    {jobData.runtime_minutes ? `${jobData.runtime_minutes} min` : 
+                     jobData.started_at ? (() => {
+                       const startTime = new Date(jobData.started_at).getTime();
+                       const now = Date.now();
+                       const minutes = Math.floor((now - startTime) / 60000);
+                       const seconds = Math.floor(((now - startTime) % 60000) / 1000);
+                       return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+                     })() : '-'}
+                  </p>
                 </div>
                 <div>
                   <p className="text-gray-400 text-sm">Started At</p>
