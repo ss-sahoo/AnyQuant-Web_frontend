@@ -734,11 +734,26 @@ function OptimizationResultsContent() {
               {/* Results Tab */}
               {selectedTab === 'results' && (
                 <div>
-                  {/* Show total count */}
-                  <div className="mb-4 flex justify-between items-center">
-                    <p className="text-gray-400 text-sm">
-                      Showing {(optimisationResult.convergence_data || []).length} results
-                    </p>
+                  {/* Show total count and download message */}
+                  <div className="mb-4">
+                    <div className="flex justify-between items-center mb-2">
+                      <p className="text-gray-400 text-sm">
+                        Showing {(optimisationResult.convergence_data || []).length} results
+                      </p>
+                    </div>
+                    {(optimisationResult.convergence_data || []).length >= 50 && (
+                      <div className="bg-[#141721] border border-[#85e1fe] rounded-lg p-3 flex items-center gap-3">
+                        <span className="text-2xl">ℹ️</span>
+                        <div className="flex-1">
+                          <p className="text-white text-sm font-semibold mb-1">
+                            Showing first 50 results for performance
+                          </p>
+                          <p className="text-gray-400 text-xs">
+                            To view all optimization results, download the <span className="text-[#85e1fe] font-semibold">Full_optimisation_result.csv</span> file from the Generated Files section below.
+                          </p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   
                   <div className="overflow-x-auto">
