@@ -5,7 +5,7 @@ import { useEffect } from "react"
 export default function Home() {
   useEffect(() => {
     // Redirect to external waitlist page
-    window.location.href = "https://www.anyquant.co.uk/waitlist"
+    window.location.href = "https://anyquant.webflow.io/waitlist"
   }, [])
 
   return (
