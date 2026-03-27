@@ -60,12 +60,69 @@ export function TimeframeUploadSection({
     }
   }, [])
 
+  // Helper function to match timeframes with filenames (same logic as main app)
+  const matchesTimeframe = (filename: string, timeframe: string) => {
+    const lowerFilename = filename.toLowerCase()
+    const lowerTimeframe = timeframe.toLowerCase()
+
+    // Direct matching (e.g., "3h" in filename)
+    if (lowerFilename.includes(lowerTimeframe)) {
+      return true
+    }
+
+    // Handle numeric equivalents
+    const timeframeToMinutes: { [key: string]: number } = {
+      "1min": 1,
+      "5min": 5,
+      "15min": 15,
+      "20min": 20,
+      "30min": 30,
+      "36min": 36,
+      "1h": 60,
+      "2h": 120,
+      "3h": 180,
+      "4h": 240,
+      "6h": 360,
+      "8h": 480,
+      "12h": 720,
+      "1d": 1440,
+      "1 day": 1440,
+      "1w": 10080,
+      "1 week": 10080,
+    }
+
+    const minutes = timeframeToMinutes[lowerTimeframe]
+    if (minutes) {
+      const minutesStr = minutes.toString()
+      const regex = new RegExp(`\\b${minutesStr}\\b`)
+      return regex.test(lowerFilename)
+    }
+
+    // Additional pattern matching
+    const timeframePatterns = {
+      "3h": ["3h", "180", "3 hour", "three hour"],
+      "1h": ["1h", "60", "1 hour", "one hour"],
+      "36min": ["36min", "36", "36 minute", "thirty six"],
+      "30min": ["30min", "30", "30 minute", "thirty"],
+      "15min": ["15min", "15", "15 minute", "fifteen"],
+      "5min": ["5min", "5", "5 minute", "five"],
+      "1min": ["1min", "1", "1 minute", "one minute"]
+    }
+
+    const patterns = timeframePatterns[lowerTimeframe as keyof typeof timeframePatterns]
+    if (patterns) {
+      return patterns.some(pattern => lowerFilename.includes(pattern.toLowerCase()))
+    }
+
+    return false
+  }
+
   // Update status when files are uploaded or deleted
   useEffect(() => {
     if (timeframeFiles.length > 0) {
       const updatedTimeframes = timeframeFiles.map((tf) => {
-        // Check if any uploaded file matches this timeframe
-        const matchingFile = uploadedFiles.find((file) => file.toLowerCase().includes(tf.timeframe.toLowerCase()))
+        // Check if any uploaded file matches this timeframe using proper matching logic
+        const matchingFile = uploadedFiles.find((file) => matchesTimeframe(file, tf.timeframe))
 
         return {
           ...tf,
@@ -236,9 +293,9 @@ export function TimeframeUploadSection({
           <h3 className="text-md font-medium mb-3">All Uploaded Files</h3>
           <div className="bg-[#1E2132] rounded-md overflow-hidden">
             {uploadedFiles.map((file, index) => {
-              // Check if this file matches a required timeframe
+              // Check if this file matches a required timeframe using proper matching logic
               const matchingTimeframe = timeframeFiles.find((tf) =>
-                file.toLowerCase().includes(tf.timeframe.toLowerCase()),
+                matchesTimeframe(file, tf.timeframe),
               )
 
               return (
@@ -267,10 +324,12 @@ export function TimeframeUploadSection({
                       <span className="text-sm">{file}</span>
                       {matchingTimeframe ? (
                         <span className="text-xs text-green-400">
-                          Matches required timeframe: {matchingTimeframe.timeframe}
+                          ✅ Matches required timeframe: {matchingTimeframe.timeframe}
                         </span>
                       ) : (
-                        <span className="text-xs text-yellow-400">Doesn't match any required timeframe</span>
+                        <span className="text-xs text-yellow-400">
+                          ⚠️ Doesn't match any required timeframe. This may cause incorrect backtest results.
+                        </span>
                       )}
                     </div>
                   </div>

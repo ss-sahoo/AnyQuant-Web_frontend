@@ -11,7 +11,43 @@ import { RsiSettingsModal } from "@/components/modals/rsi-settings-modal"
 
 interface CrossingUpSettingsModalProps {
   onClose: () => void
-  currentInp1?: any 
+  currentInp1?: any
+  initialSettings?: {
+    valueType?: string
+    customValue?: string
+    indicator?: string
+    timeframe?: string
+    band?: string
+    timeperiod?: number
+    // RSI parameters
+    rsiLength?: number
+    // RSI-MA parameters
+    rsiMaLength?: number
+    maLength?: number
+    rsiSource?: string
+    maType?: string
+    bbStdDev?: number
+    bbSource?: string
+    // Volume-MA parameters
+    volumeMaLength?: number
+    // Volume Delta parameters
+    lowerTimeframe?: string
+    resetPeriod?: string
+    fastPeriod?: number
+    slowPeriod?: number
+    signalPeriod?: number
+    kPeriod?: number
+    dPeriod?: number
+    period?: number
+    offsetLogicalOperator?: string
+    offsetValue?: number
+    offsetUnit?: string
+    // Stochastic parameters
+    fastk_period?: number
+    slowk_period?: number
+    slowd_period?: number
+    stochasticOutput?: string
+  }
   onSave: (settings: {
     valueType: string
     customValue?: string
@@ -30,17 +66,28 @@ interface CrossingUpSettingsModalProps {
     bbSource?: string
     // Volume-MA parameters
     volumeMaLength?: number
+    // Volume Delta parameters
+    lowerTimeframe?: string
+    resetPeriod?: string
     fastPeriod?: number
     slowPeriod?: number
     signalPeriod?: number
     kPeriod?: number
     dPeriod?: number
     period?: number
+    offsetLogicalOperator?: string
+    offsetValue?: number
+    offsetUnit?: string
+    // Stochastic parameters
+    fastk_period?: number
+    slowk_period?: number
+    slowd_period?: number
+    stochasticOutput?: string
   }) => void
   onNext: (indicator: string, timeframe: string) => void
 }
 
-export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }: CrossingUpSettingsModalProps) {
+export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings, onSave, onNext }: CrossingUpSettingsModalProps) {
   const [valueType, setValueType] = useState("value")
   const [customValue, setCustomValue] = useState("50")
   const [indicator, setIndicator] = useState("")
@@ -62,6 +109,10 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
 
   // Volume-MA parameters
   const [volumeMaLength, setVolumeMaLength] = useState(20)
+
+  // Volume Delta parameters
+  const [lowerTimeframe, setLowerTimeframe] = useState("1min")
+  const [resetPeriod, setResetPeriod] = useState("D")
 
   // Load saved Volume settings from localStorage on component mount
   useEffect(() => {
@@ -88,6 +139,11 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
   const [dPeriod, setDPeriod] = useState(3)
   const [period, setPeriod] = useState(14)
 
+  // Offset parameters
+  const [offsetLogicalOperator, setOffsetLogicalOperator] = useState(">=")
+  const [offsetValue, setOffsetValue] = useState(0)
+  const [offsetUnit, setOffsetUnit] = useState("none")
+
   // Add state to control showing the indicator modal for 'other' valueType
   const [showIndicatorModal, setShowIndicatorModal] = useState(false)
   const [pendingOtherIndicator, setPendingOtherIndicator] = useState<string | null>(null)
@@ -96,6 +152,11 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
   // Get available existing indicators based on inp1
   const getExistingIndicatorOptions = () => {
     if (!currentInp1) return []
+
+    // If Super Trend is selected, no existing indicators should be shown
+    if (currentInp1.name === "SupertrendIndicator") {
+      return []
+    }
 
     const options = []
 
@@ -112,6 +173,11 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
       options.push({ value: "mid", label: "Mid" })
     } else if (currentInp1.name === "MACD") {
       options.push({ value: "macd", label: "MACD" })
+    } else if (currentInp1.name === "ATR") {
+      options.push({ value: "atr", label: "ATR" })
+    } else if (currentInp1.name === "Stochastic") {
+      options.push({ value: "stochastic-k", label: "%K (fast-line)" })
+      options.push({ value: "stochastic-d", label: "%D (slow-line)" })
     } else if (
       currentInp1.name === "Volume_MA" ||
       currentInp1.input === "volume" ||
@@ -132,8 +198,51 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
 
   const existingIndicatorOptions = getExistingIndicatorOptions()
 
-  // Initialize parameters based on current inp1
+  // Initialize form fields from initialSettings when modal opens
   useEffect(() => {
+    if (initialSettings) {
+      console.log('🔍 DEBUG: Initializing form from initialSettings:', initialSettings);
+      if (initialSettings.valueType) setValueType(initialSettings.valueType);
+      if (initialSettings.customValue !== undefined) setCustomValue(String(initialSettings.customValue));
+      if (initialSettings.indicator) setIndicator(initialSettings.indicator);
+      if (initialSettings.timeframe) {
+        // Check if timeframe is a custom value (not in standard list)
+        const standardTimeframes = ["1min", "5min", "15min", "30min", "45min", "1h", "2h", "3h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"];
+        if (standardTimeframes.includes(initialSettings.timeframe)) {
+          setTimeframe(initialSettings.timeframe);
+        } else {
+          // It's a custom timeframe
+          setTimeframe("custom");
+          setCustomTimeframe(initialSettings.timeframe);
+        }
+      }
+      if (initialSettings.band) setBand(initialSettings.band);
+      if (initialSettings.timeperiod) setTimeperiod(initialSettings.timeperiod);
+      if (initialSettings.rsiLength) setRsiLength(initialSettings.rsiLength);
+      if (initialSettings.rsiMaLength) setRsiMaLength(initialSettings.rsiMaLength);
+      if (initialSettings.maLength) setMaLength(initialSettings.maLength);
+      if (initialSettings.rsiSource) setRsiSource(initialSettings.rsiSource);
+      if (initialSettings.maType) setMaType(initialSettings.maType);
+      if (initialSettings.bbStdDev !== undefined) setBbStdDev(initialSettings.bbStdDev);
+      if (initialSettings.bbSource) setBbSource(initialSettings.bbSource);
+      if (initialSettings.volumeMaLength) setVolumeMaLength(initialSettings.volumeMaLength);
+      if (initialSettings.fastPeriod) setFastPeriod(initialSettings.fastPeriod);
+      if (initialSettings.slowPeriod) setSlowPeriod(initialSettings.slowPeriod);
+      if (initialSettings.signalPeriod) setSignalPeriod(initialSettings.signalPeriod);
+      if (initialSettings.kPeriod) setKPeriod(initialSettings.kPeriod);
+      if (initialSettings.dPeriod) setDPeriod(initialSettings.dPeriod);
+      if (initialSettings.period) setPeriod(initialSettings.period);
+    }
+  }, [initialSettings]);
+
+  // Initialize parameters based on current inp1
+  // Skip this if initialSettings is provided (editing existing settings)
+  useEffect(() => {
+    if (initialSettings) {
+      // If we have initialSettings, don't initialize from currentInp1
+      // as initialSettings represents the actual saved state
+      return;
+    }
     console.log('🔍 DEBUG: useEffect triggered with currentInp1:', currentInp1);
     if (currentInp1) {
       if (currentInp1.name === "RSI") {
@@ -158,7 +267,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
       ) {
         console.log('🔍 DEBUG: Found Volume_MA in currentInp1:', currentInp1);
         console.log('🔍 DEBUG: Volume_MA input_params:', currentInp1.input_params);
-        
+
         // Get saved Volume settings as fallback
         let savedVolumeMaLength = 20;
         try {
@@ -170,7 +279,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
         } catch (error) {
           console.log('Error reading saved Volume settings:', error);
         }
-        
+
         // Always use saved settings for Volume_MA, unless currentInp1 has a specific ma_length
         let finalVolumeMaLength = savedVolumeMaLength;
         if (currentInp1.input_params?.ma_length) {
@@ -192,14 +301,31 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
         setTimeframe(currentInp1.timeframe)
       }
     }
-  }, [currentInp1])
+  }, [currentInp1, initialSettings])
 
   const handleSave = () => {
     console.log('🔍 handleSave called with indicator:', indicator, 'valueType:', valueType);
     console.log('🔍 currentInp1:', currentInp1);
     console.log('🔍 DEBUG: maType value before save:', maType);
     console.log('🔍 DEBUG: volumeMaLength value before save:', volumeMaLength);
-    
+
+    // For Stochastic %K or %D, copy input_params from inp1 and change output
+    if (valueType === "indicator" && (indicator === "stochastic-k" || indicator === "stochastic-d")) {
+      if (currentInp1 && currentInp1.input_params) {
+        const outputValue = indicator === "stochastic-k" ? "slowk" : "slowd"
+        onSave({
+          valueType,
+          indicator: "stochastic",
+          timeframe: currentInp1.timeframe || (timeframe === "custom" ? customTimeframe : timeframe),
+          fastk_period: currentInp1.input_params.fastk_period || 14,
+          slowk_period: currentInp1.input_params.slowk_period || 3,
+          slowd_period: currentInp1.input_params.slowd_period || 3,
+          stochasticOutput: outputValue,
+        } as any);
+        return;
+      }
+    }
+
     // For RSI_MA indicator, use saved localStorage values instead of currentInp1
     if (valueType === "indicator" && indicator === "rsi-ma") {
       // Get saved RSI settings from localStorage
@@ -214,14 +340,14 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
       } catch (error) {
         console.log('Error reading saved RSI settings in handleSave:', error);
       }
-      
+
       // Use saved values with fallbacks
       const finalRsiMaLength = savedRsiSettings?.rsiLength || 14;
       const finalMaLength = savedRsiSettings?.maLength || 14;
       const finalRsiSource = savedRsiSettings?.source || "Close";
       const finalMaType = savedRsiSettings?.maType || "SMA";
       const finalBbStdDev = savedRsiSettings?.bbStdDev || 2;
-      
+
       console.log('🔧 Final values for RSI_MA in handleSave:', {
         rsiMaLength: finalRsiMaLength,
         maLength: finalMaLength,
@@ -229,7 +355,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
         maType: finalMaType,
         bbStdDev: finalBbStdDev
       });
-      
+
       onSave({
         valueType,
         indicator,
@@ -239,14 +365,17 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
         rsiSource: finalRsiSource,
         maType: finalMaType,
         bbStdDev: finalBbStdDev,
+        offsetLogicalOperator,
+        offsetValue,
+        offsetUnit: offsetUnit === "none" ? "" : offsetUnit,
       });
       return;
     }
-    
+
     // For other indicators, use the form values
     let finalRsiMaLength = rsiMaLength
     let finalMaLength = maLength
-    
+
     // Create the save object without maType for Volume_MA
     const saveObject: any = {
       valueType,
@@ -262,18 +391,23 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
       bbStdDev,
       bbSource,
       volumeMaLength,
+      lowerTimeframe,
+      resetPeriod,
       fastPeriod,
       slowPeriod,
       signalPeriod,
       kPeriod,
       dPeriod,
       period,
+      offsetLogicalOperator,
+      offsetValue,
+      offsetUnit: offsetUnit === "none" ? "" : offsetUnit,
     }
-    
+
     console.log('🔍 DEBUG: Save object before maType check:', saveObject);
     console.log('🔍 DEBUG: indicator value:', indicator);
     console.log('🔍 DEBUG: indicator !== "volume-ma":', indicator !== "volume-ma");
-    
+
     // Only include maType if it's not Volume_MA and maType is not empty
     if (indicator !== "volume-ma" && maType && maType.trim() !== "") {
       saveObject.maType = maType
@@ -281,9 +415,9 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
     } else {
       console.log('🔍 DEBUG: Skipped adding maType for Volume_MA or empty maType');
     }
-    
+
     console.log('🔍 DEBUG: Final save object:', saveObject);
-    
+
     // Save Volume settings to localStorage if Volume_MA is being used
     if (indicator === "volume-ma" && volumeMaLength) {
       try {
@@ -297,7 +431,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
         console.log('Error saving Volume settings:', error);
       }
     }
-    
+
     onSave(saveObject)
   }
 
@@ -315,7 +449,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
       // If inp1 is RSI, use its timeperiod. If inp1 is RSI_MA, use its rsi_length.
       let rsiLength = 14;
       let rsiSource = "close";
-      
+
       // Try to get saved RSI settings from localStorage first
       try {
         const savedRsiSettings = localStorage.getItem('rsiSettings');
@@ -333,7 +467,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
       } catch (error) {
         console.log('Error reading saved RSI settings:', error);
       }
-      
+
       if (currentInp1.name === "RSI") {
         rsiLength = currentInp1.input_params?.timeperiod || rsiLength;
         rsiSource = currentInp1.input_params?.source || rsiSource;
@@ -352,7 +486,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
       let maLength = 14;
       let maType = "SMA";
       let bbStdDev = 2;
-      
+
       // Try to get saved RSI settings from localStorage first
       try {
         const savedRsiSettings = localStorage.getItem('rsiSettings');
@@ -368,7 +502,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
       } catch (error) {
         console.log('Error reading saved RSI settings:', error);
       }
-      
+
       if (currentInp1.name === "RSI_MA") {
         rsiLength = currentInp1.input_params?.rsi_length || rsiLength;
         rsiSource = currentInp1.input_params?.rsi_source || rsiSource;
@@ -400,7 +534,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
       } catch (error) {
         console.log('Error reading saved Volume settings in getReadOnlyParams:', error);
       }
-      
+
       return {
         volumeMaLength: currentInp1.input_params?.ma_length || savedVolumeMaLength,
       }
@@ -471,6 +605,60 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
         </div>
       )
     }
+    if (indicator === "stochastic-k" || indicator === "stochastic-d") {
+      if (!currentInp1 || !currentInp1.input_params) return null
+      const params = currentInp1.input_params
+      const readOnlyStyle = "bg-gray-100 text-gray-600 cursor-not-allowed"
+      return (
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="fastk_period" className="block text-sm font-medium text-gray-600 mb-2">
+              Fast K Period (from original indicator)
+            </Label>
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.fastk_period || 14}</div>
+          </div>
+          <div>
+            <Label htmlFor="slowk_period" className="block text-sm font-medium text-gray-600 mb-2">
+              Slow K Period (from original indicator)
+            </Label>
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.slowk_period || 3}</div>
+          </div>
+          <div>
+            <Label htmlFor="slowd_period" className="block text-sm font-medium text-gray-600 mb-2">
+              Slow D Period (from original indicator)
+            </Label>
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.slowd_period || 3}</div>
+          </div>
+          <div>
+            <Label htmlFor="output" className="block text-sm font-medium text-gray-600 mb-2">
+              Output (will be set to {indicator === "stochastic-k" ? "slowk" : "slowd"})
+            </Label>
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{indicator === "stochastic-k" ? "slowk" : "slowd"}</div>
+          </div>
+        </div>
+      )
+    }
+    if (indicator === "atr") {
+      if (!currentInp1 || !currentInp1.input_params) return null
+      const params = currentInp1.input_params
+      const readOnlyStyle = "bg-gray-100 text-gray-600 cursor-not-allowed"
+      return (
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="atr_length" className="block text-sm font-medium text-gray-600 mb-2">
+              ATR Length (from original indicator)
+            </Label>
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.atr_length || 14}</div>
+          </div>
+          <div>
+            <Label htmlFor="atr_smoothing" className="block text-sm font-medium text-gray-600 mb-2">
+              ATR Smoothing (from original indicator)
+            </Label>
+            <div className={`w-full border border-gray-300 rounded-md px-3 py-2 ${readOnlyStyle}`}>{params.atr_smoothing || "RMA"}</div>
+          </div>
+        </div>
+      )
+    }
     if (indicator === "volume-ma") {
       return (
         <div className="space-y-4">
@@ -502,6 +690,57 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
     return null
   }
 
+  const renderOffsetSettings = () => {
+    return (
+      <div className="mt-4 pt-4 border-t border-gray-100">
+        <Label className="block text-sm font-semibold text-gray-700 mb-3">Offset (Optional)</Label>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="block text-sm font-medium text-gray-600 mb-1">By Operator</Label>
+              <Select value={offsetLogicalOperator} onValueChange={setOffsetLogicalOperator}>
+                <SelectTrigger className="w-full border border-gray-300 text-black bg-white">
+                  <SelectValue placeholder="Operator" />
+                </SelectTrigger>
+                <SelectContent className="bg-white text-black">
+                  <SelectItem value=">=">Greater than or equal (&gt;=)</SelectItem>
+                  <SelectItem value="<=">Less than or equal (&lt;=)</SelectItem>
+                  <SelectItem value=">">Greater than (&gt;)</SelectItem>
+                  <SelectItem value="<">Less than (&lt;)</SelectItem>
+                  <SelectItem value="==">Equal (==)</SelectItem>
+                  <SelectItem value="!=">Not equal (!=)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="block text-sm font-medium text-gray-600 mb-1">Value</Label>
+              <Input
+                type="number"
+                value={offsetValue}
+                onChange={(e) => setOffsetValue(Number(e.target.value))}
+                className="w-full border border-gray-300 rounded-md text-black"
+                placeholder="Enter value"
+              />
+            </div>
+          </div>
+          <div>
+            <Label className="block text-sm font-medium text-gray-600 mb-1">Unit</Label>
+            <Select value={offsetUnit} onValueChange={setOffsetUnit}>
+              <SelectTrigger className="w-full border border-gray-300 text-black bg-white">
+                <SelectValue placeholder="Select unit" />
+              </SelectTrigger>
+              <SelectContent className="bg-white text-black">
+                <SelectItem value="%">Percentage (%)</SelectItem>
+                <SelectItem value="points">Points</SelectItem>
+                <SelectItem value="none">No unit</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const handleCrossingUpNext = (indicator: string, timeframe: string) => {
     onNext(indicator, timeframe)
   }
@@ -521,26 +760,23 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
             <Label className="block text-sm font-medium text-black mb-2">Value type</Label>
             <div className="grid grid-cols-3 gap-1 bg-gray-100 p-1 rounded-md">
               <button
-                className={`py-2 px-3 text-sm rounded-md text-center ${
-                  valueType === "value" ? "bg-white shadow-sm text-black" : "text-gray-700 hover:bg-gray-200"
-                }`}
+                className={`py-2 px-3 text-sm rounded-md text-center ${valueType === "value" ? "bg-white shadow-sm text-black" : "text-gray-700 hover:bg-gray-200"
+                  }`}
                 onClick={() => setValueType("value")}
               >
                 Value
               </button>
               <button
-                className={`py-2 px-3 text-sm rounded-md text-center ${
-                  valueType === "indicator" ? "bg-white shadow-sm text-black" : "text-gray-700 hover:bg-gray-200"
-                } ${existingIndicatorOptions.length === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
+                className={`py-2 px-3 text-sm rounded-md text-center ${valueType === "indicator" ? "bg-white shadow-sm text-black" : "text-gray-700 hover:bg-gray-200"
+                  } ${existingIndicatorOptions.length === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
                 onClick={() => existingIndicatorOptions.length > 0 && setValueType("indicator")}
                 disabled={existingIndicatorOptions.length === 0}
               >
                 Existing Indicator
               </button>
               <button
-                className={`py-2 px-3 text-sm rounded-md text-center ${
-                  valueType === "other" ? "bg-white shadow-sm text-black" : "text-gray-700 hover:bg-gray-200"
-                }`}
+                className={`py-2 px-3 text-sm rounded-md text-center ${valueType === "other" ? "bg-white shadow-sm text-black" : "text-gray-700 hover:bg-gray-200"
+                  }`}
                 onClick={() => setValueType("other")}
               >
                 Other Indicator
@@ -561,6 +797,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
                 className="w-full border border-gray-300 rounded-md text-black"
                 placeholder="Enter value"
               />
+              {renderOffsetSettings()}
             </div>
           )}
 
@@ -584,6 +821,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
                 </Select>
               </div>
               {renderExistingIndicatorParams()}
+              {renderOffsetSettings()}
             </div>
           )}
 
@@ -597,7 +835,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
                   <SelectTrigger id="indicator" className="w-full border border-gray-300 text-black bg-white">
                     <SelectValue placeholder="Select indicator" />
                   </SelectTrigger>
-                  <SelectContent className="bg-white text-black">
+                  <SelectContent className="bg-white text-black max-h-[300px] overflow-y-auto">
                     {/* Price Indicators */}
                     <SelectItem value="close">Close</SelectItem>
                     <SelectItem value="open">Open</SelectItem>
@@ -610,13 +848,19 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, onSave, onNext }
                     <SelectItem value="rsi-ma">RSI-MA</SelectItem>
                     <SelectItem value="bollinger">Bollinger Bands</SelectItem>
                     <SelectItem value="macd">MACD</SelectItem>
+                    <SelectItem value="ma">Moving Average (MA)</SelectItem>
                     <SelectItem value="sma">Simple Moving Average (SMA)</SelectItem>
                     <SelectItem value="stochastic">Stochastic</SelectItem>
                     <SelectItem value="atr">Average True Range (ATR)</SelectItem>
+                    <SelectItem value="supertrend">Super Trend</SelectItem>
 
                     {/* Volume Indicators */}
                     <SelectItem value="volume">Volume</SelectItem>
                     <SelectItem value="volume-ma">Volume MA</SelectItem>
+                    <SelectItem value="volume-delta">Volume Delta</SelectItem>
+                    <SelectItem value="cumulative-volume-delta">Cumulative Volume Delta</SelectItem>
+                    <SelectItem value="historical-price-level">Historical Price Level</SelectItem>
+                    <SelectItem value="candle-size">Candle Size</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

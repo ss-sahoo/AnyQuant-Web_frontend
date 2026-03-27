@@ -6,11 +6,15 @@ import { X } from "lucide-react"
 interface AtrSettingsModalProps {
   onClose: () => void
   onSave: (settings: any) => void
+  initialSettings?: {
+    atr_length: string
+    atr_smoothing: string
+  }
 }
 
-export function AtrSettingsModal({ onClose, onSave }: AtrSettingsModalProps) {
-  const [length, setLength] = useState("2")
-  const [smoothing, setSmoothing] = useState("RMA")
+export function AtrSettingsModal({ onClose, onSave, initialSettings }: AtrSettingsModalProps) {
+  const [length, setLength] = useState(initialSettings?.atr_length || "14")
+  const [smoothing, setSmoothing] = useState(initialSettings?.atr_smoothing || "RMA")
   const [showSmoothingDropdown, setShowSmoothingDropdown] = useState(false)
   const modalRef = useRef<HTMLDivElement>(null)
   const smoothingDropdownRef = useRef<HTMLDivElement>(null)
@@ -52,9 +56,10 @@ export function AtrSettingsModal({ onClose, onSave }: AtrSettingsModalProps) {
 
   const handleSave = () => {
     onSave({
-      length,
-      smoothing,
+      atr_length: length,
+      atr_smoothing: smoothing,
     })
+    onClose()
   }
 
   const smoothingOptions = ["RMA", "SMA", "EMA", "WMA", "VWMA"]

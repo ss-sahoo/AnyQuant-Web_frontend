@@ -88,7 +88,7 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
       if (optimisationFormString) {
         try {
           const optimisationForm: OptimisationForm = JSON.parse(optimisationFormString)
-          
+
           // Map parameters
           const mappedParameters: Parameter[] = optimisationForm.parameters.map((param) => {
             const isNumberType = param.type === "number"
@@ -140,7 +140,7 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
               { type: "Max_Drawdown_Percent", min: undefined, max: undefined, enabled: false },
               { type: "Sharpe_Ratio", min: undefined, max: undefined, enabled: false }
             ]
-            
+
             optimisationForm.EquityConstraints.forEach((constraint: any) => {
               const existingConstraint = mappedConstraints.find(c => c.type === constraint.type)
               if (existingConstraint) {
@@ -149,7 +149,7 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
                 existingConstraint.enabled = constraint.enabled
               }
             })
-            
+
             setEquityConstraints(mappedConstraints)
           }
         } catch (error) {
@@ -171,7 +171,7 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
 
   const handleParameterGroupToggle = (paramEncoding: string, groupIndex: number, checked: boolean) => {
     // Check if parameter is already in another group
-    const isInOtherGroup = constraintGroups.some((group, idx) => 
+    const isInOtherGroup = constraintGroups.some((group, idx) =>
       idx !== groupIndex && group.parameters.includes(paramEncoding)
     )
 
@@ -196,10 +196,10 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
     })
 
     // Update parameter constraint groups
-    setParameters(prevParams => 
+    setParameters(prevParams =>
       prevParams.map(param => {
         if (param.encoding === paramEncoding) {
-          const newGroups = checked 
+          const newGroups = checked
             ? [...param.constraintGroups, groupIndex]
             : param.constraintGroups.filter(g => g !== groupIndex)
           return { ...param, constraintGroups: newGroups }
@@ -227,7 +227,7 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
 
   const removeConstraintGroup = (groupIndex: number) => {
     // Remove group from all parameters
-    setParameters(prevParams => 
+    setParameters(prevParams =>
       prevParams.map(param => ({
         ...param,
         constraintGroups: param.constraintGroups.filter(g => g !== groupIndex)
@@ -246,16 +246,16 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
   }
 
   const toggleConstraintGroup = (groupIndex: number, enabled: boolean) => {
-    setConstraintGroups(prev => 
-      prev.map((group, index) => 
+    setConstraintGroups(prev =>
+      prev.map((group, index) =>
         index === groupIndex ? { ...group, enabled } : group
       )
     )
   }
 
   const handleEquityConstraintChange = (index: number, field: keyof EquityConstraint, value: any) => {
-    setEquityConstraints(prev => 
-      prev.map((constraint, idx) => 
+    setEquityConstraints(prev =>
+      prev.map((constraint, idx) =>
         idx === index ? { ...constraint, [field]: value } : constraint
       )
     )
@@ -267,7 +267,7 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
       group.parameters.forEach(param => usedParameters.add(param))
     })
 
-    return parameters.filter(param => 
+    return parameters.filter(param =>
       param.optimise && !usedParameters.has(param.encoding)
     )
   }
@@ -298,72 +298,73 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
       const currentOptimisationForm: OptimisationForm = currentOptimisationFormString
         ? JSON.parse(currentOptimisationFormString)
         : {
-            parameters: [],
-            maximise_options: [],
-            algorithm_options: [],
-            default_algorithm: "",
-            algorithm_defaults: {
-              population_size: 0,
-              generations: 0,
-              mutation_rate: 0,
-              tournament_size: 0,
-            },
-            simple_constraints: [],
-            Constraints: [],
-          }
+          parameters: [],
+          maximise_options: [],
+          algorithm_options: [],
+          default_algorithm: "",
+          algorithm_defaults: {
+            population_size: 0,
+            generations: 0,
+            mutation_rate: 0,
+            tournament_size: 0,
+          },
+          simple_constraints: [],
+          Constraints: [],
+        }
 
-      // Update parameters
-      currentOptimisationForm.parameters = parameters
-        .filter((param) => param.optimise)
-        .map((param) => {
-          const originalParam = currentOptimisationForm.parameters.find((p) => p.id === param.id) || ({} as OptimisationFormParameter)
+      // Build updated form params for ALL parameters (preserves non-optimise params too)
+      const allUpdatedFormParams: OptimisationFormParameter[] = parameters.map((param) => {
+        const originalParam = currentOptimisationForm.parameters.find((p) => p.id === param.id) || ({} as OptimisationFormParameter)
 
-          let defaultValue: number | string
-          if (param.type === "number") {
-            const numValue = Number(param.default)
-            if (param.default === "" || isNaN(numValue)) {
-              defaultValue = originalParam.default !== undefined && !isNaN(Number(originalParam.default)) ? originalParam.default : 0
-            } else {
-              defaultValue = numValue
-            }
+        let defaultValue: number | string
+        if (param.type === "number") {
+          const numValue = Number(param.default)
+          if (param.default === "" || isNaN(numValue)) {
+            defaultValue = originalParam.default !== undefined && !isNaN(Number(originalParam.default)) ? originalParam.default : 0
           } else {
-            defaultValue = param.default === "" ? (originalParam.default !== undefined ? originalParam.default : "") : param.default
+            defaultValue = numValue
           }
+        } else {
+          defaultValue = param.default === "" ? (originalParam.default !== undefined ? originalParam.default : "") : param.default
+        }
 
-          let rangeValue: [number, number] | undefined = originalParam.range
-          if (param.editable) {
-            const startNum = Number(param.start)
-            const stopNum = Number(param.stop)
-            if (!isNaN(startNum) && !isNaN(stopNum)) {
-              rangeValue = [startNum, stopNum]
-            } else {
-              rangeValue = originalParam.range
-            }
+        let rangeValue: [number, number] | undefined = originalParam.range
+        if (param.editable) {
+          const startNum = Number(param.start)
+          const stopNum = Number(param.stop)
+          if (!isNaN(startNum) && !isNaN(stopNum)) {
+            rangeValue = [startNum, stopNum]
+          } else {
+            rangeValue = originalParam.range
           }
+        }
 
-          let stepValue: number | undefined = originalParam.step
-          if (param.editable) {
-            const stepNum = Number(param.step)
-            if (!isNaN(stepNum)) {
-              stepValue = stepNum
-            } else {
-              stepValue = originalParam.step
-            }
+        let stepValue: number | undefined = originalParam.step
+        if (param.editable) {
+          const stepNum = Number(param.step)
+          if (!isNaN(stepNum)) {
+            stepValue = stepNum
+          } else {
+            stepValue = originalParam.step
           }
+        }
 
-          return {
-            ...originalParam,
-            id: param.id,
-            encoding: param.encoding,
-            name: param.name,
-            indicator: param.indicator,
-            optimise: param.optimise,
-            default: defaultValue,
-            range: rangeValue,
-            step: stepValue,
-            type: param.type,
-          } as OptimisationFormParameter
-        })
+        return {
+          ...originalParam,
+          id: param.id,
+          encoding: param.encoding,
+          name: param.name,
+          indicator: param.indicator,
+          optimise: param.optimise,
+          default: defaultValue,
+          range: rangeValue,
+          step: stepValue,
+          type: param.type,
+        } as OptimisationFormParameter
+      })
+
+      // For the API call, only send optimise=true parameters
+      currentOptimisationForm.parameters = allUpdatedFormParams.filter((p) => p.optimise)
 
       // Build constraint groups
       const enabledGroups = constraintGroups.filter(group => group.enabled && group.parameters.length >= 2)
@@ -403,6 +404,15 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
       console.log("Sending ui_data to API:", currentOptimisationForm)
       await saveOptimisationInput(parsedStatement, currentOptimisationForm)
 
+      // Persist ALL parameters (including non-optimise) back to localStorage
+      // so that changes survive tab switches and page refreshes
+      const formForLocalStorage = {
+        ...currentOptimisationForm,
+        parameters: allUpdatedFormParams,
+      }
+      localStorage.setItem("optimisation_form", JSON.stringify(formForLocalStorage))
+      console.log("Properties saved to localStorage:", formForLocalStorage)
+
       // Show success message
       const successMessage = document.createElement("div")
       successMessage.className =
@@ -430,7 +440,7 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
         <div className="mb-4">
           <div className="flex justify-between items-center">
             <div className="text-sm text-gray-400">
-              <span className="font-semibold">Constraint Groups:</span> {constraintGroups.length}/{maxConstraintGroups} | 
+              <span className="font-semibold">Constraint Groups:</span> {constraintGroups.length}/{maxConstraintGroups} |
               <span className="ml-2">Available parameters: {getAvailableParameters().length}</span>
             </div>
             <Button
@@ -451,15 +461,15 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
                 <div key={constraint.type} className="flex items-center gap-4 p-3 bg-[#141721] rounded">
                   <Checkbox
                     checked={constraint.enabled}
-                    onCheckedChange={(checked: boolean) => 
+                    onCheckedChange={(checked: boolean) =>
                       handleEquityConstraintChange(index, 'enabled', checked)
                     }
                     className="border-[#85e1fe] data-[state=checked]:bg-[#85e1fe] data-[state=checked]:text-black"
                   />
                   <span className="min-w-[120px] text-sm">
-                    {constraint.type === "Final_Equity" ? "Final Equity [$]" : 
-                     constraint.type === "Max_Drawdown_Percent" ? "Max Drawdown [%]" :
-                     "Sharpe Ratio"}
+                    {constraint.type === "Final_Equity" ? "Final Equity [$]" :
+                      constraint.type === "Max_Drawdown_Percent" ? "Max Drawdown [%]" :
+                        "Sharpe Ratio"}
                   </span>
                   <div className="flex items-center gap-2">
                     <input
@@ -611,7 +621,7 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
                       <td key={group.id} className="px-4 py-2 text-center">
                         <Checkbox
                           checked={group.parameters.includes(param.encoding)}
-                          onCheckedChange={(checked: boolean) => 
+                          onCheckedChange={(checked: boolean) =>
                             handleParameterGroupToggle(param.encoding, groupIndex, checked)
                           }
                           disabled={!param.optimise || param.constraintGroups.some(g => g !== groupIndex)}

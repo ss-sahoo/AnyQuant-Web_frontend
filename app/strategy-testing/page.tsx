@@ -29,10 +29,22 @@ import {
   createOptimizationJob,
   getOptimizationJob,
   cancelOptimizationJob,
-  listOptimizationJobs,
+  getWalkForwardDropletResults,
+  listStrategyWalkForwardJobs,
+  getSymbolTimeframes,
+  getAllBrokerSymbols,
+  findSymbolsWithTimeframe,
+  // Cancel API functions
+  cancelBacktest,
+  cancelOptimisationRun,
+  pollJobStatus,
+  // Custom strategy API
+  getCustomStrategy,
+  runCustomStrategyBacktest,
 } from "../AllApiCalls" // Import new functions
-import { X } from "lucide-react"
+import { X, ArrowLeft } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
+import { extractErrorMessage, formatErrorForDisplay } from "@/lib/error-utils"
 import { StrategyTab } from "@/components/strategy-tab"
 import { BacktestTab } from "@/components/backtest-tab"
 import { OptimisationTab } from "@/components/optimisation-tab"
@@ -46,7 +58,13 @@ import { TradesSummary } from "@/components/trades-summary";
 import { MetaAPIConfig, type MetaAPIConfig as MetaAPIConfigType } from "@/components/metaapi-config";
 // New optimization droplets components
 import { OptimizationCostDialog } from "@/components/optimization-cost-dialog"
-import { OptimizationJobStatus } from "@/components/optimization-job-status";
+import { OptimizationErrorDisplay } from "@/components/optimization-error-display"
+// Backtest history components
+import { BacktestHistoryList } from "@/components/BacktestHistoryList"
+// MetaAPI debugging
+import { MetaAPIDebugModal } from "@/components/metaapi-debug-modal"
+// Custom strategy backtest results
+import { CustomStrategyBacktestResults } from "@/components/custom-strategy-backtest-results"
 
 export default function StrategyTestingPage() {
   const router = useRouter()
@@ -68,6 +86,21 @@ export default function StrategyTestingPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [isLoading2, setIsLoading2] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+
+  // Abort controllers for cancellation
+  const backtestAbortRef = useRef<AbortController | null>(null)
+  const optimisationAbortRef = useRef<AbortController | null>(null)
+  const walkForwardAbortRef = useRef<AbortController | null>(null)
+
+  // run_id refs for server-side cancellation
+  const backtestRunIdRef = useRef<string | null>(null)
+  const optimisationRunIdRef = useRef<string | null>(null)
+  const walkForwardRunIdRef = useRef<string | null>(null)
+
+  // poller stop refs
+  const backtestPollerRef = useRef<(() => void) | null>(null)
+  const optimisationPollerRef = useRef<(() => void) | null>(null)
+  const walkForwardPollerRef = useRef<(() => void) | null>(null)
 
   const [isDragging, setIsDragging] = useState(false)
 
@@ -99,12 +132,13 @@ export default function StrategyTestingPage() {
   const [tournamentSize, setTournamentSize] = useState("5")
 
   // Add new state variables for trading modes
-  const [selectedTradingMode, setSelectedTradingMode] = useState("MTOOTAAT")
+  const [selectedTradingMode, setSelectedTradingMode] = useState("CLOSE & OPEN")
   const [maxTrades, setMaxTrades] = useState("1")
-  
+
   // Add state variables for TradingType configuration
   const [commission, setCommission] = useState(0.00007)
   const [assetType, setAssetType] = useState("gold")
+  const [positionSize, setPositionSize] = useState("1") // Default value is 1
 
   // New states for OptimisationTab
   const [selectedMaximiseOption, setSelectedMaximiseOption] = useState<string>("")
@@ -155,10 +189,40 @@ export default function StrategyTestingPage() {
     stderr: ''
   });
 
+  // Add backtest history states
+  const [showBacktestHistory, setShowBacktestHistory] = useState(false);
+
+  // MetaAPI Debug Modal states
+  const [showMetaAPIDebugModal, setShowMetaAPIDebugModal] = useState(false);
+  const [metaAPIError, setMetaAPIError] = useState<any>(null);
+
+  // Custom strategy backtest results state
+  const [showCustomStrategyBacktestResults, setShowCustomStrategyBacktestResults] = useState(false);
+  const [customStrategyBacktestResult, setCustomStrategyBacktestResult] = useState<any>(null);
+
   // Add progress bar states
   const [progress, setProgress] = useState(0); // For backtest
   const [progress2, setProgress2] = useState(0); // For optimisation
   const [progress3, setProgress3] = useState(0); // For walk forward optimisation
+
+  // Timezone state (moved from TradingSessionModal to Strategy tab)
+  const [timezone, setTimezone] = useState<string>("UTC")
+
+  // Helper function to map MetaAPI symbols to Backtest instruments
+  const mapSymbolToInstrument = (symbol: string): string | null => {
+    const symbolUpper = symbol.toUpperCase().replace(/\./g, '') // Remove dots like in XAUUSD.a
+
+    // Map to the exact instrument names in the instruments list
+    if (symbolUpper.includes('XAUUSD') || symbolUpper.includes('GOLD')) return 'XAUUSD'
+    if (symbolUpper.includes('GBPUSD')) return 'GBP/USD'
+    if (symbolUpper.includes('USDJPY')) return 'USD/JPY'
+    if (symbolUpper.includes('USDCHF')) return 'USD/CHF'
+    if (symbolUpper.includes('FTSE') || symbolUpper.includes('UK100')) return 'FTSE100'
+    if (symbolUpper.includes('US30') || symbolUpper.includes('DJ30') || symbolUpper.includes('DJIA')) return 'US30'
+    if (symbolUpper.includes('NAS100') || symbolUpper.includes('NASDAQ')) return 'NASDAQ'
+
+    return null
+  }
 
   // Animate progress bar for backtest
   useEffect(() => {
@@ -235,7 +299,17 @@ export default function StrategyTestingPage() {
           console.log("🔍 DEBUG: Loaded strategy from localStorage:", parsed)
           console.log("🔍 DEBUG: TradingSession in loaded strategy:", parsed.TradingSession)
           setParsedStatement(parsed)
-          
+
+          // Load timezone from TradingSession if available
+          if (parsed.TradingSession?.Timezone) {
+            setTimezone(parsed.TradingSession.Timezone)
+          }
+
+          // Load date range if available
+          if (parsed.date_range) {
+            setDateRange(parsed.date_range)
+          }
+
           // Load TradingType settings from the strategy
           if (parsed && parsed.TradingType) {
             console.log("🔍 Loading TradingType settings from strategy:", parsed.TradingType)
@@ -243,48 +317,45 @@ export default function StrategyTestingPage() {
             setMaxTrades(parsed.TradingType.nTrade_max?.toString() || "1")
             setAccountDeposit(parsed.TradingType.cash?.toString() || "100000")
             setLot(parsed.TradingType.lot || "mini")
-            
+
             // Load additional TradingType configuration values
             // Use dynamic commission from the strategy or default
             const currentCommission = parsed.TradingType.commission || 0.00007
             console.log("🔍 Commission update check:", { currentCommission })
             setCommission(currentCommission)
-            setAssetType(parsed.TradingType.Asset_type || "gold")
-            
+            setAssetType(parsed.TradingType.asset_type || "gold")
+            setPositionSize(parsed.TradingType.position_size?.toString() || "1")
+
             // Update the parsed statement with the dynamic commission value
             const updatedStatement = {
               ...parsed,
               TradingType: {
                 ...parsed.TradingType,
                 commission: Number.parseFloat(currentCommission),
-                asset_type: parsed.TradingType.asset_type || "gold"
+                asset_type: parsed.TradingType.asset_type || "gold",
+                position_size: parsed.TradingType.position_size || 1
               }
             }
             setParsedStatement(updatedStatement)
             localStorage.setItem("savedStrategy", JSON.stringify(updatedStatement))
             console.log("🔍 Updated parsed statement with correct commission:", updatedStatement.TradingType)
-            
+
             // Calculate leverage from margin
             if (parsed.TradingType.margin) {
               const margin = parsed.TradingType.margin
-              const leverage = margin === 1.0 ? "1:1" : 
-                             margin === 0.5 ? "1:2" : 
-                             margin === 0.2 ? "1:5" : 
-                             margin === 0.1 ? "1:10" : 
-                             margin === 0.05 ? "1:20" : 
-                             margin === 0.04 ? "1:25" : 
-                             margin === 0.033 ? "1:30" : 
-                             margin === 0.02 ? "1:50" : 
-                             margin === 0.013 ? "1:75" : 
-                             margin === 0.01 ? "1:100" : "1:1"
+              const leverage = margin === 1.0 ? "1:1" :
+                margin === 0.5 ? "1:2" :
+                  margin === 0.2 ? "1:5" :
+                    margin === 0.1 ? "1:10" :
+                      margin === 0.05 ? "1:20" :
+                        margin === 0.04 ? "1:25" :
+                          margin === 0.033 ? "1:30" :
+                            margin === 0.02 ? "1:50" :
+                              margin === 0.013 ? "1:75" :
+                                margin === 0.01 ? "1:100" :
+                                  margin === 0.005 ? "1:200" :
+                                    margin === 0.002 ? "1:500" : "1:1"
               setLeverage(leverage)
-              
-              // Set slider value based on leverage
-              const leverageMap: { [key: string]: number } = {
-                "1:1": 1, "1:2": 2, "1:5": 3, "1:10": 4, "1:20": 5,
-                "1:25": 6, "1:30": 7, "1:50": 8, "1:75": 9, "1:100": 10
-              }
-              setLeverageSliderValue(leverageMap[leverage] || 1)
             }
           }
         } catch (err) {
@@ -297,11 +368,11 @@ export default function StrategyTestingPage() {
       if (optimisationFormString) {
         try {
           const optimisationForm = JSON.parse(optimisationFormString)
-          
+
           // Add null checks and fallback values
           const maximiseOpts = optimisationForm.maximise_options || []
           const algorithmDefaults = optimisationForm.algorithm_defaults || {}
-          
+
           if (maximiseOpts.length > 0) {
             setSelectedMaximiseOption(maximiseOpts[0] || "")
           }
@@ -338,14 +409,64 @@ export default function StrategyTestingPage() {
     const checkQueryParams = async () => {
       if (typeof window !== "undefined") {
         const urlParams = new URLSearchParams(window.location.search)
-        const id = urlParams.get("id")
+        let id = urlParams.get("id")
+        const isCustomStrategy = urlParams.get("custom") === "true"
+
+        if (!id) {
+          try {
+            id = localStorage.getItem("strategy_id")
+          } catch { }
+        }
 
         if (id) {
           try {
-            const strategyData = await fetchStatementDetail(id)
+            let strategyData
+
+            if (isCustomStrategy) {
+              // Fetch custom strategy from CustomComponent model
+              const customStrategy = await getCustomStrategy(Number(id))
+              console.log("🔍 Loaded custom strategy:", customStrategy)
+
+              // Transform custom strategy data to match expected format
+              strategyData = {
+                id: customStrategy.id,
+                name: customStrategy.name,
+                code: customStrategy.code,
+                compiled_code: customStrategy.compiled_code,
+                parameters: customStrategy.parameters,
+                status: customStrategy.status,
+                type: "custom_strategy",
+                // Set default values for backtesting
+                side: "buy",
+                saveresult: "true",
+                strategy: [], // Custom strategies don't use the visual builder format
+                instrument: "XAUUSD",
+                TradingType: {
+                  NewTrade: "MTOOTAAT",
+                  commission: 0.00007,
+                  margin: 1,
+                  lot: "mini",
+                  cash: 100000,
+                  nTrade_max: 1,
+                },
+                // Mark as custom strategy for backtest handling
+                is_custom_strategy: true,
+                custom_strategy_id: customStrategy.id,
+              }
+            } else {
+              // Fetch regular strategy
+              strategyData = await fetchStatementDetail(id)
+            }
 
             // Store the fetched data in localStorage
             localStorage.setItem("savedStrategy", JSON.stringify(strategyData))
+            // Ensure the id is persisted for future back/forward flows
+            localStorage.setItem("strategy_id", String(id))
+            if (isCustomStrategy) {
+              localStorage.setItem("is_custom_strategy", "true")
+            } else {
+              localStorage.removeItem("is_custom_strategy")
+            }
 
             // Check if timeframes_required exists in the response and store it
             if (strategyData.timeframes_required) {
@@ -355,11 +476,11 @@ export default function StrategyTestingPage() {
             if (strategyData.optimisation_form) {
               localStorage.setItem("optimisation_form", JSON.stringify(strategyData.optimisation_form))
               const optimisationForm = strategyData.optimisation_form
-              
+
               // Add null checks and fallback values
               const maximiseOpts = optimisationForm.maximise_options || []
               const algorithmDefaults = optimisationForm.algorithm_defaults || {}
-              
+
               if (maximiseOpts.length > 0) {
                 setSelectedMaximiseOption(maximiseOpts[0] || "")
               }
@@ -372,7 +493,13 @@ export default function StrategyTestingPage() {
               setTournamentSize(algorithmDefaults.tournament_size?.toString() || "3")
             }
             if (strategyData.id) {
-              localStorage.setItem("strategy_id", strategyData.id)
+              const resolvedId = String(strategyData.id)
+              localStorage.setItem("strategy_id", resolvedId)
+              setStrategyId(resolvedId)
+            } else if (id) {
+              const resolvedId = String(id)
+              localStorage.setItem("strategy_id", resolvedId)
+              setStrategyId(resolvedId)
             }
 
             // Update component state
@@ -380,11 +507,16 @@ export default function StrategyTestingPage() {
             setStrategy(JSON.stringify(strategyData))
             setParsedStatement(strategyData)
 
+            // Load date range if available
+            if (strategyData.date_range) {
+              setDateRange(strategyData.date_range)
+            }
+
             // Extract trading symbol from strategy name
             if (strategyData.name) {
               // Extract symbol from strategy name (e.g., "Strategyname" -> "XAUUSD")
               let symbol = "XAUUSD" // Default symbol
-              
+
               // Try to extract symbol from strategy name
               const name = strategyData.name.toLowerCase()
               if (name.includes("xau") || name.includes("gold")) {
@@ -400,9 +532,9 @@ export default function StrategyTestingPage() {
               } else if (name.includes("eth") || name.includes("ethereum")) {
                 symbol = "ETHUSD"
               }
-              
+
               console.log("🔍 Extracted trading symbol from strategy name:", strategyData.name, "->", symbol)
-              
+
               // Update MetaAPI config with the extracted symbol
               const updatedConfig = {
                 token: process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || "",
@@ -410,6 +542,12 @@ export default function StrategyTestingPage() {
                 symbol: symbol
               }
               setMetaAPIConfig(updatedConfig)
+
+              // Auto-select the corresponding instrument in Backtest tab
+              const mappedInstrument = mapSymbolToInstrument(symbol)
+              if (mappedInstrument) {
+                setSelectedInstruments([mappedInstrument])
+              }
             }
 
             if (strategyData.optimisation_form) {
@@ -463,7 +601,7 @@ export default function StrategyTestingPage() {
     let bgColor = 'bg-[#85e1fe]';
     if (type === 'error') bgColor = 'bg-red-600';
     if (type === 'warning') bgColor = 'bg-yellow-500';
-    
+
     toast.className = `fixed bottom-10 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded shadow-lg z-50 text-black ${bgColor}`;
     toast.textContent = message;
     document.body.appendChild(toast);
@@ -471,6 +609,129 @@ export default function StrategyTestingPage() {
       document.body.removeChild(toast);
     }, 3000);
   };
+
+  // Helper function to detect timeframe from CSV timestamps
+  const detectTimeframeFromTimestamps = (csvContent: string): { detected: boolean; timeframeMinutes: number; timeframeLabel: string; matchesRequired: boolean } => {
+    const lines = csvContent.split('\n')
+    if (lines.length < 3) {
+      return { detected: false, timeframeMinutes: 0, timeframeLabel: '', matchesRequired: false }
+    }
+
+    // Get headers to find the time/timestamp column
+    const headers = lines[0].toLowerCase().split(',').map(col => col.trim())
+    const timeColumnIndex = headers.findIndex(h =>
+      h === 'time' || h === 'timestamp' || h === 'datetime' || h === 'date' || h === 'unix' || h === 'epoch'
+    )
+
+    // If no time column header found, assume first column is timestamp
+    const colIndex = timeColumnIndex >= 0 ? timeColumnIndex : 0
+    console.log("🔍 Using column index for timestamps:", colIndex, "Header:", headers[colIndex])
+
+    // Get timestamps from first few rows (skip header)
+    const timestamps: number[] = []
+    for (let i = 1; i < Math.min(5, lines.length); i++) {
+      const row = lines[i].split(',')
+      if (row[colIndex]) {
+        const val = row[colIndex].trim()
+        // Check if it's a Unix timestamp (number)
+        const timestamp = parseInt(val, 10)
+        if (!isNaN(timestamp) && timestamp > 1000000000) { // Valid Unix timestamp
+          timestamps.push(timestamp)
+        }
+      }
+    }
+
+    console.log("🔍 Extracted timestamps:", timestamps)
+
+    if (timestamps.length < 2) {
+      return { detected: false, timeframeMinutes: 0, timeframeLabel: '', matchesRequired: false }
+    }
+
+    // Calculate differences between consecutive timestamps
+    const differences: number[] = []
+    for (let i = 1; i < timestamps.length; i++) {
+      differences.push(timestamps[i] - timestamps[i - 1])
+    }
+
+    // Get the most common difference (in case of gaps)
+    const avgDiff = differences.reduce((a, b) => a + b, 0) / differences.length
+    const timeframeSeconds = Math.round(avgDiff)
+    const timeframeMinutes = Math.round(timeframeSeconds / 60)
+
+    console.log("🔍 Timestamp differences (seconds):", differences)
+    console.log("🔍 Average difference:", avgDiff, "seconds =", timeframeMinutes, "minutes")
+
+    // Convert minutes to human-readable label
+    let timeframeLabel = ''
+    if (timeframeMinutes >= 1440) {
+      timeframeLabel = `${Math.round(timeframeMinutes / 1440)}d`
+    } else if (timeframeMinutes >= 60) {
+      timeframeLabel = `${Math.round(timeframeMinutes / 60)}h`
+    } else {
+      timeframeLabel = `${timeframeMinutes}min`
+    }
+
+    console.log("🔍 Detected timeframe:", timeframeLabel, `(${timeframeMinutes} minutes)`)
+
+    // Check if detected timeframe matches any required timeframe
+    const timeframeToMinutes: { [key: string]: number } = {
+      "1min": 1, "5min": 5, "15min": 15, "20min": 20, "30min": 30, "36min": 36, "45min": 45,
+      "1h": 60, "2h": 120, "3h": 180, "4h": 240, "6h": 360, "8h": 480, "12h": 720,
+      "1d": 1440, "1 day": 1440, "1w": 10080, "1 week": 10080
+    }
+
+    const matchesRequired = requiredTimeframes.some(tf => {
+      const requiredMinutes = timeframeToMinutes[tf.toLowerCase()]
+      if (requiredMinutes) {
+        // Allow some tolerance (±5% or ±1 minute for small timeframes)
+        const tolerance = Math.max(1, requiredMinutes * 0.05)
+        const matches = Math.abs(timeframeMinutes - requiredMinutes) <= tolerance
+        if (matches) {
+          console.log(`✅ Timeframe ${timeframeLabel} matches required ${tf}`)
+        }
+        return matches
+      }
+      return false
+    })
+
+    return {
+      detected: true,
+      timeframeMinutes,
+      timeframeLabel,
+      matchesRequired
+    }
+  }
+
+  // Helper function to check CSV columns for timeframe patterns (legacy fallback)
+  const checkCsvColumnsForTimeframe = (csvContent: string): boolean => {
+    // Get the first line (headers)
+    const firstLine = csvContent.split('\n')[0]
+    if (!firstLine) return false
+
+    const columns = firstLine.toLowerCase().split(',').map(col => col.trim())
+    console.log("🔍 CSV columns found:", columns)
+
+    // Pattern to match timeframe columns like open_45min, close_30min, high_1h, etc.
+    const timeframeColumnPattern = /^(open|close|high|low|volume|datetime|date|time)_\d+(min|h|d|w)?$/i
+
+    // Also check for any column containing timeframe patterns
+    const hasTimeframeColumn = columns.some(col => {
+      if (timeframeColumnPattern.test(col)) {
+        console.log("✅ Found timeframe column:", col)
+        return true
+      }
+
+      const generalTimeframePattern = /_\d+(min|h|d|w)$/i
+      if (generalTimeframePattern.test(col)) {
+        console.log("✅ Found column with timeframe suffix:", col)
+        return true
+      }
+
+      return false
+    })
+
+    return hasTimeframeColumn
+  }
 
   const handleFile = (file: File) => {
     // Only allow .py and .csv files. Update here if you want to support more types.
@@ -486,7 +747,68 @@ export default function StrategyTestingPage() {
         [file.name]: file,
       }))
 
-      setShowSuccessModal(true)
+      // For CSV files, check timestamps to detect timeframe
+      if (fileExtension === "csv") {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          const content = e.target?.result as string
+          if (content) {
+            console.log("🔍 File upload validation:", {
+              filename: file.name,
+              requiredTimeframes,
+              fileExtension
+            })
+
+            // Primary check: detect timeframe from timestamps
+            const timestampResult = detectTimeframeFromTimestamps(content)
+
+            // Fallback checks
+            const hasValidTimeframeColumn = checkCsvColumnsForTimeframe(content)
+            const matchesFilename = requiredTimeframes.some(timeframe =>
+              matchesTimeframe(file.name, timeframe)
+            )
+
+            console.log("🔍 Validation results:", {
+              timestampResult,
+              hasValidTimeframeColumn,
+              matchesFilename
+            })
+
+            if (timestampResult.detected && timestampResult.matchesRequired) {
+              // Best case: timestamp analysis confirms matching timeframe
+              setShowSuccessModal(true)
+              showToast(`File uploaded successfully! Detected ${timestampResult.timeframeLabel} timeframe data.`, 'success')
+            } else if (timestampResult.detected && !timestampResult.matchesRequired) {
+              // Timestamp detected but doesn't match required
+              showToast(`File contains ${timestampResult.timeframeLabel} data but required timeframes are: ${requiredTimeframes.join(', ')}. You may get incorrect results.`, 'warning')
+            } else if (hasValidTimeframeColumn || matchesFilename) {
+              // Fallback: column names or filename match
+              setShowSuccessModal(true)
+              showToast(`File uploaded successfully! Valid timeframe pattern found.`, 'success')
+            } else {
+              // No valid timeframe detected
+              showToast(`File uploaded but couldn't detect timeframe. Required: ${requiredTimeframes.join(', ')}. You may get incorrect results.`, 'warning')
+            }
+          }
+        }
+        reader.onerror = () => {
+          // If we can't read the file, fall back to filename matching
+          const matchesAnyTimeframe = requiredTimeframes.some(timeframe =>
+            matchesTimeframe(file.name, timeframe)
+          )
+          if (matchesAnyTimeframe) {
+            setShowSuccessModal(true)
+            showToast(`File uploaded successfully! Matches required timeframe.`, 'success')
+          } else {
+            showToast(`File uploaded but couldn't verify timeframe data.`, 'warning')
+          }
+        }
+        reader.readAsText(file)
+      } else {
+        // For .py files, just accept them
+        setShowSuccessModal(true)
+        showToast(`Python file uploaded successfully!`, 'success')
+      }
     } else {
       showToast("Only .py and .csv files are supported", 'error')
     }
@@ -517,9 +839,11 @@ export default function StrategyTestingPage() {
     const lowerFilename = filename.toLowerCase()
     const lowerTimeframe = timeframe.toLowerCase()
 
+    console.log("🔍 Checking timeframe match:", { filename, timeframe, lowerFilename, lowerTimeframe })
+
     // Direct matching (e.g., "3h" in filename)
     if (lowerFilename.includes(lowerTimeframe)) {
-      console.log("✅ Direct match found")
+      console.log("✅ Direct match found for", timeframe)
       return true
     }
 
@@ -531,6 +855,7 @@ export default function StrategyTestingPage() {
       "15min": 15,
       "20min": 20,
       "30min": 30,
+      "36min": 36,
       "1h": 60,
       "2h": 120,
       "3h": 180,
@@ -550,16 +875,49 @@ export default function StrategyTestingPage() {
     if (minutes) {
       // Check if the filename contains the minute value
       const minutesStr = minutes.toString()
-      const containsMinutes = lowerFilename.includes(minutesStr)
 
-      // Additional check: Make sure it's not part of another number
+      // Use word boundary regex to avoid partial matches
       // For example, "20" in "120" should not match "20m"
       const regex = new RegExp(`\\b${minutesStr}\\b`)
       const isStandaloneNumber = regex.test(lowerFilename)
 
-      return containsMinutes
+      console.log("🔍 Minute check:", {
+        timeframe,
+        minutes,
+        minutesStr,
+        lowerFilename,
+        isStandaloneNumber,
+        regex: regex.toString()
+      })
+
+      if (isStandaloneNumber) {
+        console.log("✅ Minute match found for", timeframe, "(" + minutes + " minutes)")
+        return true
+      }
     }
 
+    // Additional check: Look for common timeframe patterns in filename
+    const timeframePatterns = {
+      "3h": ["3h", "180", "3 hour", "three hour"],
+      "1h": ["1h", "60", "1 hour", "one hour"],
+      "36min": ["36min", "36", "36 minute", "thirty six"],
+      "30min": ["30min", "30", "30 minute", "thirty"],
+      "15min": ["15min", "15", "15 minute", "fifteen"],
+      "5min": ["5min", "5", "5 minute", "five"],
+      "1min": ["1min", "1", "1 minute", "one minute"]
+    }
+
+    const patterns = timeframePatterns[lowerTimeframe as keyof typeof timeframePatterns]
+    if (patterns) {
+      for (const pattern of patterns) {
+        if (lowerFilename.includes(pattern.toLowerCase())) {
+          console.log("✅ Pattern match found for", timeframe, "using pattern:", pattern)
+          return true
+        }
+      }
+    }
+
+    console.log("❌ No match found for", timeframe, "in", filename)
     return false
   }
 
@@ -579,32 +937,253 @@ export default function StrategyTestingPage() {
     try {
       setIsLoading(true)
 
-      let result
+      let result: any
 
-      if (useMetaAPI) {
-        // Use MetaAPI for backtesting with environment variables
+      // Check if this is a custom strategy
+      const isCustomStrategy = parsedStatement?.is_custom_strategy ||
+        localStorage.getItem("is_custom_strategy") === "true"
+
+      if (isCustomStrategy) {
+        // Use custom strategy backtest API
+        const customStrategyId = parsedStatement?.custom_strategy_id || parsedStatement?.id
+        const symbol = metaAPIConfig?.symbol || "XAUUSD"
+
+        console.log("🔍 Running custom strategy backtest:", {
+          customStrategyId,
+          symbol,
+          isCustomStrategy
+        })
+
+        result = await runCustomStrategyBacktest({
+          strategy_id: customStrategyId,
+          params: parsedStatement?.parameters || {},
+          initial_equity: Number(accountDeposit.replace(/,/g, "")) || 10000,
+          symbol: symbol
+        })
+
+        console.log("Custom strategy backtest result:", result)
+
+        // Handle custom strategy backtest result
+        if (result) {
+          // Normalize the response to match expected format
+          const normalizedResult = {
+            message: result.message || "Custom strategy backtest completed.",
+            custom_strategy_id: result.custom_strategy_id || customStrategyId,
+            custom_strategy_name: result.custom_strategy_name || parsedStatement?.name || "Custom Strategy",
+            data_source: result.data_source || result.metadata?.data_source || "custom",
+            symbol: result.symbol || result.metadata?.symbol || symbol,
+            initial_equity: result.initial_equity || Number(accountDeposit.replace(/,/g, "")) || 10000,
+            final_equity: result.final_equity || 0,
+            return_percent: result.return_percent ?? result.total_return ?? 0,
+            num_trades: result.num_trades || 0,
+            win_rate_percent: result.win_rate_percent ?? result.win_rate ?? 0,
+            max_drawdown_percent: result.max_drawdown_percent ?? result.max_drawdown ?? 0,
+            sharpe_ratio: result.sharpe_ratio || 0,
+            equity_curve: result.equity_curve || [],
+            trades: result.trades || [],
+            statistics: result.statistics || {
+              win_rate: result.win_rate ?? result.win_rate_percent ?? 0,
+              max_drawdown: result.max_drawdown ?? result.max_drawdown_percent ?? 0,
+              sharpe_ratio: result.sharpe_ratio || 0,
+              total_trades: result.num_trades || 0,
+              total_return: result.total_return ?? result.return_percent ?? 0,
+              profit_factor: result.profit_factor || 0
+            },
+            plot_html: result.plot_html || null,
+            csv_url: result.csv_url || null,
+            metadata: result.metadata || {}
+          }
+
+          // Store the result in sessionStorage for the results page
+          sessionStorage.setItem('customBacktestResult', JSON.stringify(normalizedResult))
+
+          // Store the result for display in modal
+          setCustomStrategyBacktestResult(normalizedResult)
+          setShowCustomStrategyBacktestResults(true)
+
+          // Also set plot HTML if available
+          if (normalizedResult.plot_html) {
+            setPlotHtml(normalizedResult.plot_html)
+          }
+
+          showToast("Custom strategy backtest completed!", 'success')
+        }
+      } else if (useMetaAPI) {
         const symbol = metaAPIConfig?.symbol || "XAUUSD"
         const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
         const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
-        
+
         console.log("🔍 Using trading symbol for MetaAPI backtest:", symbol)
         console.log("🔍 MetaAPI Token available:", !!token)
         console.log("🔍 MetaAPI Account ID available:", !!accountId)
-        
+
         if (!token || !accountId) {
           throw new Error("MetaAPI credentials not configured. Please check environment variables.")
         }
-        
-        result = await runBacktestWithMetaAPI(
+
+        // Fire the request — if backend is async it returns {run_id} immediately,
+        // if sync it blocks until done. Either way we handle both.
+        const backtestPromise = runBacktestWithMetaAPI(
           parsedStatement,
           token,
           accountId,
-          symbol
+          symbol,
+          null as any
         )
-      } else {
-        // Use traditional file upload method
-        const timeframeFiles: Record<string, File> = {}
 
+        // Wait for response — async backend resolves fast with run_id, sync backend blocks
+        const startData = await backtestPromise
+        console.log("Backtest response:", startData)
+        console.log("run_id:", startData?.run_id, "| status:", startData?.status)
+
+        if (startData?.run_id && startData?.status === 'started') {
+          backtestRunIdRef.current = startData.run_id
+          console.log("✅ Async mode — stored run_id:", startData.run_id)
+          const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000 })
+          backtestPollerRef.current = stop
+          try {
+            result = await promise
+          } catch (e: any) {
+            if (e?.message === 'cancelled') return // user cancelled — stop processing
+            throw e
+          }
+          backtestPollerRef.current = null
+        } else {
+          console.log("ℹ️ Sync mode — full result returned directly (cancel not supported in sync mode)")
+          result = startData
+        }
+
+        // Handle plot HTML
+        if (result?.plot_html) {
+          setPlotHtml(result.plot_html)
+        }
+
+        // Handle trades CSV data — redirect to results page
+        const resultId = result?.backtest_result_id || result?.backtest_id || result?.result?.backtest_result_id
+        if (resultId) {
+          showToast("Backtest completed! Redirecting to results...", 'success')
+          setTimeout(() => { router.push(`/backtest-results?id=${resultId}`) }, 800)
+        } else if (result?.trades_csv) {
+          showToast("Backtest completed but no result ID returned.", 'warning')
+        } else if (!result?.plot_html) {
+          showToast("Backtest completed but no data returned", 'error')
+        }
+      } else {
+        // File upload method
+        const timeframeFiles: Record<string, File> = {}
+        requiredTimeframes.forEach((timeframe, index) => {
+          const filename = uploadedFiles[index]
+          if (filename && fileObjects[filename]) timeframeFiles[timeframe] = fileObjects[filename]
+        })
+        uploadedFiles.forEach((filename) => {
+          if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
+            timeframeFiles[filename.split(".")[0]] = fileObjects[filename]
+          }
+        })
+
+        // Step 1: start the job
+        const startData = await (runBacktest as any)({ statement: parsedStatement, files: timeframeFiles })
+        console.log("Backtest response:", startData)
+        console.log("run_id:", startData?.run_id, "| status:", startData?.status)
+
+        if (startData?.run_id && startData?.status === 'started') {
+          backtestRunIdRef.current = startData.run_id
+          console.log("✅ Async mode — stored run_id:", startData.run_id)
+          const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000 })
+          backtestPollerRef.current = stop
+          try {
+            result = await promise
+          } catch (e: any) {
+            if (e?.message === 'cancelled') return
+            throw e
+          }
+          backtestPollerRef.current = null
+        } else {
+          console.log("ℹ️ Sync mode — full result returned directly")
+          result = startData
+        }
+
+        if (result?.plot_html) setPlotHtml(result.plot_html)
+
+        const resultId2 = result?.backtest_result_id || result?.backtest_id || result?.result?.backtest_result_id
+        if (resultId2) {
+          showToast("Backtest completed! Redirecting to results...", 'success')
+          setTimeout(() => { router.push(`/backtest-results?id=${resultId2}`) }, 800)
+        } else if (result?.trades_csv) {
+          showToast("Backtest completed but no result ID returned.", 'warning')
+        } else if (!result?.plot_html) {
+          showToast("Backtest completed but no data returned", 'error')
+        }
+      }
+    } catch (error: any) {
+      console.error("Backtest Error:", error)
+
+      // Check if this is a MetaAPI-related error
+      const errorMessage = error.message || "Unknown error"
+      const isMetaAPIError = useMetaAPI && metaAPIConfig && (
+        errorMessage.toLowerCase().includes("symbol") ||
+        errorMessage.toLowerCase().includes("timeframe") ||
+        errorMessage.toLowerCase().includes("metaapi") ||
+        errorMessage.toLowerCase().includes("candles") ||
+        errorMessage.toLowerCase().includes("broker")
+      )
+
+      if (isMetaAPIError) {
+        // Extract required timeframes from the strategy
+        const requiredTimeframes = parsedStatement?.strategy
+          ?.filter((step: any) => step.function && step.vars && step.vars.timeframe)
+          .map((step: any) => step.vars.timeframe) || []
+
+        // Show detailed MetaAPI debug modal
+        setMetaAPIError({
+          message: errorMessage,
+          details: error,
+          symbol: metaAPIConfig?.symbol || parsedStatement?.instrument,
+          timeframes: requiredTimeframes,
+        })
+        setShowMetaAPIDebugModal(true)
+      } else {
+        // Show normal error toast for non-MetaAPI errors
+        showToast("Backtest Error: " + errorMessage, 'error')
+      }
+    } finally {
+      setIsLoading(false)
+      backtestRunIdRef.current = null
+    }
+  }
+
+  const cancelBacktestRun = () => {
+    backtestPollerRef.current?.()
+    backtestPollerRef.current = null
+    const runId = backtestRunIdRef.current
+    backtestRunIdRef.current = null
+    if (runId) {
+      cancelBacktest(runId as any)
+        .then((r) => console.log("✅ cancel-backtest:", r))
+        .catch((e) => console.error("❌ cancel-backtest failed:", e))
+    }
+    setIsLoading(false)
+    showToast("Backtest cancelled", 'warning')
+  }
+
+  const handleOptimisation = async (wait = false) => {
+    if (!parsedStatement) {
+      showToast("Strategy statement is missing or not parsed!", 'error')
+      return
+    }
+
+    // Only check for files if NOT using MetaAPI
+    if (!useMetaAPI && requiredTimeframes.length > uploadedFiles.length) {
+      showToast("Not enough files uploaded for the required timeframes", 'error')
+      return
+    }
+
+    try {
+      setIsLoading2(true)
+      let timeframeFiles: Record<string, File> = {}
+
+      // Only process files if NOT using MetaAPI
+      if (!useMetaAPI) {
         // Directly map each required timeframe to the uploaded file in order
         requiredTimeframes.forEach((timeframe, index) => {
           const filename = uploadedFiles[index]
@@ -620,105 +1199,13 @@ export default function StrategyTestingPage() {
             timeframeFiles[key] = fileObjects[filename]
           }
         })
-
-        result = await runBacktest({
-          statement: parsedStatement,
-          files: timeframeFiles,
-        })
       }
-
-      console.log("Backtest result:", result)
-
-      // Handle plot HTML
-      if (result?.plot_html) {
-        setPlotHtml(result.plot_html)
-      }
-
-      // Handle trades CSV data
-      if (result?.trades_csv) {
-        setTradesData({
-          tradesCsv: result.trades_csv,
-          tradesCsvFilename: result.trades_csv_filename || 'trades.csv',
-          tradesCsvDownloadUrl: result.trades_csv_download_url || '',
-          stdout: result.stdout || '',
-          stderr: result.stderr || ''
-        })
-        setShowTradesSummary(true)
-        
-        // Check if trades CSV has actual data
-        const csvLines = result.trades_csv.trim().split('\n')
-        if (csvLines.length >= 2) {
-          showToast("Trades data available! View summary for details.", 'success')
-        } else {
-          showToast("Backtest completed but no trades were executed.", 'warning')
-        }
-      } else {
-        // No trades CSV data
-        setTradesData({
-          tradesCsv: '',
-          tradesCsvFilename: '',
-          tradesCsvDownloadUrl: '',
-          stdout: result?.stdout || '',
-          stderr: result?.stderr || ''
-        })
-        setShowTradesSummary(true)
-        showToast("Backtest completed but no trades data available.", 'warning')
-      }
-
-      // Handle stdout/stderr
-      if (result?.stdout) {
-        console.log("Backtest stdout:", result.stdout)
-      }
-      if (result?.stderr) {
-        console.log("Backtest stderr:", result.stderr)
-      }
-
-      if (!result?.plot_html && !result?.trades_csv) {
-        showToast("Backtest completed but no data returned", 'error')
-      }
-    } catch (error: any) {
-      showToast("Backtest Error: " + (error.message || "Unknown error"), 'error')
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const handleOptimisation = async (wait = false) => {
-    if (!parsedStatement) {
-      showToast("Strategy statement is missing or not parsed!", 'error')
-      return
-    }
-
-    if (requiredTimeframes.length > uploadedFiles.length) {
-      showToast("Not enough files uploaded for the required timeframes", 'error')
-      return
-    }
-
-    try {
-      setIsLoading2(true)
-      const timeframeFiles: Record<string, File> = {}
-
-      // Directly map each required timeframe to the uploaded file in order
-      requiredTimeframes.forEach((timeframe, index) => {
-        const filename = uploadedFiles[index]
-        if (filename && fileObjects[filename]) {
-          timeframeFiles[timeframe] = fileObjects[filename]
-        }
-      })
-
-      // Add unmatched remaining files to the form with filename as key (optional fallback)
-      uploadedFiles.forEach((filename) => {
-        if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
-          const key = filename.split(".")[0]
-          timeframeFiles[key] = fileObjects[filename]
-        }
-      })
 
       // Get optimisation form from localStorage to extract Parameters and Constraints
       const optimisationFormString = localStorage.getItem("optimisation_form")
       let parametersObject: Record<string, any> = {}
       let constraintsArray: string[] = []
-      
+
       if (optimisationFormString) {
         try {
           const optimisationForm = JSON.parse(optimisationFormString)
@@ -758,74 +1245,147 @@ export default function StrategyTestingPage() {
         optimiser_parameters: optimiserParameters,
       }
 
-      const result = await runOptimisation({
-        statement: optimisationStatement,
-        files: timeframeFiles,
-        strategy_statement_id: strategy_id ? strategy_id : null,
-        wait,
-      })
+      let result: any
+
+      // Use MetaAPI or file upload based on the mode
+      if (useMetaAPI) {
+        const symbol = metaAPIConfig?.symbol || "XAUUSD"
+        const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
+        const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
+
+        console.log("🔍 Using trading symbol for MetaAPI optimization:", symbol)
+        if (!token || !accountId) {
+          throw new Error("MetaAPI credentials not configured. Please check environment variables.")
+        }
+
+        const startData = await (runOptimisation as any)({
+          statement: optimisationStatement,
+          strategy_statement_id: strategy_id ? strategy_id : null,
+          wait,
+          metaapi_token: token,
+          metaapi_account_id: accountId,
+          symbol: symbol,
+        })
+
+        if (startData?.run_id && startData?.status === 'started') {
+          optimisationRunIdRef.current = startData.run_id
+          console.log("✅ Stored optimisation run_id for cancel:", startData.run_id)
+          const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000 })
+          optimisationPollerRef.current = stop
+          try {
+            result = await promise
+          } catch (e: any) {
+            if (e?.message === 'cancelled') return
+            throw e
+          }
+          optimisationPollerRef.current = null
+        } else {
+          result = startData
+        }
+      } else {
+        const startData = await (runOptimisation as any)({
+          statement: optimisationStatement,
+          files: timeframeFiles,
+          strategy_statement_id: strategy_id ? strategy_id : null,
+          wait,
+        })
+
+        if (startData?.run_id && startData?.status === 'started') {
+          optimisationRunIdRef.current = startData.run_id
+          console.log("✅ Stored optimisation run_id for cancel:", startData.run_id)
+          const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000 })
+          optimisationPollerRef.current = stop
+          try {
+            result = await promise
+          } catch (e: any) {
+            if (e?.message === 'cancelled') return
+            throw e
+          }
+          optimisationPollerRef.current = null
+        } else {
+          result = startData
+        }
+      }
 
       console.log("Full optimization response:", result)
 
+      // Unwrap polled result — pollJobStatus resolves with { status, result: {...} }
+      const polledResult = result?.result ?? result
+
       // Capture optional message/stdout/stderr from response
-      setOptimisationMessage(result?.message || "")
-      setOptimisationStdout(result?.stdout || "")
-      setOptimisationStderr(result?.stderr || "")
+      setOptimisationMessage(polledResult?.message || result?.message || "")
+      setOptimisationStdout(polledResult?.stdout || result?.stdout || "")
+      setOptimisationStderr(polledResult?.stderr || result?.stderr || "")
 
-      // Handle the response based on whether it's sync or async
-      if (wait && result?.result) {
-        // Sync mode: use result.result directly
-        setOptimisationResult(result.result)
+      // Handle the response — treat polledResult as the actual result data
+      if (polledResult) {
+        setOptimisationResult(polledResult)
         setActiveTab("optimisation")
         setShowPreviousOptimisationView(true)
-        setOptimizationResults(prev => Array.isArray(prev) ? [...prev, result.result] : [result.result])
-        if (result.result.heatmap_plot_html) {
-          setPlotHeatmapHtml(result.result.heatmap_plot_html)
+        setOptimizationResults(prev => Array.isArray(prev) ? [...prev, polledResult] : [polledResult])
+        if (polledResult.heatmap_plot_html) {
+          setPlotHeatmapHtml(polledResult.heatmap_plot_html)
         } else {
           setPlotHeatmapHtml(null)
         }
-        if (result.result.trades_plot_html) {
-          setPlotHtml(result.result.trades_plot_html)
+        if (polledResult.trades_plot_html) {
+          setPlotHtml(polledResult.trades_plot_html)
         }
         setOptimizationStatus("completed")
-        setCurrentOptimizationId(result.optimization_id || null)
+        setCurrentOptimizationId(result?.optimization_id || polledResult?.optimization_id || null)
         return
       }
 
-      // Async mode: Check if we have immediate results
-      if (result?.result) {
-        // We have results immediately (even in async mode)
-        setOptimisationResult(result.result)
-        setActiveTab("optimisation")
-        setShowPreviousOptimisationView(true)
-        setOptimizationResults(prev => Array.isArray(prev) ? [...prev, result.result] : [result.result])
-        if (result.result.heatmap_plot_html) {
-          setPlotHeatmapHtml(result.result.heatmap_plot_html)
-        } else {
-          setPlotHeatmapHtml(null)
-        }
-        if (result.result.trades_plot_html) {
-          setPlotHtml(result.result.trades_plot_html)
-        }
-        setOptimizationStatus("completed")
-        setCurrentOptimizationId(result.optimization_id || null)
-        return
-      }
-
-      // Pure async mode: Start polling for optimisation status if optimization_id exists
-      const pollId = result?.optimization_id
-      if (pollId) {
-        setCurrentOptimizationId(pollId)
-        setOptimizationStatus("running")
-        startStatusPolling(pollId)
-      } else {
-        showToast("No optimization ID received for polling", 'error')
-      }
+      showToast("No optimisation result received", 'error')
     } catch (error: any) {
-      showToast("Optimisation Error: " + (error.message || "Unknown error"), 'error')
+      console.error("Optimisation Error:", error)
+
+      // Check if this is a MetaAPI-related error
+      const errorMessage = error.message || "Unknown error"
+      const isMetaAPIError = useMetaAPI && metaAPIConfig && (
+        errorMessage.toLowerCase().includes("symbol") ||
+        errorMessage.toLowerCase().includes("timeframe") ||
+        errorMessage.toLowerCase().includes("metaapi") ||
+        errorMessage.toLowerCase().includes("candles") ||
+        errorMessage.toLowerCase().includes("broker")
+      )
+
+      if (isMetaAPIError) {
+        // Extract required timeframes from the strategy
+        const requiredTimeframes = parsedStatement?.strategy
+          ?.filter((step: any) => step.function && step.vars && step.vars.timeframe)
+          .map((step: any) => step.vars.timeframe) || []
+
+        // Show detailed MetaAPI debug modal
+        setMetaAPIError({
+          message: errorMessage,
+          details: error,
+          symbol: metaAPIConfig?.symbol || parsedStatement?.instrument,
+          timeframes: requiredTimeframes,
+        })
+        setShowMetaAPIDebugModal(true)
+      } else {
+        // Show normal error toast for non-MetaAPI errors
+        showToast("Optimisation Error: " + errorMessage, 'error')
+      }
     } finally {
       setIsLoading2(false)
+      optimisationRunIdRef.current = null
     }
+  }
+
+  const cancelOptimisation = () => {
+    optimisationPollerRef.current?.()
+    optimisationPollerRef.current = null
+    const runId = optimisationRunIdRef.current
+    optimisationRunIdRef.current = null
+    if (runId) {
+      cancelOptimisationRun(runId as any)
+        .then((r) => console.log("✅ cancel-optimisation:", r))
+        .catch((e) => console.error("❌ cancel-optimisation failed:", e))
+    }
+    setIsLoading2(false)
+    showToast("Optimisation cancelled", 'warning')
   }
 
   const handleWalkForwardOptimisation = async (wait = false) => {
@@ -834,30 +1394,34 @@ export default function StrategyTestingPage() {
       return
     }
 
-    if (requiredTimeframes.length > uploadedFiles.length) {
+    // Only check for files if NOT using MetaAPI
+    if (!useMetaAPI && requiredTimeframes.length > uploadedFiles.length) {
       showToast("Not enough files uploaded for the required timeframes", 'error')
       return
     }
 
     try {
       setIsLoading3(true)
-      const timeframeFiles: Record<string, File> = {}
+      let timeframeFiles: Record<string, File> = {}
 
-      // Directly map each required timeframe to the uploaded file in order
-      requiredTimeframes.forEach((timeframe, index) => {
-        const filename = uploadedFiles[index]
-        if (filename && fileObjects[filename]) {
-          timeframeFiles[timeframe] = fileObjects[filename]
-        }
-      })
+      // Only process files if NOT using MetaAPI
+      if (!useMetaAPI) {
+        // Directly map each required timeframe to the uploaded file in order
+        requiredTimeframes.forEach((timeframe, index) => {
+          const filename = uploadedFiles[index]
+          if (filename && fileObjects[filename]) {
+            timeframeFiles[timeframe] = fileObjects[filename]
+          }
+        })
 
-      // Add unmatched remaining files to the form with filename as key (optional fallback)
-      uploadedFiles.forEach((filename) => {
-        if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
-          const key = filename.split(".")[0]
-          timeframeFiles[key] = fileObjects[filename]
-        }
-      })
+        // Add unmatched remaining files to the form with filename as key (optional fallback)
+        uploadedFiles.forEach((filename) => {
+          if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
+            const key = filename.split(".")[0]
+            timeframeFiles[key] = fileObjects[filename]
+          }
+        })
+      }
 
       // Get walk forward settings from localStorage
       const walkForwardSettingsString = localStorage.getItem("walk_forward_settings")
@@ -880,7 +1444,7 @@ export default function StrategyTestingPage() {
       const optimisationFormString = localStorage.getItem("optimisation_form")
       let parametersObject: Record<string, any> = {}
       let constraintsArray: string[] = []
-      
+
       if (optimisationFormString) {
         try {
           const optimisationForm = JSON.parse(optimisationFormString)
@@ -922,33 +1486,72 @@ export default function StrategyTestingPage() {
 
       const apiParams: any = {
         statement: walkForwardStatement,
-        files: timeframeFiles,
         walk_forward_setting: walkForwardSettings, // Pass as separate parameter
         wait,
       }
-      
+
       if (strategy_id && !isNaN(Number(strategy_id))) {
         apiParams.strategy_statement_id = Number(strategy_id)
       }
 
-      const result = await runWalkForwardOptimisation(apiParams)
+      // Use MetaAPI or file upload based on the mode
+      if (useMetaAPI) {
+        // Use MetaAPI for walk forward optimization
+        const symbol = metaAPIConfig?.symbol || "XAUUSD"
+        const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
+        const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
+
+        console.log("🔍 Using trading symbol for MetaAPI walk forward optimization:", symbol)
+        console.log("🔍 MetaAPI Token available:", !!token)
+        console.log("🔍 MetaAPI Account ID available:", !!accountId)
+
+        if (!token || !accountId) {
+          throw new Error("MetaAPI credentials not configured. Please check environment variables.")
+        }
+
+        apiParams.metaapi_token = token
+        apiParams.metaapi_account_id = accountId
+        apiParams.symbol = symbol
+      } else {
+        // Use file upload for walk forward optimization
+        apiParams.files = timeframeFiles
+      }
+
+      const startData = await runWalkForwardOptimisation(apiParams)
+
+      let result: any
+      if (startData?.run_id && startData?.status === 'started') {
+        walkForwardRunIdRef.current = startData.run_id
+        console.log("✅ Stored walk forward run_id for cancel:", startData.run_id)
+        const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000 })
+        walkForwardPollerRef.current = stop
+        try {
+          result = await promise
+        } catch (e: any) {
+          if (e?.message === 'cancelled') return
+          throw e
+        }
+        walkForwardPollerRef.current = null
+      } else {
+        result = startData
+      }
 
       console.log("Walk Forward optimization response:", result)
       console.log("Result status:", result?.status)
       console.log("Result message:", result?.message)
 
-      // The API response structure is direct, not nested under 'result'
-      const resultData = result;
-      
+      // Unwrap polled result — pollJobStatus resolves with { status, result: {...} }
+      const resultData = result?.result ?? result;
+
       console.log("🔍 DEBUG: Full result data:", resultData);
       console.log("🔍 DEBUG: Available fields:", Object.keys(resultData || {}));
-      
+
       if (resultData && (resultData.status === 'success' || resultData.message?.toLowerCase().includes('success'))) {
         console.log("Success detected, navigating to results page");
         // Store only the optimization ID in sessionStorage and navigate to results page
         const optimizationId = resultData.walkforward_optimization_id || resultData.optimization_id;
         console.log("🔍 DEBUG: Found optimization ID:", optimizationId);
-        
+
         if (optimizationId) {
           console.log("✅ Storing optimization ID:", optimizationId);
           sessionStorage.setItem('walkForwardOptimizationId', optimizationId.toString());
@@ -979,7 +1582,7 @@ export default function StrategyTestingPage() {
         // Store only the optimization ID in sessionStorage
         const optimizationId = resultData.walkforward_optimization_id || resultData.optimization_id;
         console.log("🔍 DEBUG: Found optimization ID:", optimizationId);
-        
+
         if (optimizationId) {
           console.log("✅ Storing optimization ID:", optimizationId);
           sessionStorage.setItem('walkForwardOptimizationId', optimizationId.toString());
@@ -987,7 +1590,7 @@ export default function StrategyTestingPage() {
           setTimeout(() => {
             router.push('/walk-forward-results');
           }, 100);
-      } else {
+        } else {
           // Fallback: store minimal data
           const minimalData = {
             id: resultData.id || resultData.walkforward_optimization_id || resultData.optimization_id,
@@ -1006,10 +1609,54 @@ export default function StrategyTestingPage() {
 
       console.log("No result data found");
     } catch (error: any) {
-      showToast("Walk Forward Optimisation Error: " + (error.message || "Unknown error"), 'error')
+      console.error("Walk Forward Optimisation Error:", error)
+
+      // Check if this is a MetaAPI-related error
+      const errorMessage = error.message || "Unknown error"
+      const isMetaAPIError = useMetaAPI && metaAPIConfig && (
+        errorMessage.toLowerCase().includes("symbol") ||
+        errorMessage.toLowerCase().includes("timeframe") ||
+        errorMessage.toLowerCase().includes("metaapi") ||
+        errorMessage.toLowerCase().includes("candles") ||
+        errorMessage.toLowerCase().includes("broker")
+      )
+
+      if (isMetaAPIError) {
+        // Extract required timeframes from the strategy
+        const requiredTimeframes = parsedStatement?.strategy
+          ?.filter((step: any) => step.function && step.vars && step.vars.timeframe)
+          .map((step: any) => step.vars.timeframe) || []
+
+        // Show detailed MetaAPI debug modal
+        setMetaAPIError({
+          message: errorMessage,
+          details: error,
+          symbol: metaAPIConfig?.symbol || parsedStatement?.instrument,
+          timeframes: requiredTimeframes,
+        })
+        setShowMetaAPIDebugModal(true)
+      } else {
+        // Show normal error toast for non-MetaAPI errors
+        showToast("Walk Forward Optimisation Error: " + errorMessage, 'error')
+      }
     } finally {
       setIsLoading3(false)
+      walkForwardRunIdRef.current = null
     }
+  }
+
+  const cancelWalkForward = () => {
+    walkForwardPollerRef.current?.()
+    walkForwardPollerRef.current = null
+    const runId = walkForwardRunIdRef.current
+    walkForwardRunIdRef.current = null
+    if (runId) {
+      cancelOptimisationRun(runId as any)
+        .then((r) => console.log("✅ cancel-walk-forward:", r))
+        .catch((e) => console.error("❌ cancel-walk-forward failed:", e))
+    }
+    setIsLoading3(false)
+    showToast("Walk Forward Optimisation cancelled", 'warning')
   }
 
   // Add function to start status polling
@@ -1064,7 +1711,7 @@ export default function StrategyTestingPage() {
         page_size: 50
       })
       setOptimizationResults(results.results || [])
-    
+
     } catch (error) {
       showToast("Error loading optimization results", 'error')
       console.error("Error loading optimization results:", error)
@@ -1118,7 +1765,7 @@ export default function StrategyTestingPage() {
         page_size: 50
       })
       setWalkForwardOptimizationResults(results.results || [])
-    
+
     } catch (error) {
       showToast("Error loading walk forward optimization results", 'error')
       console.error("Error loading walk forward optimization results:", error)
@@ -1131,9 +1778,9 @@ export default function StrategyTestingPage() {
       console.log("Fetching WFO result detail for ID:", optimizationId)
       const result = await getWalkForwardOptimizationResultDetail(optimizationId)
       console.log("WFO result detail received:", result)
-      
+
       showToast("Loading walk forward optimization result details...", 'success')
-      
+
       // Navigate to the walk-forward-results page with the optimization ID
       // The page will fetch the data directly using the ID
       router.push(`/walk-forward-results?id=${optimizationId}`)
@@ -1160,7 +1807,7 @@ export default function StrategyTestingPage() {
     }
   }
 
-  // Cleanup polling interval on unmount
+  // Cleanup polling intervals on unmount
   useEffect(() => {
     return () => {
       if (statusPollingInterval) {
@@ -1190,14 +1837,22 @@ export default function StrategyTestingPage() {
   // MetaAPI Configuration Handlers
   const handleMetaAPIConfigChange = (config: MetaAPIConfigType) => {
     setMetaAPIConfig(config)
+
+    // Auto-select the corresponding instrument in Backtest tab
+    if (config.symbol) {
+      const mappedInstrument = mapSymbolToInstrument(config.symbol)
+      if (mappedInstrument && !selectedInstruments.includes(mappedInstrument)) {
+        setSelectedInstruments([mappedInstrument])
+      }
+    }
   }
 
-  const [dateRange, setDateRange] = useState("2024.01.02 - 2025.01.02")
-  const [selectedInstruments, setSelectedInstruments] = useState(["USD/JPY"])
+  const [dateRange, setDateRange] = useState("2024.02.01 - 2024.08.01")
+  const [selectedInstruments, setSelectedInstruments] = useState<string[]>(["XAUUSD"])
   const [accountDeposit, setAccountDeposit] = useState("1,000")
   const [currency, setCurrency] = useState("USD")
   const [leverage, setLeverage] = useState("1:1")
-  const [leverageSliderValue, setLeverageSliderValue] = useState(1) // Add state for slider position
+  const [customLeverage, setCustomLeverage] = useState("")
 
   // Handle account deposit change
   const handleAccountDepositChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1207,6 +1862,11 @@ export default function StrategyTestingPage() {
 
   // Get margin value from leverage string
   const getLeverageMargin = (leverageStr: string): number => {
+    // Handle custom leverage
+    if (leverageStr === "custom" && customLeverage.trim()) {
+      leverageStr = customLeverage.trim()
+    }
+
     const ratio = Number.parseInt(leverageStr.split(":")[1])
     // For 1:1 leverage, margin should be 1.0 (100%)
     // For 1:2 leverage, margin should be 0.5 (50%)
@@ -1214,45 +1874,45 @@ export default function StrategyTestingPage() {
     return ratio ? 1.0 / ratio : 0.09 // Default to 0.09 if parsing fails
   }
 
-  // Handle leverage change
-  const handleLeverageChange = (newLeverage: string) => {
-    setLeverage(newLeverage)
-  }
-
-  // Handle slider change
-  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = Number.parseInt(e.target.value)
-    setLeverageSliderValue(value)
-
-    const leverageMap: { [key: string]: string } = {
-      "1": "1:1",
-      "2": "1:2",
-      "3": "1:5",
-      "4": "1:10",
-      "5": "1:20",
-      "6": "1:25",
-      "7": "1:30",
-      "8": "1:50",
-      "9": "1:75",
-      "10": "1:100",
+  // Handle leverage change from dropdown
+  const handleLeverageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedValue = e.target.value
+    if (selectedValue === "custom") {
+      // Keep the dropdown on "custom" and don't change the leverage state
+      setLeverage("custom")
+    } else {
+      // Set the predefined leverage value
+      setLeverage(selectedValue)
+      setCustomLeverage("") // Clear custom input
     }
-    handleLeverageChange(leverageMap[value.toString()])
   }
 
-  // Calculate thumb position as percentage
-  const getThumbPosition = () => {
-    return ((leverageSliderValue - 1) / (10 - 1)) * 100
+  // Handle custom leverage input
+  const handleCustomLeverageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value
+    console.log("🔍 Custom leverage input:", value)
+    setCustomLeverage(value)
+    // Don't update the main leverage state here - keep it as "custom"
+    // The actual leverage value will be used from customLeverage when needed
   }
 
-  const instruments = ["USD/JPY", "GBP/USD", "USD/CHF", "FTSE100", "US30", "NASDAQ"]
+  const instruments = ["XAUUSD", "USD/JPY", "GBP/USD", "USD/CHF", "FTSE100", "US30", "NASDAQ"]
 
   const toggleInstrument = (instrument: string) => {
-    if (selectedInstruments.includes(instrument)) {
-      setSelectedInstruments(selectedInstruments.filter((i) => i !== instrument))
-    } else {
-      setSelectedInstruments([...selectedInstruments, instrument])
-    }
+    // Only allow one instrument selection at a time
+    setSelectedInstruments([instrument])
   }
+
+  // Auto-select instrument when MetaAPI config changes
+  useEffect(() => {
+    if (metaAPIConfig?.symbol) {
+      const mappedInstrument = mapSymbolToInstrument(metaAPIConfig.symbol)
+      if (mappedInstrument) {
+        // Always update to match current MetaAPI symbol
+        setSelectedInstruments([mappedInstrument])
+      }
+    }
+  }, [metaAPIConfig])  // Watch entire config object, not just symbol
 
   // Function to save backtest settings via API
   const saveBacktestSettings = async () => {
@@ -1266,7 +1926,16 @@ export default function StrategyTestingPage() {
 
       // Extract numeric value for API call
       const cash = Number.parseFloat(accountDeposit.replace(/,/g, ""))
-      const leverageMargin = getLeverageMargin(leverage)
+      // Use custom leverage if available, otherwise use the selected leverage
+      const actualLeverage = (leverage === "custom" && customLeverage.trim()) ? customLeverage.trim() : leverage
+      const leverageMargin = getLeverageMargin(actualLeverage)
+
+      console.log("🔍 Saving leverage settings:", {
+        leverage,
+        customLeverage,
+        actualLeverage,
+        leverageMargin
+      })
 
       // Create the data object with trading mode consideration
       // Use dynamic commission from the form
@@ -1277,10 +1946,11 @@ export default function StrategyTestingPage() {
         commission: commission, // Use dynamic commission from form
         NewTrade: selectedTradingMode, // Add the selected trading mode
         asset_type: assetType, // Add the asset type
+        position_size: Number.parseFloat(positionSize) || 1, // Add position size with default value of 1
       }
-      
-      console.log("🔍 Commission being sent to API:", { 
-        commission, 
+
+      console.log("🔍 Commission being sent to API:", {
+        commission,
         commissionState: commission,
         parsedStatementCommission: parsedStatement?.TradingType?.commission
       })
@@ -1292,11 +1962,11 @@ export default function StrategyTestingPage() {
 
       // Get TradingSession from parsedStatement if it exists
       const tradingSession = parsedStatement?.TradingSession || null
-      
+
       console.log("🔍 DEBUG: TradingSession being sent to API:", tradingSession)
       console.log("🔍 DEBUG: parsedStatement:", parsedStatement)
       console.log("🔍 DEBUG: parsedStatement.TradingSession:", parsedStatement?.TradingSession)
-      
+
       // Use editStrategy to update the complete strategy including TradingSession
       const updatedStrategyData = {
         ...parsedStatement,
@@ -1306,14 +1976,17 @@ export default function StrategyTestingPage() {
           lot: lot,
           commission: commission,
           asset_type: assetType,
+          position_size: Number.parseFloat(positionSize) || 1,
         },
+        // Add date range
+        date_range: dateRange,
         // Preserve TradingSession if it exists
         ...(parsedStatement.TradingSession && { TradingSession: parsedStatement.TradingSession })
       }
-      
+
       console.log("🔍 DEBUG: updatedStrategyData being sent to editStrategy:", updatedStrategyData)
       console.log("🔍 DEBUG: TradingSession in updatedStrategyData:", updatedStrategyData.TradingSession)
-      
+
       const result = await editStrategy(strategy_id, updatedStrategyData)
 
       // Update the local strategy object with the response from the API
@@ -1323,17 +1996,17 @@ export default function StrategyTestingPage() {
           ...result,
           TradingSession: updatedStrategyData.TradingSession
         }
-        
+
         setParsedStatement(finalResult)
         localStorage.setItem("savedStrategy", JSON.stringify(finalResult))
-        
+
         // Update strategy_id if it changed
         if (result.id && result.id.toString() !== strategy_id) {
           setStrategyId(result.id.toString())
           localStorage.setItem("strategy_id", result.id.toString())
           console.log("🔍 Strategy ID updated from", strategy_id, "to", result.id)
         }
-        
+
         console.log("🔍 Updated strategy from API:", result)
         console.log("🔍 TradingSession preserved locally:", finalResult.TradingSession)
         showToast("Backtest settings saved successfully!", 'success')
@@ -1358,17 +2031,17 @@ export default function StrategyTestingPage() {
       let currentOptimisationForm = currentOptimisationFormString
         ? JSON.parse(currentOptimisationFormString)
         : {
-            parameters: [],
-            maximise_options: [],
-            algorithm_options: [],
-            default_algorithm: "",
-            algorithm_defaults: {
-              population_size: 100,
-              generations: 50,
-              mutation_rate: 0.1,
-              tournament_size: 3,
-            },
-          }
+          parameters: [],
+          maximise_options: [],
+          algorithm_options: [],
+          default_algorithm: "",
+          algorithm_defaults: {
+            population_size: 100,
+            generations: 50,
+            mutation_rate: 0.1,
+            tournament_size: 3,
+          },
+        }
 
       // Transform parameters array to Parameters object format for the API
       const parametersObject: Record<string, any> = {}
@@ -1412,21 +2085,332 @@ export default function StrategyTestingPage() {
 
   // When optimisation results load, set the first row as selected by default
   useEffect(() => {
-    const rows = (optimisationResult?.full_optimization_results || optimisationResult?.table || []);
+    const rows = (optimisationResult?.convergence_data || optimisationResult?.full_optimization_results || optimisationResult?.table || []);
     if (rows.length > 0) {
       setSelectedOptimisationRow(rows[0]);
     }
   }, [optimisationResult]);
 
+  // Helper function to generate convergence plot HTML
+  const generateConvergencePlotHTML = (convergenceData: any[]) => {
+    if (!convergenceData || convergenceData.length === 0) return null;
+
+    // Extract generations and equity values
+    const generations = convergenceData.map((d, idx) => d.generation ?? idx);
+    const equityValues = convergenceData.map(d => d['Equity Final [$]']);
+
+    const plotlyData = JSON.stringify([{
+      x: generations,
+      y: equityValues,
+      type: 'scatter',
+      mode: 'lines+markers',
+      marker: { color: '#85e1fe' },
+      line: { color: '#85e1fe', width: 2 },
+      name: 'Equity Final'
+    }]);
+
+    const layout = JSON.stringify({
+      title: 'Convergence Plot',
+      xaxis: { title: 'Generation', gridcolor: '#333' },
+      yaxis: { title: 'Equity Final [$]', gridcolor: '#333' },
+      paper_bgcolor: '#0e1018',
+      plot_bgcolor: '#0e1018',
+      font: { color: '#fff' }
+    });
+
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+      </head>
+      <body style="margin:0;">
+        <div id="plot" style="width:100%;height:100%;"></div>
+        <script>
+          Plotly.newPlot('plot', ${plotlyData}, ${layout}, {responsive: true});
+        </script>
+      </body>
+      </html>
+    `;
+  };
+
+  // Helper function to generate heatmap plot HTML
+  const generateHeatmapPlotHTML = (heatmapData: any[]) => {
+    if (!heatmapData || heatmapData.length === 0) return null;
+
+    // Extract unique parameter values and create a matrix
+    const param1Key = Object.keys(heatmapData[0]).find(k => k !== 'Equity Final [$]' && k !== 'Return [%]');
+    const param2Key = Object.keys(heatmapData[0]).find(k => k !== 'Equity Final [$]' && k !== 'Return [%]' && k !== param1Key);
+
+    if (!param1Key || !param2Key) {
+      // If we can't find two parameters, create a simple scatter plot
+      const x = heatmapData.map((d, idx) => idx);
+      const y = heatmapData.map(d => d['Equity Final [$]']);
+
+      const plotlyData = JSON.stringify([{
+        x: x,
+        y: y,
+        mode: 'markers',
+        type: 'scatter',
+        marker: {
+          color: y,
+          colorscale: 'Viridis',
+          showscale: true,
+          size: 10
+        },
+        name: 'Equity Final'
+      }]);
+
+      const layout = JSON.stringify({
+        title: 'Optimization Results',
+        xaxis: { title: 'Index', gridcolor: '#333' },
+        yaxis: { title: 'Equity Final [$]', gridcolor: '#333' },
+        paper_bgcolor: '#0e1018',
+        plot_bgcolor: '#0e1018',
+        font: { color: '#fff' }
+      });
+
+      return `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+        </head>
+        <body style="margin:0;">
+          <div id="plot" style="width:100%;height:100%;"></div>
+          <script>
+            Plotly.newPlot('plot', ${plotlyData}, ${layout}, {responsive: true});
+          </script>
+        </body>
+        </html>
+      `;
+    }
+
+    const x = heatmapData.map(d => d[param1Key]);
+    const y = heatmapData.map(d => d[param2Key]);
+    const z = heatmapData.map(d => d['Equity Final [$]']);
+
+    const plotlyData = JSON.stringify([{
+      x: x,
+      y: y,
+      mode: 'markers',
+      type: 'scatter',
+      marker: {
+        color: z,
+        colorscale: 'Viridis',
+        showscale: true,
+        size: 12,
+        colorbar: { title: 'Equity Final [$]' }
+      },
+      text: z.map((val: number) => `$${val.toFixed(2)}`),
+      hovertemplate: `${param1Key}: %{x}<br>${param2Key}: %{y}<br>Equity: %{text}<extra></extra>`
+    }]);
+
+    const layout = JSON.stringify({
+      title: 'Parameter Optimization Heatmap',
+      xaxis: { title: param1Key, gridcolor: '#333' },
+      yaxis: { title: param2Key, gridcolor: '#333' },
+      paper_bgcolor: '#0e1018',
+      plot_bgcolor: '#0e1018',
+      font: { color: '#fff' }
+    });
+
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+      </head>
+      <body style="margin:0;">
+        <div id="plot" style="width:100%;height:100%;"></div>
+        <script>
+          Plotly.newPlot('plot', ${plotlyData}, ${layout}, {responsive: true});
+        </script>
+      </body>
+      </html>
+    `;
+  };
+
   // Optimization Droplets states
   const [showCostDialog, setShowCostDialog] = useState(false)
-  const [showJobStatus, setShowJobStatus] = useState(false)
-  const [currentOptimizationJob, setCurrentOptimizationJob] = useState<any>(null)
   const [optimizationType, setOptimizationType] = useState<'regular' | 'walk_forward'>('regular')
-  const [jobPollingInterval, setJobPollingInterval] = useState<NodeJS.Timeout | null>(null)
+  const [isCreatingOptimizationJob, setIsCreatingOptimizationJob] = useState(false)
+  const [dropletJobId, setDropletJobId] = useState<number | null>(null)
+  const [dropletJobStatus, setDropletJobStatus] = useState<string>("")
+  const [dropletJobResults, setDropletJobResults] = useState<any>(null)
+  const [dropletPollingInterval, setDropletPollingInterval] = useState<NodeJS.Timeout | null>(null)
+  const [isPollingActive, setIsPollingActive] = useState(false)
+  const isPollingRequestPendingRef = useRef(false)
+  const hasFinalStatusRef = useRef(false)
 
   // New Optimization Droplets Flow Functions
-  
+
+  /**
+   * Poll droplet job status (for droplet-based optimizations)
+   */
+  const startDropletJobPolling = async (jobId: number) => {
+    // Prevent multiple polling instances for the same job
+    if (isPollingActive && dropletJobId === jobId) {
+      console.log(`⚠️ Polling already active for job ${jobId} - skipping`)
+      return
+    }
+
+    // Don't start polling if we've already reached a final status
+    if (hasFinalStatusRef.current) {
+      console.log(`⚠️ Job ${jobId} already reached final status - skipping polling`)
+      return
+    }
+
+    // Clear any existing polling
+    if (dropletPollingInterval) {
+      clearInterval(dropletPollingInterval)
+      setDropletPollingInterval(null)
+    }
+
+    const isFinalStatus = (status: string) =>
+      ["Completed", "Failed", "Cancelled", "completed", "failed", "cancelled"].includes(status)
+
+    // Reset final status flag for new polling session
+    hasFinalStatusRef.current = false
+
+    // Check initial status before starting polling
+    try {
+      isPollingRequestPendingRef.current = true
+      const initialJobData = await getOptimizationJob(jobId)
+      isPollingRequestPendingRef.current = false
+      console.log(`📊 Droplet Job ${jobId} Initial Check: ${initialJobData.status}`)
+
+      setDropletJobStatus(initialJobData.status)
+
+      // If job is already in a final state, don't start polling
+      if (isFinalStatus(initialJobData.status)) {
+        console.log(`✅ Job ${jobId} already ${initialJobData.status} - skipping polling`)
+        hasFinalStatusRef.current = true
+        setDropletJobResults(initialJobData)
+        setIsPollingActive(false)
+
+        if (initialJobData.status === 'Completed' || initialJobData.status === 'completed') {
+          console.log('✅ Droplet job already completed:', initialJobData)
+          // Don't show toast if we're just loading existing results
+          // showToast('Optimization already completed!', 'success')
+        } else if (initialJobData.status === 'Failed' || initialJobData.status === 'failed') {
+          const errorMsg = formatErrorForDisplay(initialJobData.error_message || initialJobData, 'Unknown error')
+          showToast(`Optimization failed: ${errorMsg}`, 'error')
+        }
+        return // Exit early - no need to poll
+      }
+    } catch (error) {
+      isPollingRequestPendingRef.current = false
+      console.error('Error checking initial job status:', error)
+      // Continue with polling even if initial check fails
+    }
+
+    // Start polling only if job is not in final state
+    setIsPollingActive(true)
+    let stopped = false
+
+    const interval = setInterval(async () => {
+      // Early exit if polling has been stopped
+      if (stopped) {
+        console.log(`🛑 Polling stopped for job ${jobId}`)
+        return
+      }
+
+      // Skip this polling cycle if previous request is still pending
+      if (isPollingRequestPendingRef.current) {
+        console.log(`⏳ Skipping poll for job ${jobId} - previous request still pending`)
+        return
+      }
+
+      try {
+        isPollingRequestPendingRef.current = true
+        const jobData = await getOptimizationJob(jobId)
+        isPollingRequestPendingRef.current = false
+        console.log(`📊 Droplet Job ${jobId}: ${jobData.status} (Runtime: ${jobData.runtime_minutes} min)`)
+
+        setDropletJobStatus(jobData.status)
+
+        // Check if job has reached a final state
+        if (isFinalStatus(jobData.status)) {
+          console.log(`🛑 Job ${jobId} reached final status: ${jobData.status} - stopping polling`)
+
+          // Set all flags to stop polling completely
+          stopped = true
+          hasFinalStatusRef.current = true
+          clearInterval(interval)
+          setDropletPollingInterval(null)
+          setIsPollingActive(false)
+          isPollingRequestPendingRef.current = false
+
+          if (jobData.status === 'Completed' || jobData.status === 'completed') {
+            console.log('✅ Droplet job completed successfully:', jobData)
+            setDropletJobResults(jobData)  // Store entire job data, not just results
+
+            // Show results for walk forward optimization
+            if (optimizationType === 'walk_forward') {
+              console.log('📊 Walk Forward Results:')
+              console.log(`   Strategy: ${jobData.strategy_name}`)
+              console.log(`   Runtime: ${jobData.runtime_minutes} minutes`)
+              console.log(`   Z-Statistic: ${jobData.results?.z_statistic?.toFixed(4)}`)
+              console.log(`   P-Value: ${jobData.results?.p_value?.toFixed(4)}`)
+              console.log(`   Decision: ${jobData.results?.hypothesis_decision}`)
+              console.log(`   Avg Validation Return: ${jobData.results?.avg_validation_return?.toFixed(2)}%`)
+
+              // Log plot files if available
+              if (jobData.results?.plot_files) {
+                console.log('📈 Plot Files:')
+                Object.entries(jobData.results.plot_files).forEach(([type, info]: [string, any]) => {
+                  console.log(`   ${type}: ${info.filename} (${(info.size / 1024 / 1024).toFixed(2)} MB)`)
+                })
+              }
+
+              // Log cost information
+              console.log('💰 Cost Information:')
+              console.log(`   Estimated: $${jobData.estimated_cost}`)
+              console.log(`   Actual: $${jobData.actual_cost}`)
+              console.log(`   Droplet Size: ${jobData.droplet_size}`)
+
+              const decision = jobData.results?.hypothesis_decision || 'Completed'
+              const pValue = jobData.results?.p_value
+              const isProfitable = pValue && pValue < 0.05
+
+              showToast(
+                `Walk Forward Optimization completed! ${isProfitable ? '✅ Profitable' : '⚠️ ' + decision.substring(0, 50)}`,
+                isProfitable ? 'success' : 'warning'
+              )
+            } else {
+              showToast('Optimization completed successfully!', 'success')
+            }
+          } else if (jobData.status === 'Failed' || jobData.status === 'failed') {
+            const errorMsg = formatErrorForDisplay(jobData.error_message || jobData, 'Unknown error')
+            console.log(`❌ Droplet job failed:`, errorMsg)
+            showToast(`Optimization failed: ${errorMsg}`, 'error')
+          } else if (jobData.status === 'Cancelled' || jobData.status === 'cancelled') {
+            console.log(`⚠️ Droplet job cancelled`)
+            showToast('Optimization job was cancelled', 'warning')
+          }
+
+          // Ensure polling has fully stopped
+          console.log(`✅ Polling cleanup complete for job ${jobId}`)
+          return // Exit the interval callback after final status
+        }
+      } catch (error) {
+        isPollingRequestPendingRef.current = false
+        console.error(`❌ Error polling droplet job status for job ${jobId}:`, error)
+
+        // Stop polling on error to prevent infinite error loops
+        stopped = true
+        clearInterval(interval)
+        setDropletPollingInterval(null)
+        setIsPollingActive(false)
+
+        console.log(`🛑 Polling stopped due to error for job ${jobId}`)
+      }
+    }, 60000) // Poll every 1 minute (60 seconds)
+
+    setDropletPollingInterval(interval)
+  }
+
   /**
    * Step 1: Handle optimization with droplets - show cost dialog
    */
@@ -1435,53 +2419,127 @@ export default function StrategyTestingPage() {
     setShowCostDialog(true)
   }
 
+  // Cleanup droplet polling interval on unmount
+  useEffect(() => {
+    return () => {
+      if (dropletPollingInterval) {
+        clearInterval(dropletPollingInterval)
+        setIsPollingActive(false)
+        isPollingRequestPendingRef.current = false
+        hasFinalStatusRef.current = false
+      }
+    }
+  }, [dropletPollingInterval])
+
+  /**
+   * Open walk forward plot in new tab or display in iframe
+   */
+  const openWalkForwardPlot = (plotUrl: string, plotType: string) => {
+    console.log(`Opening ${plotType} plot: ${plotUrl}`)
+    window.open(plotUrl, '_blank')
+  }
+
+  /**
+   * View walk forward droplet results
+   */
+  const viewWalkForwardDropletResults = async (jobId: number) => {
+    try {
+      const jobData = await getWalkForwardDropletResults(jobId)
+      console.log('📊 Walk Forward Droplet Results:', jobData)
+
+      setDropletJobResults(jobData.results)
+
+      // Display results summary
+      if (jobData.results) {
+        console.log('📈 Results Summary:')
+        console.log(`   Status: ${jobData.status}`)
+        console.log(`   Runtime: ${jobData.runtime_minutes} minutes`)
+        console.log(`   Z-Statistic: ${jobData.results.z_statistic?.toFixed(4)}`)
+        console.log(`   P-Value: ${jobData.results.p_value?.toFixed(4)}`)
+        console.log(`   Decision: ${jobData.results.hypothesis_decision}`)
+        console.log(`   Avg Validation Return: ${jobData.results.avg_validation_return?.toFixed(2)}%`)
+
+        // Display plot URLs
+        if (jobData.results.plot_urls) {
+          console.log('📈 Available Plots:')
+          Object.entries(jobData.results.plot_urls).forEach(([type, url]: [string, any]) => {
+            console.log(`   ${type}: ${url}`)
+          })
+        }
+
+        showToast('Walk forward results loaded successfully!', 'success')
+      }
+    } catch (error: any) {
+      console.error('Error fetching walk forward droplet results:', error)
+      showToast(`Failed to load results: ${error.message}`, 'error')
+    }
+  }
+
   /**
    * Step 2 & 3: Handle cost confirmation and create optimization job
    */
   const handleCostConfirmation = async () => {
     setShowCostDialog(false)
-    
+
     if (!parsedStatement) {
       showToast("Strategy statement is missing or not parsed!", 'error')
       return
     }
 
-    if (requiredTimeframes.length > uploadedFiles.length) {
+    // Only check for files if NOT using MetaAPI
+    if (!useMetaAPI && requiredTimeframes.length > uploadedFiles.length) {
       showToast("Not enough files uploaded for the required timeframes", 'error')
       return
     }
 
     try {
-      // Prepare files
-      const timeframeFiles: Record<string, File> = {}
-      requiredTimeframes.forEach((timeframe, index) => {
-        const filename = uploadedFiles[index]
-        if (filename && fileObjects[filename]) {
-          timeframeFiles[timeframe] = fileObjects[filename]
-        }
-      })
+      setIsCreatingOptimizationJob(true)
+      // Prepare files only if NOT using MetaAPI
+      let timeframeFiles: Record<string, File> = {}
 
-      // Add unmatched remaining files
-      uploadedFiles.forEach((filename) => {
-        if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
-          const key = filename.split(".")[0]
-          timeframeFiles[key] = fileObjects[filename]
-        }
-      })
+      if (!useMetaAPI) {
+        requiredTimeframes.forEach((timeframe, index) => {
+          const filename = uploadedFiles[index]
+          if (filename && fileObjects[filename]) {
+            timeframeFiles[timeframe] = fileObjects[filename]
+          }
+        })
+
+        // Add unmatched remaining files
+        uploadedFiles.forEach((filename) => {
+          if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
+            const key = filename.split(".")[0]
+            timeframeFiles[key] = fileObjects[filename]
+          }
+        })
+      }
 
       // Get optimisation form settings
       const optimisationFormString = localStorage.getItem("optimisation_form")
       let parametersObject: Record<string, any> = {}
       let constraintsArray: string[] = []
-      
+
       if (optimisationFormString) {
         try {
           const optimisationForm = JSON.parse(optimisationFormString)
           parametersObject = optimisationForm.Parameters || {}
           constraintsArray = optimisationForm.Constraints || []
+
+          // Debug logging for parameters
+          console.log("🔍 Optimisation form loaded from localStorage:", optimisationForm)
+          console.log("🔍 Parameters object:", parametersObject)
+          console.log("🔍 Parameters keys:", Object.keys(parametersObject))
+
+          if (Object.keys(parametersObject).length === 0) {
+            console.warn("⚠️ WARNING: Parameters object is empty! User needs to configure optimization parameters in Advanced Settings.")
+            showToast("No optimization parameters configured. Please set parameters in Advanced Settings.", 'warning')
+          }
         } catch (error) {
           console.error("Error parsing optimisation_form from localStorage:", error)
         }
+      } else {
+        console.warn("⚠️ WARNING: No optimisation_form found in localStorage!")
+        showToast("Optimization settings not found. Please configure parameters in Advanced Settings.", 'warning')
       }
 
       // Construct optimisation statement
@@ -1510,21 +2568,16 @@ export default function StrategyTestingPage() {
         optimiser_parameters: optimiserParameters,
       }
 
+      // Validate strategy_id is available
+      if (!strategy_id || isNaN(Number(strategy_id))) {
+        throw new Error("Strategy ID is required to create an optimization job")
+      }
+
       // Prepare API call parameters
+      // ❌ DO NOT send statement - backend fetches from database!
       const apiParams: any = {
-        statement: optimisationStatement,
-        files: timeframeFiles,
-        optimization_type: optimizationType,
-      }
-
-      // Add CSV file explicitly (use the first uploaded file)
-      const firstFile = Object.values(timeframeFiles)[0]
-      if (firstFile) {
-        apiParams.csvFile = firstFile
-      }
-
-      if (strategy_id && !isNaN(Number(strategy_id))) {
-        apiParams.strategy_statement_id = Number(strategy_id)
+        strategy_statement_id: Number(strategy_id), // ✅ REQUIRED - backend fetches strategy from DB
+        type: optimizationType, // ✅ REQUIRED - 'regular' or 'walk_forward'
       }
 
       // Add walk forward settings if needed
@@ -1545,124 +2598,150 @@ export default function StrategyTestingPage() {
           }
         }
 
-        apiParams.walk_forward_setting = walkForwardSettings
+        // Backend expects 'walk_forward_settings' (plural)
+        apiParams.walk_forward_settings = walkForwardSettings
+        console.log("🔍 Walk forward settings for droplet:", walkForwardSettings)
+      }
+
+      // Use MetaAPI or file upload based on the mode
+      if (useMetaAPI) {
+        // Use MetaAPI for optimization job
+        const symbol = metaAPIConfig?.symbol || "XAUUSD"
+        const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
+        const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
+
+        console.log("🔍 Using trading symbol for MetaAPI optimization job:", symbol)
+        console.log("🔍 MetaAPI Token available:", !!token)
+        console.log("🔍 MetaAPI Account ID available:", !!accountId)
+
+        if (!token || !accountId) {
+          throw new Error("MetaAPI credentials not configured. Please check environment variables.")
+        }
+
+        apiParams.metaapi_token = token
+        apiParams.metaapi_account_id = accountId
+        apiParams.symbol = symbol
+      } else {
+        // Use file upload for optimization job
+        apiParams.files = timeframeFiles
+
+        // Add CSV file explicitly (use the first uploaded file)
+        const firstFile = Object.values(timeframeFiles)[0]
+        if (firstFile) {
+          apiParams.csvFile = firstFile
+        }
       }
 
       // Step 3: Create optimization job
+      console.log("📤 Final API params being sent:", {
+        ...apiParams,
+        files: apiParams.files ? Object.keys(apiParams.files) : undefined,
+        metaapi_token: apiParams.metaapi_token ? '***' : undefined
+      })
+
       const jobResult = await createOptimizationJob(apiParams)
-      
       console.log("Optimization job created:", jobResult)
-      
-      setCurrentOptimizationJob(jobResult)
-      setShowJobStatus(true)
-      
-      // Step 4: Start polling for job status
-      startJobPolling(jobResult.job_id)
-      
-      showToast("Optimization job created successfully!", 'success')
-      
+
+      // Backend returns { status: 'creating', run_id: 'droplet_272_xxx' }
+      // The run_id is the job identifier
+      const runId = jobResult.run_id
+      const jobId = jobResult.job_id || jobResult.id // Try multiple fields
+
+      if (!runId) {
+        throw new Error("No run_id returned from optimization job creation")
+      }
+
+      // Use run_id as the job identifier if job_id is not available
+      const jobIdentifier = jobId || runId
+
+      setDropletJobId(jobId || null)
+      setDropletJobStatus(jobResult.status || 'creating')
+      // Store run_id for cancel
+      optimisationRunIdRef.current = runId
+
+      showToast(`Optimization job created! Redirecting to results page...`, 'success')
+
+      // Redirect immediately to optimization results page
+      // The results page will handle polling and showing progress
+      // Use run_id as the job identifier in the URL
+      setTimeout(() => {
+        router.push(`/optimization-results?job_id=${jobIdentifier}&type=droplet`)
+      }, 500)
+
     } catch (error: any) {
+      console.error("Error creating optimization job:", error)
+
       // Error Handling: 403, 400, 500, Network errors
       if (error.message.includes('401') || error.message.includes('403')) {
         showToast("Authentication failed. Please login again.", 'error')
         // Redirect to login
         router.push('/auth')
       } else if (error.message.includes('400')) {
-        showToast("Invalid parameters: " + (error.message || "Unknown error"), 'error')
+        // Check if this is a MetaAPI-related error
+        const errorMessage = error.message || "Unknown error"
+        const isMetaAPIError = useMetaAPI && metaAPIConfig && (
+          errorMessage.toLowerCase().includes("symbol") ||
+          errorMessage.toLowerCase().includes("timeframe") ||
+          errorMessage.toLowerCase().includes("metaapi") ||
+          errorMessage.toLowerCase().includes("candles") ||
+          errorMessage.toLowerCase().includes("broker")
+        )
+
+        if (isMetaAPIError) {
+          // Extract required timeframes from the strategy
+          const requiredTimeframes = parsedStatement?.strategy
+            ?.filter((step: any) => step.function && step.vars && step.vars.timeframe)
+            .map((step: any) => step.vars.timeframe) || []
+
+          // Show detailed MetaAPI debug modal
+          setMetaAPIError({
+            message: errorMessage,
+            details: error,
+            symbol: metaAPIConfig?.symbol || parsedStatement?.instrument,
+            timeframes: requiredTimeframes,
+          })
+          setShowMetaAPIDebugModal(true)
+        } else {
+          showToast("Invalid parameters: " + errorMessage, 'error')
+        }
       } else if (error.message.includes('500')) {
         showToast("Server error. Please try again later.", 'error')
       } else {
-        showToast("Connection failed: " + (error.message || "Unknown error"), 'error')
-      }
-      console.error("Error creating optimization job:", error)
-    }
-  }
+        // Check if this is a MetaAPI-related error for connection failures
+        const errorMessage = error.message || "Unknown error"
+        const isMetaAPIError = useMetaAPI && metaAPIConfig && (
+          errorMessage.toLowerCase().includes("symbol") ||
+          errorMessage.toLowerCase().includes("timeframe") ||
+          errorMessage.toLowerCase().includes("metaapi") ||
+          errorMessage.toLowerCase().includes("candles") ||
+          errorMessage.toLowerCase().includes("broker")
+        )
 
-  /**
-   * Step 4: Start job status polling (every 5 seconds)
-   */
-  const startJobPolling = (jobId: string) => {
-    // Clear any existing polling
-    if (jobPollingInterval) {
-      clearInterval(jobPollingInterval)
-      setJobPollingInterval(null)
-    }
+        if (isMetaAPIError) {
+          // Extract required timeframes from the strategy
+          const requiredTimeframes = parsedStatement?.strategy
+            ?.filter((step: any) => step.function && step.vars && step.vars.timeframe)
+            .map((step: any) => step.vars.timeframe) || []
 
-    const interval = setInterval(async () => {
-      try {
-        const jobStatus = await getOptimizationJob(jobId)
-        setCurrentOptimizationJob(jobStatus)
-        
-        // Stop polling when job is finished
-        if (['completed', 'failed', 'cancelled'].includes(jobStatus.status)) {
-          clearInterval(interval)
-          setJobPollingInterval(null)
-          
-          if (jobStatus.status === 'completed') {
-            showToast("Optimization completed successfully!", 'success')
-            
-            // Step 5: Display results
-            if (jobStatus.result) {
-              setOptimisationResult(jobStatus.result)
-              setShowOptimisationResults(true)
-              setActiveTab("optimisation")
-              
-              if (jobStatus.result.heatmap_plot_html) {
-                setPlotHeatmapHtml(jobStatus.result.heatmap_plot_html)
-              }
-              if (jobStatus.result.trades_plot_html) {
-                setPlotHtml(jobStatus.result.trades_plot_html)
-              }
-            }
-          } else if (jobStatus.status === 'failed') {
-            showToast("Optimization failed: " + (jobStatus.error_message || "Unknown error"), 'error')
-          } else if (jobStatus.status === 'cancelled') {
-            showToast("Optimization was cancelled", 'warning')
-          }
+          // Show detailed MetaAPI debug modal
+          setMetaAPIError({
+            message: errorMessage,
+            details: error,
+            symbol: metaAPIConfig?.symbol || parsedStatement?.instrument,
+            timeframes: requiredTimeframes,
+          })
+          setShowMetaAPIDebugModal(true)
+        } else {
+          showToast("Connection failed: " + errorMessage, 'error')
         }
-      } catch (error) {
-        console.error("Error polling job status:", error)
-        // Don't stop polling on error, continue trying
       }
-    }, 5000) // Poll every 5 seconds
-
-    setJobPollingInterval(interval)
-  }
-
-  /**
-   * Step 6: Cancel optimization job
-   */
-  const handleCancelOptimizationJob = async () => {
-    if (!currentOptimizationJob?.job_id) return
-    
-    try {
-      await cancelOptimizationJob(currentOptimizationJob.job_id)
-      showToast("Optimization job cancelled", 'warning')
-      
-      // Stop polling
-      if (jobPollingInterval) {
-        clearInterval(jobPollingInterval)
-        setJobPollingInterval(null)
-      }
-      
-      // Update job status
-      setCurrentOptimizationJob({
-        ...currentOptimizationJob,
-        status: 'cancelled'
-      })
-    } catch (error: any) {
-      showToast("Failed to cancel optimization job: " + (error.message || "Unknown error"), 'error')
+    } finally {
+      setIsCreatingOptimizationJob(false)
+      setIsLoading2(false)
+      optimisationRunIdRef.current = null
     }
   }
 
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => {
-      if (jobPollingInterval) {
-        clearInterval(jobPollingInterval)
-      }
-    }
-  }, [jobPollingInterval])
 
   return (
     <AuthGuard>
@@ -1738,9 +2817,8 @@ export default function StrategyTestingPage() {
                 {["strategy", "backtest", "optimisation", "properties"].map((tab) => (
                   <button
                     key={tab}
-                    className={`flex-1 py-3 text-center font-medium ${
-                      activeTab === tab ? "bg-[#141721] text-[#85e1fe]" : "bg-[#1A1D2D] text-gray-400"
-                    }`}
+                    className={`flex-1 py-3 text-center font-medium ${activeTab === tab ? "bg-[#141721] text-[#85e1fe]" : "bg-[#1A1D2D] text-gray-400"
+                      }`}
                     onClick={() => handleTabChange(tab)}
                   >
                     {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -1750,6 +2828,21 @@ export default function StrategyTestingPage() {
 
               {/* Content area with overflow to allow scrolling */}
               <div className="flex-1 overflow-y-auto pb-[160px] bg-[#000000] ml-[63px]">
+                {/* Back Button - Sticky */}
+                {strategy_id && (
+                  <div className="sticky top-4 z-50 w-fit ml-5 mt-4 md:ml-10">
+                    <button
+                      onClick={() => {
+                        router.push(`/strategy-builder/${strategy_id}`)
+                      }}
+                      className="flex items-center gap-2 bg-[#1A1D2D] hover:bg-[#2B2E38] text-white px-4 py-2 rounded-full transition-colors border border-gray-700 shadow-lg"
+                      title="Back to Strategy Editor"
+                    >
+                      <ArrowLeft className="w-4 h-4" />
+                      <span className="hidden sm:inline">Back to Editor</span>
+                    </button>
+                  </div>
+                )}
                 {activeTab === "strategy" && (
                   <div className="p-6 space-y-6">
                     {/* Data Source Toggle */}
@@ -1778,19 +2871,115 @@ export default function StrategyTestingPage() {
                         </label>
                       </div>
                       <p className="text-sm text-gray-400 mt-2">
-                        {useMetaAPI 
+                        {useMetaAPI
                           ? "Use MetaAPI to fetch real market data automatically"
                           : "Upload CSV files manually for backtesting"
                         }
                       </p>
                     </div>
 
+                    {/* Previous Backtests Button - Always Visible */}
+                    <div className="mb-4 flex justify-end">
+                      <button
+                        onClick={() => setShowBacktestHistory(true)}
+                        className="bg-gray-600 hover:bg-gray-700 text-white rounded-full px-6 py-3 text-sm font-medium"
+                      >
+                        Previous Backtests
+                      </button>
+                    </div>
+
                     {/* MetaAPI Configuration or File Upload */}
                     {useMetaAPI ? (
-                      <MetaAPIConfig
-                        onConfigChange={handleMetaAPIConfigChange}
-                        initialConfig={metaAPIConfig || undefined}
-                      />
+                      <div className="space-y-3">
+                        <MetaAPIConfig
+                          onConfigChange={handleMetaAPIConfigChange}
+                          initialConfig={metaAPIConfig || undefined}
+                        />
+
+                        {/* Timezone Selector */}
+                        <div className="bg-black border border-gray-700 rounded-lg p-4">
+                          <label className="block text-white font-medium mb-2">Timezone</label>
+                          <select
+                            value={timezone}
+                            onChange={(e) => {
+                              setTimezone(e.target.value)
+                              // Update TradingSession immediately when timezone changes
+                              if (parsedStatement?.TradingSession) {
+                                const updated = {
+                                  ...parsedStatement,
+                                  TradingSession: {
+                                    ...parsedStatement.TradingSession,
+                                    Timezone: e.target.value
+                                  }
+                                }
+                                setParsedStatement(updated)
+                                localStorage.setItem("savedStrategy", JSON.stringify(updated))
+                              }
+                            }}
+                            className="w-full bg-gray-900 border border-gray-600 text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#85e1fe]"
+                          >
+                            <option value="UTC">UTC</option>
+                            <option value="Europe/London">Europe/London</option>
+                            <option value="America/New_York">EST (Eastern Standard Time)</option>
+                            <option value="Asia/Kolkata">Asia/Kolkata</option>
+                          </select>
+                          <p className="text-xs text-gray-500 mt-1">
+                            Select the timezone for trading session configuration
+                          </p>
+                        </div>
+
+                        <div className="flex gap-3">
+                          {/* <button
+                            className="bg-[#141721] hover:bg-[#2B2E38] text-white rounded-full px-4 py-2 text-sm"
+                            onClick={async () => {
+                              try {
+                                const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
+                                const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
+                                if (!token || !accountId) {
+                                  showToast('MetaAPI credentials not configured', 'error')
+                                  return
+                                }
+                                const res = await getAllBrokerSymbols({ metaapi_token: token, metaapi_account_id: accountId })
+                                const gold = res?.results?.gold_silver_symbols?.[0] ||
+                                  (Array.isArray(res?.results?.all_symbols) ? res.results.all_symbols.find((s: any) => typeof s.symbol === 'string' && s.symbol.toUpperCase().includes('XAU')) : undefined)
+                                if (gold?.symbol) {
+                                  const updated = { token, accountId, symbol: gold.symbol }
+                                  setMetaAPIConfig(updated as any)
+                                  showToast(`Detected broker gold symbol: ${gold.symbol}`, 'success')
+                                } else {
+                                  showToast('No gold symbols found. Try without filter.', 'warning')
+                                }
+                              } catch (e: any) {
+                                showToast(`Failed to fetch symbols: ${e.message}`, 'error')
+                              }
+                            }}
+                          >
+                            Find Broker Symbols (Gold)
+                          </button> */}
+                          {/* <button
+                            className="bg-[#141721] hover:bg-[#2B2E38] text-white rounded-full px-4 py-2 text-sm"
+                            onClick={async () => {
+                              try {
+                                const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
+                                const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
+                                const symbol = metaAPIConfig?.symbol || 'XAUUSD'
+                                if (!token || !accountId) {
+                                  showToast('MetaAPI credentials not configured', 'error')
+                                  return
+                                }
+                                const res = await getSymbolTimeframes({ metaapi_token: token, metaapi_account_id: accountId, symbol })
+                                const available = res?.results?.available_timeframes || []
+                                const unavailable = res?.results?.unavailable_timeframes || []
+                                showToast(`Available: ${available.join(', ')} | Unavailable: ${unavailable.join(', ')}`, 'success')
+                              } catch (e: any) {
+                                showToast(`Timeframe check failed: ${e.message}`, 'error')
+                              }
+                            }}
+                          >
+                            Check Timeframes
+                          </button> */}
+                        </div>
+                      </div>
                     ) : (
                       <StrategyTab
                         selectedStrategy={selectedStrategy}
@@ -1825,9 +3014,9 @@ export default function StrategyTestingPage() {
                     currency={currency}
                     setCurrency={setCurrency}
                     leverage={leverage}
-                    leverageSliderValue={leverageSliderValue}
-                    handleSliderChange={handleSliderChange}
-                    getThumbPosition={getThumbPosition}
+                    handleLeverageChange={handleLeverageChange}
+                    customLeverage={customLeverage}
+                    handleCustomLeverageChange={handleCustomLeverageChange}
                     selectedTradingMode={selectedTradingMode}
                     setSelectedTradingMode={setSelectedTradingMode}
                     maxTrades={maxTrades}
@@ -1838,14 +3027,22 @@ export default function StrategyTestingPage() {
                     setLot={setLot}
                     commission={commission}
                     setCommission={setCommission}
+                    positionSize={positionSize}
+                    setPositionSize={setPositionSize}
                     assetType={assetType}
                     setAssetType={setAssetType}
                     showTradesSummary={showTradesSummary}
                     onShowTradesSummary={() => setShowTradesSummary(true)}
                     initialTradingSession={parsedStatement?.TradingSession}
+                    timezone={timezone}
                     onTradingSessionSave={(session) => {
                       try {
-                        const updated = { ...(parsedStatement || {}), TradingSession: session }
+                        // Ensure timezone from state is included in the session
+                        const sessionWithTimezone = {
+                          ...session,
+                          Timezone: timezone
+                        }
+                        const updated = { ...(parsedStatement || {}), TradingSession: sessionWithTimezone }
                         setParsedStatement(updated)
                         localStorage.setItem("savedStrategy", JSON.stringify(updated))
                         // optional toast
@@ -1863,28 +3060,14 @@ export default function StrategyTestingPage() {
 
                 {activeTab === "optimisation" && showOptimisationResults && optimisationResult && (
                   <div className="p-6 bg-[#000000] text-white min-h-[600px]">
-                    {/* Optimisation response info (message/stdout/stderr) */}
+                    {/* Optimisation response info (message/stdout/stderr) - Enhanced Error Display */}
                     {(optimisationMessage || optimisationStdout || optimisationStderr) && (
-                      <div className="mb-4 p-4 bg-[#141721] rounded-md border border-gray-700">
-                        {optimisationMessage && (
-                          <div className="mb-2">
-                            <span className="font-semibold text-white mr-2">Message:</span>
-                            <span className="text-gray-300 break-words">{optimisationMessage}</span>
-                          </div>
-                        )}
-                        {optimisationStdout && (
-                          <div className="mb-2">
-                            <div className="font-semibold text-white mb-1">Stdout:</div>
-                            <pre className="whitespace-pre-wrap break-words text-gray-300 text-xs bg-[#0e1018] p-3 rounded-md border border-gray-800 max-h-60 overflow-auto">{optimisationStdout}</pre>
-                          </div>
-                        )}
-                        {optimisationStderr && (
-                          <div className="mb-2">
-                            <div className="font-semibold text-white mb-1">Stderr:</div>
-                            <pre className="whitespace-pre-wrap break-words text-gray-300 text-xs bg-[#0e1018] p-3 rounded-md border border-gray-800 max-h-60 overflow-auto">{optimisationStderr}</pre>
-                          </div>
-                        )}
-                      </div>
+                      <OptimizationErrorDisplay
+                        message={optimisationMessage}
+                        stdout={optimisationStdout}
+                        stderr={optimisationStderr}
+                        className="mb-4"
+                      />
                     )}
 
                     {/* Top-level tabs: Results | Graph | Report */}
@@ -1917,46 +3100,62 @@ export default function StrategyTestingPage() {
                             <thead>
                               <tr className="bg-[#1A1D2D] text-white">
                                 <th className="px-2 py-2">#</th>
-                                <th className="px-2 py-2">Profit</th>
-                                <th className="px-2 py-2">Total trades</th>
-                                <th className="px-2 py-2">Profit factor</th>
-                                <th className="px-2 py-2">Expected Pay</th>
-                                <th className="px-2 py-2">Drawdown $</th>
-                                <th className="px-2 py-2">Drawdown %</th>
-                                <th className="px-2 py-2">Win Rate</th>
-                                <th className="px-2 py-2">Inputs</th>
+                                <th className="px-2 py-2">Return [%]</th>
+                                <th className="px-2 py-2">Equity Final [$]</th>
+                                <th className="px-2 py-2"># Trades</th>
+                                <th className="px-2 py-2">Win Rate [%]</th>
+                                <th className="px-2 py-2">Profit Factor</th>
+                                <th className="px-2 py-2">Max. Drawdown [%]</th>
+                                <th className="px-2 py-2">Sharpe Ratio</th>
+                                <th className="px-2 py-2">Parameters</th>
                                 <th className="px-2 py-2"> </th>
                               </tr>
                             </thead>
                             <tbody>
-                              {(optimisationResult.full_optimization_results || optimisationResult.table || []).map((row: any, idx: number) => (
-                                <tr
-                                  key={idx}
-                                  className={`bg-[#141721] text-white cursor-pointer ${selectedOptimisationRow === row ? 'bg-[#23263a]' : ''}`}
-                                  onClick={() => {
-                                    setSelectedOptimisationRow(row);
-                                    setOptimisationTab('report');
-                                  }}
-                                >
-                                  <td className="px-2 py-2">{idx + 1}</td>
-                                  <td className="px-2 py-2">{row.profit}</td>
-                                  <td className="px-2 py-2">{row.total_trades}</td>
-                                  <td className="px-2 py-2">{row.profit_factor}</td>
-                                  <td className="px-2 py-2">{row.expected_pay}</td>
-                                  <td className="px-2 py-2">{row.drawdown_dollar}</td>
-                                  <td className="px-2 py-2">{row.drawdown_percent}</td>
-                                  <td className="px-2 py-2">{row.win_rate_percent || row.win_rate || '-'}</td>
-                                  <td className="px-2 py-2 max-w-[200px] truncate" title={row.inputs}>{row.inputs}</td>
-                                  <td className="px-2 py-2 text-right">
-                                    <button
-                                      className="text-[#85e1fe] hover:underline text-xs"
-                                      onClick={e => { e.stopPropagation(); setSelectedOptimisationRow(row); setOptimisationTab('report'); }}
-                                    >
-                                      View Report
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))}
+                              {(optimisationResult.convergence_data || optimisationResult.full_optimization_results || optimisationResult.table || []).map((row: any, idx: number) => {
+                                // Extract parameters (all fields that are not standard metrics)
+                                const standardFields = ['Return [%]', 'Equity Final [$]', '# Trades', 'Win Rate [%]',
+                                  'Profit Factor', 'Max. Drawdown [%]', 'Sharpe Ratio', 'Sortino Ratio', 'Calmar Ratio',
+                                  'Return (Ann.) [%]', 'Volatility (Ann.) [%]', 'Start', 'End', 'Duration', 'SQN',
+                                  'Exposure Time [%]', 'Equity Peak [$]', 'Avg. Trade [%]', 'Best Trade [%]',
+                                  'Worst Trade [%]', 'Avg. Drawdown [%]', 'Avg. Drawdown Duration', 'Max. Drawdown Duration',
+                                  'Avg. Trade Duration', 'Max. Trade Duration', 'Buy & Hold Return [%]', 'Expectancy [%]',
+                                  'Unnamed: 0', 'generation'];
+
+                                const parameters = Object.keys(row)
+                                  .filter(key => !standardFields.includes(key))
+                                  .map(key => `${key}=${row[key]}`)
+                                  .join(', ');
+
+                                return (
+                                  <tr
+                                    key={idx}
+                                    className={`bg-[#141721] text-white cursor-pointer hover:bg-[#1e2132] ${selectedOptimisationRow === row ? 'bg-[#23263a]' : ''}`}
+                                    onClick={() => {
+                                      setSelectedOptimisationRow(row);
+                                      setOptimisationTab('report');
+                                    }}
+                                  >
+                                    <td className="px-2 py-2">{idx + 1}</td>
+                                    <td className="px-2 py-2">{row['Return [%]']?.toFixed(2) || row.profit || '-'}</td>
+                                    <td className="px-2 py-2">{row['Equity Final [$]']?.toFixed(2) || '-'}</td>
+                                    <td className="px-2 py-2">{row['# Trades'] || row.total_trades || '-'}</td>
+                                    <td className="px-2 py-2">{row['Win Rate [%]']?.toFixed(2) || row.win_rate_percent || row.win_rate || '-'}</td>
+                                    <td className="px-2 py-2">{row['Profit Factor']?.toFixed(2) || row.profit_factor || '-'}</td>
+                                    <td className="px-2 py-2">{row['Max. Drawdown [%]']?.toFixed(2) || row.drawdown_percent || '-'}</td>
+                                    <td className="px-2 py-2">{row['Sharpe Ratio']?.toFixed(2) || '-'}</td>
+                                    <td className="px-2 py-2 max-w-[200px] truncate" title={parameters || row.inputs}>{parameters || row.inputs || '-'}</td>
+                                    <td className="px-2 py-2 text-right">
+                                      <button
+                                        className="text-[#85e1fe] hover:underline text-xs"
+                                        onClick={e => { e.stopPropagation(); setSelectedOptimisationRow(row); setOptimisationTab('report'); }}
+                                      >
+                                        View Report
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                             </tbody>
                           </table>
                         </div>
@@ -1966,9 +3165,40 @@ export default function StrategyTestingPage() {
                     {/* Graph Tab */}
                     {optimisationTab === 'graph' && (
                       <div>
+                        {/* Convergence Plot */}
+                        {optimisationResult.convergence_data && optimisationResult.convergence_data.length > 0 && (() => {
+                          const plotHTML = generateConvergencePlotHTML(optimisationResult.convergence_data);
+                          return plotHTML ? (
+                            <div className="mb-8">
+                              <h3 className="mb-2 text-lg font-semibold text-white">Convergence Plot</h3>
+                              <iframe
+                                title="Convergence Plot"
+                                style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#0e1018" }}
+                                srcDoc={plotHTML}
+                              />
+                            </div>
+                          ) : null;
+                        })()}
+
+                        {/* Heatmap Plot */}
+                        {optimisationResult.optimization_heatmap_data && optimisationResult.optimization_heatmap_data.length > 0 && (() => {
+                          const plotHTML = generateHeatmapPlotHTML(optimisationResult.optimization_heatmap_data);
+                          return plotHTML ? (
+                            <div className="mb-8">
+                              <h3 className="mb-2 text-lg font-semibold text-white">Parameter Optimization Heatmap</h3>
+                              <iframe
+                                title="Optimization Heatmap"
+                                style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#0e1018" }}
+                                srcDoc={plotHTML}
+                              />
+                            </div>
+                          ) : null;
+                        })()}
+
+                        {/* Legacy plots - still show if available */}
                         {optimisationResult.heatmap_plot_html && (
                           <div className="mb-8">
-                            <h3 className="mb-2 text-lg font-semibold text-white">Scatter Plot</h3>
+                            <h3 className="mb-2 text-lg font-semibold text-white">Scatter Plot (Legacy)</h3>
                             <iframe
                               title="Scatter Plot"
                               style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#f8f8f8" }}
@@ -1986,6 +3216,16 @@ export default function StrategyTestingPage() {
                             />
                           </div>
                         )}
+
+                        {/* No data message */}
+                        {!optimisationResult.convergence_data &&
+                          !optimisationResult.optimization_heatmap_data &&
+                          !optimisationResult.heatmap_plot_html &&
+                          !optimisationResult.trades_plot_html && (
+                            <div className="text-center text-gray-400 py-8">
+                              No plot data available
+                            </div>
+                          )}
                       </div>
                     )}
 
@@ -2039,6 +3279,7 @@ export default function StrategyTestingPage() {
                       onShowWalkForwardResults={() => setShowWalkForwardOptimizationResults(true)}
                       onRunWalkForwardOptimisation={() => handleWalkForwardOptimisation(false)}
                       onRunWalkForwardOptimisationDroplets={() => handleOptimizationWithDroplets('walk_forward')}
+                      onCancelWalkForward={cancelWalkForward}
                       isLoading3={isLoading3}
                     />
                   </>
@@ -2064,10 +3305,10 @@ export default function StrategyTestingPage() {
                         width: (isLoading
                           ? `${Math.min(progress, 100)}%`
                           : isLoading2
-                          ? `${Math.min(progress2, 100)}%`
-                          : isLoading3
-                          ? `${Math.min(progress3, 100)}%`
-                          : "0%"),
+                            ? `${Math.min(progress2, 100)}%`
+                            : isLoading3
+                              ? `${Math.min(progress3, 100)}%`
+                              : "0%"),
                         opacity: (isLoading || isLoading2 || isLoading3) ? 1 : 0,
                       }}
                     ></div>
@@ -2077,29 +3318,40 @@ export default function StrategyTestingPage() {
                 {/* Action Buttons */}
                 <div className="p-4 flex gap-4">
                   <button
-                    className={`flex-1 py-3 rounded-full text-white transition-colors ${
-                      isLoading || (!useMetaAPI && (requiredTimeframes.length > uploadedFiles.length))
-                        ? 'bg-gray-600 cursor-not-allowed'
-                        : 'bg-[#141721] hover:bg-[#2B2E38]'
-                    }`}
-                    onClick={handleRunBacktest}
-                    disabled={isLoading || (!useMetaAPI && (requiredTimeframes.length > uploadedFiles.length))}
+                    className={`flex-1 py-3 rounded-full transition-colors ${isLoading
+                      ? 'bg-red-600 hover:bg-red-700 text-white font-semibold'
+                      : (!useMetaAPI && (requiredTimeframes.length > uploadedFiles.length))
+                        ? 'bg-gray-600 cursor-not-allowed text-gray-300'
+                        : (activeTab === 'strategy' || activeTab === 'backtest')
+                          ? 'bg-[#85e1fe] text-black hover:bg-[#6bcae2] font-semibold'
+                          : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
+                      }`}
+                    onClick={isLoading ? cancelBacktestRun : handleRunBacktest}
+                    disabled={!isLoading && (!useMetaAPI && (requiredTimeframes.length > uploadedFiles.length))}
                   >
-                    {isLoading ? 'Running...' : 'Run Backtest'}
+                    {isLoading ? 'Cancel Backtest' : 'Run Backtest'}
                   </button>
                   <button
-                    onClick={() => handleOptimisation(false)}
-                    className="flex-1 py-3 bg-[#141721] rounded-full text-white hover:bg-[#2B2E38]"
-                    disabled={isLoading2}
+                    onClick={isLoading2 ? cancelOptimisation : () => handleOptimisation(false)}
+                    className={`flex-1 py-3 rounded-full transition-colors ${isLoading2
+                      ? 'bg-red-600 hover:bg-red-700 text-white font-semibold'
+                      : (activeTab === 'optimisation' || activeTab === 'properties')
+                        ? 'bg-[#85e1fe] text-black hover:bg-[#6bcae2] font-semibold'
+                        : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
+                      }`}
                   >
-                    Run Optimisation (Legacy)
+                    {isLoading2 ? 'Cancel Optimisation' : 'Run Optimisation (Legacy)'}
                   </button>
                   <button
-                    onClick={() => handleOptimizationWithDroplets('regular')}
-                    className="flex-1 py-3 bg-[#85e1fe] text-black rounded-full hover:bg-[#6bcae2] font-semibold"
-                    disabled={isLoading2}
+                    onClick={isLoading2 || isCreatingOptimizationJob ? cancelOptimisation : () => handleOptimizationWithDroplets('regular')}
+                    className={`flex-1 py-3 rounded-full font-semibold transition-colors ${isLoading2 || isCreatingOptimizationJob
+                      ? 'bg-red-600 hover:bg-red-700 text-white'
+                      : (activeTab === 'optimisation' || activeTab === 'properties')
+                        ? 'bg-[#85e1fe] text-black hover:bg-[#6bcae2]'
+                        : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
+                      }`}
                   >
-                    Run Optimization (Droplets)
+                    {isLoading2 || isCreatingOptimizationJob ? 'Cancel Optimization' : 'Run Optimization (Droplets)'}
                   </button>
                 </div>
               </div>
@@ -2150,7 +3402,7 @@ export default function StrategyTestingPage() {
         )}
 
         {/* Loading Modal */}
-        
+
         {isChartExpanded && (
           <div className="fixed inset-0 bg-black bg-opacity-50 z-40" onClick={toggleChartExpansion} />
         )}
@@ -2179,14 +3431,14 @@ export default function StrategyTestingPage() {
             <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-6xl max-h-[80vh] overflow-hidden">
               <div className="flex justify-between items-center p-6 border-b border-gray-700">
                 <h2 className="text-2xl font-bold text-white">Optimization History</h2>
-                <button 
+                <button
                   onClick={() => setShowOptimizationHistory(false)}
                   className="text-gray-400 hover:text-white"
                 >
                   <X className="w-6 h-6" />
                 </button>
               </div>
-              
+
               <div className="p-6 overflow-y-auto max-h-[60vh]">
                 {optimizationResults.length === 0 ? (
                   <div className="text-center text-gray-400 py-8">
@@ -2209,12 +3461,11 @@ export default function StrategyTestingPage() {
                             </p>
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                              result.status === "completed" ? "bg-green-500 text-white" :
+                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${result.status === "completed" ? "bg-green-500 text-white" :
                               result.status === "running" ? "bg-yellow-500 text-black" :
-                              result.status === "failed" ? "bg-red-500 text-white" :
-                              "bg-gray-500 text-white"
-                            }`}>
+                                result.status === "failed" ? "bg-red-500 text-white" :
+                                  "bg-gray-500 text-white"
+                              }`}>
                               {result.status}
                             </span>
                             <button
@@ -2225,7 +3476,7 @@ export default function StrategyTestingPage() {
                             </button>
                           </div>
                         </div>
-                        
+
                         {result.status === "completed" && (
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                             <div className="text-center">
@@ -2254,7 +3505,7 @@ export default function StrategyTestingPage() {
                             </div>
                           </div>
                         )}
-                        
+
                         <div className="flex gap-2">
                           <button
                             onClick={() => viewOptimizationResult(result.id)}
@@ -2293,14 +3544,14 @@ export default function StrategyTestingPage() {
                 <h2 className="text-2xl font-bold text-white">
                   Optimization Result Details
                 </h2>
-                <button 
+                <button
                   onClick={() => setSelectedOptimizationResult(null)}
                   className="text-gray-400 hover:text-white"
                 >
                   <X className="w-6 h-6" />
                 </button>
               </div>
-              
+
               <div className="p-6 overflow-y-auto max-h-[60vh]">
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-6 mb-6">
                   <div className="text-center">
@@ -2340,7 +3591,7 @@ export default function StrategyTestingPage() {
                     </p>
                   </div>
                 </div>
-                
+
                 {selectedOptimizationResult.optimized_parameters && (
                   <div className="mb-6">
                     <h3 className="text-lg font-semibold text-white mb-3">Optimized Parameters</h3>
@@ -2351,7 +3602,7 @@ export default function StrategyTestingPage() {
                     </div>
                   </div>
                 )}
-                
+
                 {selectedOptimizationResult.trades_plot_html && (
                   <div className="mb-6">
                     <h3 className="text-lg font-semibold text-white mb-3">Trades Plot</h3>
@@ -2362,7 +3613,7 @@ export default function StrategyTestingPage() {
                     />
                   </div>
                 )}
-                
+
                 {selectedOptimizationResult.heatmap_plot_html && (
                   <div className="mb-6">
                     <h3 className="text-lg font-semibold text-white mb-3">Heatmap Plot</h3>
@@ -2429,22 +3680,19 @@ export default function StrategyTestingPage() {
           />
         )}
 
-        {/* Trades Summary Modal */}
-        {showTradesSummary && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-6xl max-h-[90vh] overflow-hidden">
-              <div className="p-6 overflow-y-auto max-h-[90vh]">
-                <TradesSummary
-                  tradesCsv={tradesData.tradesCsv}
-                  tradesCsvFilename={tradesData.tradesCsvFilename}
-                  tradesCsvDownloadUrl={tradesData.tradesCsvDownloadUrl}
-                  stdout={tradesData.stdout}
-                  stderr={tradesData.stderr}
-                  onClose={() => setShowTradesSummary(false)}
-                />
-              </div>
-            </div>
-          </div>
+        {/* Custom Strategy Backtest Results Modal */}
+        {showCustomStrategyBacktestResults && customStrategyBacktestResult && (
+          <CustomStrategyBacktestResults
+            result={customStrategyBacktestResult}
+            onClose={() => {
+              setShowCustomStrategyBacktestResults(false)
+              setCustomStrategyBacktestResult(null)
+            }}
+            onViewFullResults={() => {
+              setShowCustomStrategyBacktestResults(false)
+              router.push('/custom-backtest-results')
+            }}
+          />
         )}
 
         {/* Optimization Cost Dialog */}
@@ -2455,13 +3703,233 @@ export default function StrategyTestingPage() {
           optimizationType={optimizationType}
         />
 
-        {/* Optimization Job Status */}
-        <OptimizationJobStatus
-          isOpen={showJobStatus}
-          onClose={() => setShowJobStatus(false)}
-          job={currentOptimizationJob}
-          onCancel={handleCancelOptimizationJob}
-        />
+        {/* Optimization Job Creation Loading Modal */}
+        {isCreatingOptimizationJob && (
+          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+            <div className="bg-[#1A1D2D] rounded-lg shadow-lg p-8 max-w-md w-full">
+              <div className="flex flex-col items-center">
+                {/* Spinner */}
+                <div className="relative w-20 h-20 mb-6">
+                  <div className="absolute top-0 left-0 w-full h-full">
+                    <div className="w-20 h-20 border-4 border-gray-600 border-t-[#85e1fe] rounded-full animate-spin"></div>
+                  </div>
+                </div>
+
+                {/* Loading Text */}
+                <h3 className="text-xl font-semibold text-white mb-2">
+                  Creating Optimization Job
+                </h3>
+                <p className="text-gray-400 text-center">
+                  {optimizationType === 'walk_forward'
+                    ? 'Setting up walk forward optimization with droplets...'
+                    : 'Setting up regular optimization with droplets...'}
+                </p>
+                <p className="text-sm text-gray-500 text-center mt-2">
+                  Please wait, this may take a few moments
+                </p>
+                <button
+                  onClick={cancelOptimisation}
+                  className="mt-6 px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-full font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Backtest History Modal */}
+        {showBacktestHistory && (
+          <BacktestHistoryList
+            strategyId={strategy_id || ''}
+            onClose={() => setShowBacktestHistory(false)}
+          />
+        )}
+
+        {/* Walk Forward Droplet Results Modal */}
+        {dropletJobResults && dropletJobResults.results && (
+          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+            <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-5xl max-h-[90vh] overflow-hidden">
+              <div className="flex justify-between items-center p-6 border-b border-gray-700">
+                <div>
+                  <h2 className="text-2xl font-bold text-white">{dropletJobResults.strategy_name}</h2>
+                  <p className="text-gray-400 text-sm mt-1">{dropletJobResults.type}</p>
+                </div>
+                <button
+                  onClick={() => setDropletJobResults(null)}
+                  className="text-gray-400 hover:text-white"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="p-6 overflow-y-auto max-h-[75vh]">
+                {/* Hypothesis Testing Results */}
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold text-white mb-4">Hypothesis Testing</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-[#141721] rounded-lg p-4">
+                      <p className="text-gray-400 text-sm">Z-Statistic</p>
+                      <p className="text-white font-semibold text-lg">
+                        {dropletJobResults.results.z_statistic?.toFixed(4) || 'N/A'}
+                      </p>
+                    </div>
+                    <div className="bg-[#141721] rounded-lg p-4">
+                      <p className="text-gray-400 text-sm">P-Value</p>
+                      <p className="text-white font-semibold text-lg">
+                        {dropletJobResults.results.p_value?.toFixed(4) || 'N/A'}
+                      </p>
+                    </div>
+                    <div className="bg-[#141721] rounded-lg p-4">
+                      <p className="text-gray-400 text-sm">Avg Validation Return</p>
+                      <p className={`font-semibold text-lg ${(dropletJobResults.results.avg_validation_return || 0) > 0 ? 'text-green-500' : 'text-red-500'
+                        }`}>
+                        {dropletJobResults.results.avg_validation_return?.toFixed(2) || 'N/A'}%
+                      </p>
+                    </div>
+                    <div className="bg-[#141721] rounded-lg p-4">
+                      <p className="text-gray-400 text-sm">Decision</p>
+                      <p className={`font-semibold text-sm ${(dropletJobResults.results.p_value || 1) < 0.05 ? 'text-green-500' : 'text-yellow-500'
+                        }`}>
+                        {(dropletJobResults.results.p_value || 1) < 0.05 ? '✅ Profitable' : '⚠️ Not Profitable'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 bg-[#141721] rounded-lg p-4">
+                    <p className="text-gray-400 text-sm mb-2">Hypothesis Decision:</p>
+                    <p className="text-white text-sm">
+                      {dropletJobResults.results.hypothesis_decision || 'No decision available'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Plot Files Information */}
+                {dropletJobResults.results.plot_files && (
+                  <div className="mb-6">
+                    <h3 className="text-lg font-semibold text-white mb-4">
+                      Plot Files ({Object.keys(dropletJobResults.results.plot_files).length} available)
+                    </h3>
+                    <div className="grid grid-cols-1 gap-3">
+                      {Object.entries(dropletJobResults.results.plot_files).map(([type, info]: [string, any]) => (
+                        <div
+                          key={type}
+                          className="bg-[#141721] rounded-lg p-4 flex justify-between items-center"
+                        >
+                          <div>
+                            <p className="text-white font-semibold">
+                              {type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                            </p>
+                            <p className="text-gray-400 text-sm">{info.filename}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[#85e1fe] font-semibold">
+                              {(info.size / 1024 / 1024).toFixed(2)} MB
+                            </p>
+                            <p className="text-gray-400 text-xs">
+                              {info.available ? '✅ Available' : '❌ Not available'}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-gray-400 text-sm mt-3">
+                      ℹ️ Plots were generated on the droplet. Download from output directory: {dropletJobResults.results.output_dir}
+                    </p>
+                  </div>
+                )}
+
+                {/* Walk Forward Settings */}
+                {dropletJobResults.job_parameters?.walk_forward_settings && (
+                  <div className="mb-6">
+                    <h3 className="text-lg font-semibold text-white mb-4">Walk Forward Settings</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="bg-[#141721] rounded-lg p-4">
+                        <p className="text-gray-400 text-sm">Warmup Bars</p>
+                        <p className="text-white font-semibold">
+                          {dropletJobResults.job_parameters.walk_forward_settings.warmup_bars}
+                        </p>
+                      </div>
+                      <div className="bg-[#141721] rounded-lg p-4">
+                        <p className="text-gray-400 text-sm">Lookback Bars</p>
+                        <p className="text-white font-semibold">
+                          {dropletJobResults.job_parameters.walk_forward_settings.lookback_bars}
+                        </p>
+                      </div>
+                      <div className="bg-[#141721] rounded-lg p-4">
+                        <p className="text-gray-400 text-sm">Validation Bars</p>
+                        <p className="text-white font-semibold">
+                          {dropletJobResults.job_parameters.walk_forward_settings.validation_bars}
+                        </p>
+                      </div>
+                      <div className="bg-[#141721] rounded-lg p-4">
+                        <p className="text-gray-400 text-sm">Anchor</p>
+                        <p className="text-white font-semibold">
+                          {dropletJobResults.job_parameters.walk_forward_settings.anchor ? 'Yes' : 'No'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Job Information */}
+                <div className="bg-[#141721] rounded-lg p-4">
+                  <h3 className="text-lg font-semibold text-white mb-3">Job Information</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Job ID:</span>
+                        <span className="text-white font-semibold">{dropletJobResults.id}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Status:</span>
+                        <span className="text-green-500 font-semibold">{dropletJobResults.status}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Runtime:</span>
+                        <span className="text-white font-semibold">{dropletJobResults.runtime_minutes} min</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Droplet Size:</span>
+                        <span className="text-white font-semibold">{dropletJobResults.droplet_size}</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Estimated Cost:</span>
+                        <span className="text-white font-semibold">${dropletJobResults.estimated_cost}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Actual Cost:</span>
+                        <span className="text-green-500 font-semibold">${dropletJobResults.actual_cost}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Droplet ID:</span>
+                        <span className="text-white font-semibold">{dropletJobResults.droplet_id}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Completed At:</span>
+                        <span className="text-white font-semibold">
+                          {new Date(dropletJobResults.completed_at).toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MetaAPI Debug Modal */}
+        {showMetaAPIDebugModal && metaAPIError && metaAPIConfig && (
+          <MetaAPIDebugModal
+            isOpen={showMetaAPIDebugModal}
+            onClose={() => setShowMetaAPIDebugModal(false)}
+            error={metaAPIError}
+            metaAPIConfig={metaAPIConfig}
+          />
+        )}
       </div>
     </AuthGuard>
   )

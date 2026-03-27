@@ -2,6 +2,7 @@
 
 import React from 'react'
 import { X, AlertCircle, CheckCircle, Clock, Loader2 } from 'lucide-react'
+import { extractOptimizationError } from '@/lib/error-utils'
 
 interface OptimizationJobStatusProps {
   isOpen: boolean
@@ -87,6 +88,9 @@ export const OptimizationJobStatus: React.FC<OptimizationJobStatusProps> = ({
     return isNaN(numCost) ? '0.00' : numCost.toFixed(2)
   }
 
+  // Extract structured error information
+  const errorInfo = job.error_message ? extractOptimizationError(job.error_message) : null
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-md p-6">
@@ -167,9 +171,18 @@ export const OptimizationJobStatus: React.FC<OptimizationJobStatusProps> = ({
           )}
 
           {/* Error Message */}
-          {job.error_message && (
-            <div className="bg-red-900 border border-red-700 rounded-lg p-3">
-              <p className="text-red-200 text-sm">{job.error_message}</p>
+          {errorInfo && (
+            <div className="bg-red-900 border border-red-700 rounded-lg p-4 space-y-2">
+              <div className="flex items-start space-x-2">
+                <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <h4 className="text-red-200 font-semibold text-sm mb-1">{errorInfo.title}</h4>
+                  <p className="text-red-200 text-sm">{errorInfo.message}</p>
+                  {errorInfo.details && (
+                    <p className="text-red-300 text-xs mt-2 italic">{errorInfo.details}</p>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 

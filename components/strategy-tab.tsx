@@ -38,9 +38,9 @@ export function StrategyTab({
   return (
     <div className="p-4">
       {/* Strategy Selection */}
-      <div className="p-4 bg-black">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-4">
-          <div className="mb-2 md:mb-0">
+      {/* <div className="p-4 bg-black"> */}
+        {/* <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-4"> */}
+          {/* <div className="mb-2 md:mb-0">
             <label className="block text-sm text-gray-400 mb-2">Select Strategy</label>
             <div className="relative">
               <select
@@ -64,12 +64,12 @@ export function StrategyTab({
                 </svg>
               </div>
             </div>
-          </div>
-          <button className="bg-[#85e1fe] hover:bg-[#6bcae2] text-black rounded-full px-8 py-3 text-sm font-medium">
+          </div> */}
+          {/* <button className="ml-auto bg-[#85e1fe] hover:bg-[#6bcae2] text-black rounded-full px-8 py-3 text-sm font-medium">
             Load
-          </button>
-        </div>
-      </div>
+          </button> */}
+        {/* </div> */}
+      {/* </div> */}
 
       {/* File Upload Area */}
       <div className="p-4 bg-black">

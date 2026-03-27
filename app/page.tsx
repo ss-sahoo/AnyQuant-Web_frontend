@@ -1,7 +1,16 @@
-import { redirect } from "next/navigation"
+"use client"
+
+import { useEffect } from "react"
 
 export default function Home() {
-  // In a real app, we would check if the user is authenticated
-  // For now, we'll just redirect to the auth page
-  redirect("/auth")
+  useEffect(() => {
+    // Redirect to external waitlist page
+    window.location.href = "https://anyquant.webflow.io/waitlist"
+  }, [])
+
+  return (
+    <div className="min-h-screen bg-black flex justify-center items-center">
+      <div className="text-white text-lg">Redirecting to waitlist...</div>
+    </div>
+  )
 }

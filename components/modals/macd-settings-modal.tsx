@@ -8,14 +8,24 @@ interface MacdSettingsModalProps {
   onSave: (settings: any) => void
 }
 
-export function MacdSettingsModal({ onClose, onSave }: MacdSettingsModalProps) {
-  const [indicatorType, setIndicatorType] = useState("histogram")
-  const [fastLength, setFastLength] = useState("12")
-  const [slowLength, setSlowLength] = useState("26")
-  const [source, setSource] = useState("close")
-  const [signalSmoothing, setSignalSmoothing] = useState("9")
-  const [oscillatorMaType, setOscillatorMaType] = useState("EMA")
-  const [signalLineMaType, setSignalLineMaType] = useState("EMA")
+interface MacdSettings {
+  indicatorType: string
+  fastLength: string
+  slowLength: string
+  source: string
+  signalSmoothing: string
+  oscillatorMaType: string
+  signalLineMaType: string
+}
+
+export function MacdSettingsModal({ onClose, onSave, initialSettings }: MacdSettingsModalProps & { initialSettings?: MacdSettings }) {
+  const [indicatorType, setIndicatorType] = useState(initialSettings?.indicatorType || "MACD")
+  const [fastLength, setFastLength] = useState(initialSettings?.fastLength || "12")
+  const [slowLength, setSlowLength] = useState(initialSettings?.slowLength || "26")
+  const [source, setSource] = useState(initialSettings?.source || "close")
+  const [signalSmoothing, setSignalSmoothing] = useState(initialSettings?.signalSmoothing || "9")
+  const [oscillatorMaType, setOscillatorMaType] = useState(initialSettings?.oscillatorMaType || "EMA")
+  const [signalLineMaType, setSignalLineMaType] = useState(initialSettings?.signalLineMaType || "EMA")
 
   const [showSourceDropdown, setShowSourceDropdown] = useState(false)
   const [showOscillatorMaTypeDropdown, setShowOscillatorMaTypeDropdown] = useState(false)
@@ -77,6 +87,7 @@ export function MacdSettingsModal({ onClose, onSave }: MacdSettingsModalProps) {
       oscillatorMaType,
       signalLineMaType,
     })
+    onClose()
   }
 
   const sources = ["close", "open", "high", "low", "hl2", "hlc3", "ohlc4"]
@@ -132,7 +143,7 @@ export function MacdSettingsModal({ onClose, onSave }: MacdSettingsModalProps) {
               <div>
                 <label className="block text-base font-medium text-gray-700 mb-2">Fast Length</label>
                 <input
-                  type="text"
+                  type="number"
                   value={fastLength}
                   onChange={(e) => setFastLength(e.target.value)}
                   className="w-full p-3 border border-gray-300 rounded text-gray-700"
@@ -141,7 +152,7 @@ export function MacdSettingsModal({ onClose, onSave }: MacdSettingsModalProps) {
               <div>
                 <label className="block text-base font-medium text-gray-700 mb-2">Slow Length</label>
                 <input
-                  type="text"
+                  type="number"
                   value={slowLength}
                   onChange={(e) => setSlowLength(e.target.value)}
                   className="w-full p-3 border border-gray-300 rounded text-gray-700"
@@ -182,7 +193,7 @@ export function MacdSettingsModal({ onClose, onSave }: MacdSettingsModalProps) {
             <div className="mb-4">
               <label className="block text-base font-medium text-gray-700 mb-2">Signal Smoothing</label>
               <input
-                type="text"
+                type="number"
                 value={signalSmoothing}
                 onChange={(e) => setSignalSmoothing(e.target.value)}
                 className="w-full p-3 border border-gray-300 rounded text-gray-700"

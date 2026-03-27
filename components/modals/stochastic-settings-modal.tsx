@@ -6,48 +6,79 @@ import { X } from "lucide-react"
 interface StochasticSettingsModalProps {
   onClose: () => void
   onSave: (settings: any) => void
+  initialSettings?: {
+    // Support both parameter formats
+    indicatorType?: string
+    kLength?: string | number
+    kSmoothing?: string | number
+    dSmoothing?: string | number
+    // Alternative format (Stochastic)
+    fastk_period?: number
+    slowk_period?: number
+    slowd_period?: number
+    output?: "slowk" | "slowd"
+    timeframe?: string
+  }
 }
 
-export function StochasticSettingsModal({ onClose, onSave }: StochasticSettingsModalProps) {
-  const [indicatorType, setIndicatorType] = useState("k")
-  const [kLength, setKLength] = useState("12")
-  const [kSmoothing, setKSmoothing] = useState("26")
-  const [dSmoothing, setDSmoothing] = useState("9")
+export function StochasticSettingsModal({ onClose, onSave, initialSettings }: StochasticSettingsModalProps) {
+  // Support both parameter formats
+  const [indicatorType, setIndicatorType] = useState(
+    initialSettings?.indicatorType || 
+    (initialSettings?.output === "slowd" ? "d" : "k")
+  )
+  const [kLength, setKLength] = useState(
+    String(initialSettings?.kLength || initialSettings?.fastk_period || 12)
+  )
+  const [kSmoothing, setKSmoothing] = useState(
+    String(initialSettings?.kSmoothing || initialSettings?.slowk_period || 26)
+  )
+  const [dSmoothing, setDSmoothing] = useState(
+    String(initialSettings?.dSmoothing || initialSettings?.slowd_period || 9)
+  )
   const modalRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
-        onClose()
-      }
-    }
-
     function handleEscKey(event: KeyboardEvent) {
       if (event.key === "Escape") {
         onClose()
       }
     }
 
-    document.addEventListener("mousedown", handleClickOutside)
     document.addEventListener("keydown", handleEscKey)
 
     return () => {
-      document.removeEventListener("mousedown", handleClickOutside)
       document.removeEventListener("keydown", handleEscKey)
     }
   }, [onClose])
 
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Only close if clicking the backdrop itself, not its children
+    if (e.target === e.currentTarget) {
+      onClose()
+    }
+  }
+
   const handleSave = () => {
+    // Return both parameter formats for compatibility
     onSave({
       indicatorType,
       kLength,
       kSmoothing,
       dSmoothing,
+      // Also include Stochastic format
+      fastk_period: Number(kLength),
+      slowk_period: Number(kSmoothing),
+      slowd_period: Number(dSmoothing),
+      output: indicatorType === "d" ? "slowd" : "slowk",
     })
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div 
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      onClick={handleBackdropClick}
+    >
       <div ref={modalRef} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md">
         <div className="flex justify-between items-center p-6">
           <h2 className="text-2xl font-bold text-black">Stochastic Settings</h2>

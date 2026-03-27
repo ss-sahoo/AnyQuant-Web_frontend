@@ -3,6 +3,7 @@
 import type React from "react"
 import { useState, useEffect } from "react"
 import { TradingSessionModal } from "./trading-session-modal"
+import { DateRangeModal } from "./date-range-modal"
 
 interface BacktestTabProps {
   dateRange: string
@@ -15,9 +16,9 @@ interface BacktestTabProps {
   currency: string
   setCurrency: React.Dispatch<React.SetStateAction<string>>
   leverage: string
-  leverageSliderValue: number
-  handleSliderChange: (e: React.ChangeEvent<HTMLInputElement>) => void
-  getThumbPosition: () => number
+  handleLeverageChange: (e: React.ChangeEvent<HTMLSelectElement>) => void
+  customLeverage: string
+  handleCustomLeverageChange: (e: React.ChangeEvent<HTMLInputElement>) => void
   selectedTradingMode: string
   setSelectedTradingMode: React.Dispatch<React.SetStateAction<string>>
   maxTrades: string
@@ -28,6 +29,8 @@ interface BacktestTabProps {
   setLot: React.Dispatch<React.SetStateAction<string>>
   commission: number
   setCommission: React.Dispatch<React.SetStateAction<number>>
+  positionSize: string
+  setPositionSize: React.Dispatch<React.SetStateAction<string>>
 
   assetType: string
   setAssetType: React.Dispatch<React.SetStateAction<string>>
@@ -36,6 +39,7 @@ interface BacktestTabProps {
   // New optional props for Trading Session integration
   initialTradingSession?: any
   onTradingSessionSave?: (session: any) => void
+  timezone?: string
 }
 
 export function BacktestTab({
@@ -49,9 +53,9 @@ export function BacktestTab({
   currency,
   setCurrency,
   leverage,
-  leverageSliderValue,
-  handleSliderChange,
-  getThumbPosition,
+  handleLeverageChange,
+  customLeverage,
+  handleCustomLeverageChange,
   selectedTradingMode,
   setSelectedTradingMode,
   maxTrades,
@@ -62,6 +66,8 @@ export function BacktestTab({
   setLot,
   commission,
   setCommission,
+  positionSize,
+  setPositionSize,
 
   assetType,
   setAssetType,
@@ -69,8 +75,10 @@ export function BacktestTab({
   onShowTradesSummary,
   initialTradingSession,
   onTradingSessionSave,
+  timezone = "UTC",
 }: BacktestTabProps) {
   const [showTradingSessionModal, setShowTradingSessionModal] = useState(false)
+  const [showDateRangeModal, setShowDateRangeModal] = useState(false)
   const [tradingSessionSummary, setTradingSessionSummary] = useState<string>("")
 
   // Keep a small formatter for summary display
@@ -91,14 +99,14 @@ export function BacktestTab({
   // Map to required day order
   const DAY_ORDER = ["M", "t", "W", "T", "F", "S", "U"]
 
-  const handleTradingSessionSave = (config: { timezone: string; startTime: string; endTime: string; selectedDays: string[] }) => {
+  const handleTradingSessionSave = (config: { startTime: string; endTime: string; selectedDays: string[] }) => {
     // Build ordered day string
     const selectedSet = new Set(config.selectedDays)
     const orderedDays = DAY_ORDER.filter((d) => selectedSet.has(d)).join("")
 
-    // Build JSON per spec
+    // Build JSON per spec - use timezone from props instead of config
     const sessionJson = {
-      Timezone: config.timezone,
+      Timezone: timezone,
       Day: {
         Operator: "is",
         input: orderedDays,
@@ -136,10 +144,15 @@ export function BacktestTab({
             <input
               type="text"
               value={dateRange}
-              onChange={(e) => setDateRange(e.target.value)}
-              className="flex-1 bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
+              placeholder="YYYY.MM.DD - YYYY.MM.DD"
+              className="flex-1 bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white cursor-pointer"
+              readOnly
+              onClick={() => setShowDateRangeModal(true)}
             />
-            <button className="ml-2 bg-[#141721] p-3 rounded-md border border-[#2b2e38]">
+            <button 
+              className="ml-2 bg-[#141721] p-3 rounded-md border border-[#2b2e38] hover:border-[#85e1fe] hover:bg-[#2b2e38] transition-colors"
+              onClick={() => setShowDateRangeModal(true)}
+            >
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <rect x="3" y="6" width="18" height="15" rx="2" stroke="white" strokeWidth="2" />
                 <path d="M3 10H21" stroke="white" strokeWidth="2" />
@@ -148,10 +161,11 @@ export function BacktestTab({
               </svg>
             </button>
           </div>
+          <p className="text-xs text-gray-400 mt-1">Click to select date range</p>
         </div>
 
         {/* Right side - Instruments */}
-        <div className="w-[65%]">
+        {/* <div className="w-[65%]">
           <label className="block text-sm text-gray-400 mb-2">Instruments</label>
           <div className="flex flex-wrap gap-2">
             {instruments.map((instrument) => (
@@ -174,7 +188,7 @@ export function BacktestTab({
               </svg>
             </button>
           </div>
-        </div>
+        </div> */}
       </div>
 
       <div className="border-t border-[#2b2e38] my-6"></div>
@@ -222,35 +236,61 @@ export function BacktestTab({
         {/* Leverage/Margin Assumptions */}
         <div className="w-[35%]">
           <label className="block text-sm text-gray-400 mb-2">Leverage/Margin Assumptions</label>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-white">1:1</span>
-            <span className="text-xs text-white">1:2</span>
-            <span className="text-xs text-white">1:5</span>
-            <span className="text-xs text-white">1:10</span>
-            <span className="text-xs text-white">1:20</span>
-            <span className="text-xs text-white">1:25</span>
-            <span className="text-xs text-white">1:30</span>
-            <span className="text-xs text-white">1:50</span>
-            <span className="text-xs text-white">1:75</span>
-            <span className="text-xs text-white">1:100</span>
-          </div>
-          <div className="relative w-full h-1 bg-[#2b2e38] rounded-full">
-            <input
-              type="range"
-              min="1"
-              max="10"
-              step="1"
-              value={leverageSliderValue}
-              onChange={handleSliderChange}
-              className="absolute w-full h-1 opacity-0 cursor-pointer"
-            />
-            <div
-              className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-[#85e1fe] rounded-full transition-all duration-200 ease-out"
-              style={{ left: `calc(${getThumbPosition()}% - 6px)` }}
-            ></div>
-          </div>
-          <div className="mt-2 text-center">
-            <span className="text-sm text-[#85e1fe] font-medium">{leverage}</span>
+          <div className="space-y-2">
+            <div className="relative">
+              <select
+                value={leverage}
+                onChange={handleLeverageChange}
+                className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white appearance-none cursor-pointer"
+              >
+                <option value="1:1">1:1</option>
+                <option value="1:2">1:2</option>
+                <option value="1:5">1:5</option>
+                <option value="1:10">1:10</option>
+                <option value="1:20">1:20</option>
+                <option value="1:25">1:25</option>
+                <option value="1:30">1:30</option>
+                <option value="1:50">1:50</option>
+                <option value="1:75">1:75</option>
+                <option value="1:100">1:100</option>
+                <option value="1:200">1:200</option>
+                <option value="1:500">1:500</option>
+                <option value="custom">Custom...</option>
+              </select>
+              <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                <svg
+                  className="w-5 h-5 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path>
+                </svg>
+              </div>
+            </div>
+            {leverage === "custom" && (
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Enter custom leverage (e.g., 1:1000)"
+                  value={customLeverage}
+                  onChange={handleCustomLeverageChange}
+                  className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white placeholder-gray-500"
+                />
+                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                  <svg
+                    className="w-5 h-5 text-gray-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                  </svg>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -338,18 +378,18 @@ export function BacktestTab({
             />
           </div>
 
-          {/* Lot Size */}
+          {/* Lot Definition */}
           <div>
-            <label className="block text-sm text-gray-400 mb-2">Lot Size</label>
+            <label className="block text-sm text-gray-400 mb-2">Lot Definition</label>
             <div className="relative">
               <select
                 value={lot}
                 onChange={(e) => setLot(e.target.value)}
                 className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 pr-10 appearance-none focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
               >
-                <option value="mini">Mini (0.01)</option>
-                <option value="micro">Micro (0.001)</option>
-                <option value="standard">Standard (1.0)</option>
+                <option value="mini">Mini</option>
+                <option value="micro">Micro</option>
+                <option value="standard">Standard </option>
               </select>
               <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
                 <svg
@@ -365,8 +405,21 @@ export function BacktestTab({
             </div>
           </div>
 
+          {/* Position Size */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Position Size</label>
+            <input
+              type="number"
+              step="0.01"
+              value={positionSize}
+              onChange={(e) => setPositionSize(e.target.value)}
+              placeholder="Default: 1"
+              className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
+            />
+          </div>
+
           {/* Max Trades (if not MTOOTAAT) */}
-          {selectedTradingMode !== "MTOOTAAT" && (
+          {/* {selectedTradingMode !== "MTOOTAAT" && (
             <div>
               <label className="block text-sm text-gray-400 mb-2">Max Trades</label>
               <input
@@ -377,7 +430,7 @@ export function BacktestTab({
                 className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
               />
             </div>
-          )}
+          )} */}
 
           {/* Asset Type */}
           <div>
@@ -486,19 +539,17 @@ export function BacktestTab({
         </button>
       </div>
 
-      {/* Attach modal */}
+      {/* Attach modals */}
       {showTradingSessionModal && (
         <TradingSessionModal
           onClose={() => setShowTradingSessionModal(false)}
           onSave={(cfg) => handleTradingSessionSave(cfg)}
           initial={(() => {
             if (!initialTradingSession) return undefined
-            const tz = initialTradingSession.Timezone
             const dayStr: string = initialTradingSession.Day?.input || ""
             const timeStr: string = Array.isArray(initialTradingSession.Time?.input) ? initialTradingSession.Time.input[0] : ""
             const [start, end] = (timeStr || "-").split("-")
             return {
-              timezone: tz,
               startTime: start || "09:00",
               endTime: end || "17:00",
               selectedDays: dayStr.split("").filter(Boolean),
@@ -506,6 +557,14 @@ export function BacktestTab({
           })()}
         />
       )}
+      
+      {/* Date Range Modal */}
+      <DateRangeModal
+        isOpen={showDateRangeModal}
+        onClose={() => setShowDateRangeModal(false)}
+        currentDateRange={dateRange}
+        onSave={(newDateRange) => setDateRange(newDateRange)}
+      />
     </div>
   )
 } 

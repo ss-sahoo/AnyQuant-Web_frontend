@@ -31,7 +31,7 @@ export function SaveStrategyModal({
             <div className="absolute inset-0 rounded-full border-4 border-t-[#85e1fe] border-r-[#85e1fe] border-b-transparent border-l-transparent animate-spin"></div>
           </div>
           <h2 className="text-xl font-medium text-black">
-            {isSaving ? "Saving Strategy..." : "Proceeding to Strategy Testing..."}
+            {isSaving ? "Saving Strategy..." : "Loading Strategy Testing..."}
           </h2>
         </div>
       </div>
@@ -67,9 +67,9 @@ export function SaveStrategyModal({
           </button>
           <button
             onClick={() => onProceedToTesting(strategyName)}
-            className="px-8 py-3 bg-[#85e1fe] rounded-full text-black hover:bg-[#6dcfe9] flex-1"
+            className="px-8 py-3 bg-[#85e1fe] rounded-full text-black hover:bg-[#6dcfe9] flex-1 whitespace-nowrap"
           >
-            Proceed to strategy testing
+            Strategy Testing
           </button>
         </div>
       </div>

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { Sidebar } from "@/components/sidebar"
 import { AlgorithmTable } from "@/components/algorithm-table"
 import { ChartView } from "@/components/chart-view"
@@ -11,9 +12,16 @@ import { Link, Menu } from "lucide-react"
 export function MobileResponsiveDashboard() {
   const [algorithms, setAlgorithms] = useState(mockAlgorithms)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const router = useRouter()
 
   const handleDeleteAlgorithm = (id: string) => {
     setAlgorithms(algorithms.filter((algo) => algo.id !== id))
+  }
+
+  const handleLogout = () => {
+    localStorage.removeItem("auth_token")
+    router.push("/")
+    setIsSidebarOpen(false)
   }
 
   return (
@@ -68,15 +76,15 @@ export function MobileResponsiveDashboard() {
         </div>
         <div className="p-4">
           <nav className="space-y-4">
-            <a href="#" className="block py-2 px-4 rounded hover:bg-gray-800">
+            <a href="/home" className="block py-2 px-4 rounded hover:bg-gray-800">
               Home
             </a>
-            <a href="#" className="block py-2 px-4 rounded hover:bg-gray-800">
+            <a href="/profile" className="block py-2 px-4 rounded hover:bg-gray-800">
               Profile
             </a>
-            <a href="#" className="block py-2 px-4 rounded hover:bg-gray-800 text-red-500">
+            <button onClick={handleLogout} className="block w-full text-left py-2 px-4 rounded hover:bg-gray-800 text-red-500">
               Logout
-            </a>
+            </button>
           </nav>
         </div>
       </div>
@@ -109,8 +117,18 @@ export function MobileResponsiveDashboard() {
               <div className="lg:col-span-2 order-2 lg:order-1">
                 <div className="flex justify-between items-center mb-4">
                   {/* <h1 className="text-xl md:text-2xl font-normal">Draft algorithms</h1> */}
-                 <Link href="/strategy-builder">
-                 <button className="bg-[#6BCAE2] hover:bg-[#5AB9D1] text-black rounded-full px-4 md:px-6 py-1.5 md:py-2 text-xs md:text-sm">
+                 <Link href="/strategy-builder?new=1">
+                 <button
+                   className="bg-[#6BCAE2] hover:bg-[#5AB9D1] text-black rounded-full px-4 md:px-6 py-1.5 md:py-2 text-xs md:text-sm"
+                   onClick={() => {
+                     try {
+                       if (typeof window !== 'undefined') {
+                         window.localStorage.removeItem('strategy_id')
+                         window.sessionStorage.removeItem('builder_saved')
+                       }
+                     } catch {}
+                   }}
+                 >
                     Create Strategy
                   </button>
                  </Link>

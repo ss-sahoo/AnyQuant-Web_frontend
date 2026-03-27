@@ -150,7 +150,7 @@ export const getUserProfile = async (userId) => {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
-      
+
     },
   })
 
@@ -162,23 +162,60 @@ export const getUserProfile = async (userId) => {
   return data
 }
 
-export const updateUserProfile = async (userId, updatedData) => {
+export const updateUserProfile = async (userId, updatedData, profileImage = null, removeImage = false) => {
+  // profileImage can be File, null, or undefined
+  // removeImage flag indicates user wants to remove the existing image
   const token = localStorage.getItem("auth_token")
 
-  const response = await Fetch(`/api/profile/${userId}/`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(updatedData),
-  })
+  // If profileImage is provided (File object) or removeImage is true, use FormData
+  if (profileImage instanceof File || removeImage) {
+    const formData = new FormData()
 
-  if (!response.ok) {
-    throw new Error("Failed to update profile")
+    // Add text fields
+    if (updatedData.username) formData.append("username", updatedData.username)
+    if (updatedData.email) formData.append("email", updatedData.email)
+    if (updatedData.phoneno) formData.append("phoneno", updatedData.phoneno)
+
+    // If removing image, send empty string or null
+    // If uploading new image, send the file
+    if (removeImage) {
+      // Send empty string to indicate removal (backend should handle this)
+      formData.append("profile_image", "")
+    } else if (profileImage instanceof File) {
+      formData.append("profile_image", profileImage)
+    }
+
+    const response = await Fetch(`/api/profile/${userId}/`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        // Don't set Content-Type - browser will set it with boundary for FormData
+      },
+      body: formData,
+    })
+
+    if (!response.ok) {
+      throw new Error("Failed to update profile")
+    }
+
+    return response.json()
+  } else {
+    // No image changes, use JSON as before
+    const response = await Fetch(`/api/profile/${userId}/`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(updatedData),
+    })
+
+    if (!response.ok) {
+      throw new Error("Failed to update profile")
+    }
+
+    return response.json()
   }
-
-  return response.json()
 }
 
 export const sendOtp = async (email) => {
@@ -200,14 +237,12 @@ export const sendOtp = async (email) => {
 
 // src/api/runBacktest.js or .ts
 
-export const runBacktest = async ({ statement, files }) => {
+export const runBacktest = async ({ statement, files, run_id = null }) => {
   const formData = new FormData()
 
-  // Attach the statement JSON as a string
   formData.append("statement", JSON.stringify(statement))
+  if (run_id) formData.append("run_id", run_id)
 
-  // Attach each file using its timeframe key
-  // Example: files = { "3h": File, "15min": File }
   for (const [timeframe, file] of Object.entries(files)) {
     formData.append(timeframe, file)
   }
@@ -229,8 +264,7 @@ export const runBacktest = async ({ statement, files }) => {
 // If you want to use the native fetch, replace all 'Fetch' with 'fetch'.
 
 // Add this new function for MetaAPI integration
-export const runBacktestWithMetaAPI = async (strategy, token, accountId, symbol) => {
-  // Debug logging
+export const runBacktestWithMetaAPI = async (strategy, token, accountId, symbol, run_id = null) => {
   console.log('🔍 MetaAPI Debug Info:', {
     tokenLength: token?.length || 0,
     accountId: accountId,
@@ -245,7 +279,8 @@ export const runBacktestWithMetaAPI = async (strategy, token, accountId, symbol)
   formData.append('metaapi_token', token);
   formData.append('metaapi_account_id', accountId);
   formData.append('symbol', symbol);
-  
+  if (run_id) formData.append('run_id', run_id);
+
   try {
     const response = await Fetch('/api/run-backtest/', {
       method: 'POST',
@@ -258,28 +293,131 @@ export const runBacktestWithMetaAPI = async (strategy, token, accountId, symbol)
       throw new Error(error?.error || error?.message || 'Failed to start backtest with MetaAPI');
     }
 
-    return response.json();
+    const data = await response.json();
+
+    // If backend returned run_id immediately (async mode), return as-is for polling
+    // If backend returned full result (sync mode), return as-is for direct use
+    return data;
   } catch (error) {
     console.error('🔍 MetaAPI Request Error:', error);
     throw error;
   }
 };
 
+// New: Check available timeframes for a symbol via MetaAPI
+export const getSymbolTimeframes = async ({ metaapi_token, metaapi_account_id, symbol }) => {
+  const response = await Fetch('/api/get-symbol-timeframes/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ metaapi_token, metaapi_account_id, symbol }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error?.error || error?.message || 'Failed to check symbol timeframes')
+  }
+  return response.json()
+}
+
+// New: Validate a strategy against MetaAPI timeframes
+export const validateStrategyMetaapi = async ({ statement, metaapi_token, metaapi_account_id, symbol }) => {
+  const response = await Fetch('/api/validate-strategy-metaapi/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      statement: JSON.stringify(statement),
+      metaapi_token,
+      metaapi_account_id,
+      symbol,
+    }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error?.error || error?.message || 'Failed to validate strategy')
+  }
+  return response.json()
+}
+
+// New: Get all broker symbols (optionally filtered)
+export const getAllBrokerSymbols = async ({ metaapi_token, metaapi_account_id, filter = undefined }) => {
+  const payload = { metaapi_token, metaapi_account_id }
+  if (filter) payload.filter = filter
+
+  const response = await Fetch('/api/get-all-broker-symbols/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error?.error || error?.message || 'Failed to fetch broker symbols')
+  }
+  return response.json()
+}
+
+// New: Find symbols with available timeframe(s)
+export const findSymbolsWithTimeframe = async ({ metaapi_token, metaapi_account_id, symbol, timeframes }) => {
+  const response = await Fetch('/api/find-symbols-with-timeframe/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ metaapi_token, metaapi_account_id, symbol, timeframes }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error?.error || error?.message || 'Failed to find symbols with timeframe')
+  }
+  return response.json()
+}
+
 /**
  * Run optimisation (async or sync)
  * @param {Object} params
  * @param {Object} params.statement - The strategy statement
- * @param {Object} params.files - The files to upload
+ * @param {Object} [params.files] - The files to upload (required if not using MetaAPI)
  * @param {string|null} [params.strategy_statement_id] - Optional strategy statement ID
  * @param {boolean} [params.wait] - If true, wait for completion and return result in response
+ * @param {string|null} [params.metaapi_token] - MetaAPI token (for MetaAPI mode)
+ * @param {string|null} [params.metaapi_account_id] - MetaAPI account ID (for MetaAPI mode)
+ * @param {string|null} [params.symbol] - Trading symbol (for MetaAPI mode)
  */
-export const runOptimisation = async ({ statement, files, strategy_statement_id = null, wait = false }) => {
+export const runOptimisation = async ({
+  statement,
+  files = null,
+  strategy_statement_id = null,
+  wait = false,
+  metaapi_token = null,
+  metaapi_account_id = null,
+  symbol = null,
+  run_id = null,
+}) => {
+  // Validate input: either files OR MetaAPI credentials must be provided
+  const isMetaAPIMode = metaapi_token && metaapi_account_id && symbol;
+  const isFileMode = files && Object.keys(files).length > 0;
+
+  if (!isMetaAPIMode && !isFileMode) {
+    throw new Error("Either files or MetaAPI credentials (token, account_id, symbol) must be provided");
+  }
+
+  // Debug logging for MetaAPI mode
+  if (isMetaAPIMode) {
+    console.log('🔍 MetaAPI Optimisation Debug Info:', {
+      tokenLength: metaapi_token?.length || 0,
+      accountId: metaapi_account_id,
+      symbol: symbol,
+      tokenPrefix: metaapi_token?.substring(0, 20) + '...',
+      hasToken: !!metaapi_token,
+      hasAccountId: !!metaapi_account_id
+    });
+  }
+
   const formData = new FormData()
 
-  // Attach the statement JSON as a string
   formData.append("statement", JSON.stringify(statement))
+  if (run_id) formData.append("run_id", run_id)
 
-  // Attach strategy statement ID if provided
   if (strategy_statement_id) {
     formData.append("strategy_statement_id", strategy_statement_id)
   }
@@ -289,10 +427,22 @@ export const runOptimisation = async ({ statement, files, strategy_statement_id 
     formData.append("wait", "true")
   }
 
-  // Attach each file using its timeframe key
-  for (const [timeframe, file] of Object.entries(files)) {
-    formData.append(timeframe, file)
+  // MetaAPI mode: attach MetaAPI credentials
+  if (isMetaAPIMode) {
+    formData.append("metaapi_token", metaapi_token)
+    formData.append("metaapi_account_id", metaapi_account_id)
+    formData.append("symbol", symbol)
+    console.log('📡 Running optimisation with MetaAPI');
   }
+
+  // File upload mode: attach each file using its timeframe key
+  if (isFileMode) {
+    for (const [timeframe, file] of Object.entries(files)) {
+      formData.append(timeframe, file)
+    }
+    console.log('📁 Running optimisation with file upload');
+  }
+
   try {
     const response = await Fetch("/api/run-optimisation/", {
       method: "POST",
@@ -301,36 +451,95 @@ export const runOptimisation = async ({ statement, files, strategy_statement_id 
 
     if (!response.ok) {
       const error = await response.json()
+      console.error('🔍 Optimisation Backend Error:', error);
       throw new Error(error?.error || "Failed to start optimisation")
     }
     const data = await response.json();
-    console.log("Optimisation response:", data);
+    console.log("✅ Optimisation response:", data);
     return data;
   } catch (err) {
-    console.error("Optimisation request failed:", err);
+    console.error("❌ Optimisation request failed:", err);
     throw err;
   }
 }
 
+export const cancelBacktest = async (runId) => {
+  const formData = new FormData()
+  formData.append("run_id", runId)
+  const authToken = typeof localStorage !== 'undefined' ? localStorage.getItem("auth_token") : null
+  const headers = new Headers()
+  if (authToken) headers.append("Authorization", `Bearer ${authToken}`)
+  console.log("📡 cancel-backtest →", runId)
+  const response = await fetch("http://127.0.0.1:8000/api/cancel-backtest/", { method: "POST", headers, body: formData })
+  console.log("📡 cancel-backtest status:", response.status)
+  return response.json().catch(() => ({}))
+}
+
+export const cancelOptimisationRun = async (runId) => {
+  const formData = new FormData()
+  formData.append("run_id", runId)
+  const authToken = typeof localStorage !== 'undefined' ? localStorage.getItem("auth_token") : null
+  const headers = new Headers()
+  if (authToken) headers.append("Authorization", `Bearer ${authToken}`)
+  console.log("📡 cancel-optimisation →", runId)
+  const response = await fetch("http://127.0.0.1:8000/api/cancel-optimisation/", { method: "POST", headers, body: formData })
+  console.log("📡 cancel-optimisation status:", response.status)
+  return response.json().catch(() => ({}))
+}
+
+// Poll job status until completed/failed/cancelled
+// Returns { stop, promise }
+// stop() clears the interval AND rejects the promise (call on cancel)
+// promise resolves with final data or rejects on failure/cancel
+export const pollJobStatus = (runId, { intervalMs = 3000, onStatus } = {}) => {
+  let intervalId = null
+  let rejectFn = null
+
+  const promise = new Promise((resolve, reject) => {
+    rejectFn = reject
+
+    intervalId = setInterval(async () => {
+      try {
+        const response = await Fetch(`/api/job-status/${runId}/`, { method: "GET" })
+        if (!response.ok) {
+          clearInterval(intervalId)
+          reject(new Error("Failed to poll job status"))
+          return
+        }
+        const data = await response.json()
+        if (onStatus) onStatus(data)
+
+        if (data.status === "completed") {
+          clearInterval(intervalId)
+          resolve(data)
+        } else if (data.status === "failed") {
+          clearInterval(intervalId)
+          reject(new Error(data.error || data.message || "Job failed"))
+        } else if (data.status === "cancelled") {
+          clearInterval(intervalId)
+          reject(new Error("cancelled"))
+        }
+      } catch (err) {
+        clearInterval(intervalId)
+        reject(err)
+      }
+    }, intervalMs)
+  })
+
+  const stop = () => {
+    if (intervalId) clearInterval(intervalId)
+    if (rejectFn) rejectFn(new Error("cancelled"))
+  }
+
+  return { promise, stop }
+}
 
 // AllApiCalls.ts
 export const createStatement = async ({ account, statement }) => {
   const payload = {
     account,
-    name: statement.name,
-    side: statement.side,
-    saveresult: statement.saveresult,
-    strategy: statement.strategy,
-    instrument: statement.instrument || "XAU/USD",  // use default if not provided
-  }
-
-  // Add optional fields if they exist
-  if (statement.Equity !== undefined && statement.Equity !== null) {
-    payload.Equity = statement.Equity
-  }
-
-  if (statement.tradingtype !== undefined && statement.tradingtype !== null) {
-    payload.tradingtype = statement.tradingtype
+    ...statement,
+    instrument: statement.instrument || "XAU/USD",
   }
 
   const response = await Fetch("/api/strategies/", {
@@ -343,7 +552,8 @@ export const createStatement = async ({ account, statement }) => {
 
   if (!response.ok) {
     const error = await response.json()
-    throw new Error(error?.error || "Failed to create statement")
+    const errorMessage = error?.error || error?.detail || JSON.stringify(error) || "Failed to create statement"
+    throw new Error(errorMessage)
   }
 
   return response.json()
@@ -351,19 +561,23 @@ export const createStatement = async ({ account, statement }) => {
 
 
 
-export const fetchStatement = async (page = 1, pageSize = 10) => {
+export const fetchStatement = async (page = 1, pageSize = 10, search = "") => {
   const accountId = localStorage.getItem("user_id")
   if (!accountId) throw new Error("Account ID not found")
 
-  const response = await Fetch(
-    `/api/strategies/?page=${page}&page_size=${pageSize}&account=${accountId}`,
-    {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    }
-  )
+  let url = `/api/strategies/?page=${page}&page_size=${pageSize}&account=${accountId}`
+
+  // Add search parameter if provided
+  if (search && search.trim()) {
+    url += `&search=${encodeURIComponent(search.trim())}`
+  }
+
+  const response = await Fetch(url, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  })
 
   if (!response.ok) throw new Error("Failed to fetch strategies")
 
@@ -379,21 +593,21 @@ export const fetchStatement = async (page = 1, pageSize = 10) => {
 
 
 
-  export const fetchStatementDetail = async (id) => {
-    const response = await Fetch(`/api/strategies/${id}/`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    })
+export const fetchStatementDetail = async (id) => {
+  const response = await Fetch(`/api/strategies/${id}/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  })
 
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error?.detail || "Failed to fetch statement detail")
-    }
-
-    return response.json()
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error?.detail || "Failed to fetch statement detail")
   }
+
+  return response.json()
+}
 
 export const deleteStatement = async (statement_id) => {
   const response = await Fetch(`/api/strategies/${statement_id}/delete/`, {
@@ -507,7 +721,7 @@ export async function editStrategy(id, data) {
   try {
     // Debug logging
     console.log("🔍 DEBUG: editStrategy data being sent:", JSON.stringify(data, null, 2))
-    
+
     const response = await Fetch(`/api/strategies/${id}/edit/`, {
       method: "PATCH",
       headers: {
@@ -517,7 +731,9 @@ export async function editStrategy(id, data) {
     })
 
     if (!response.ok) {
-      throw new Error(`Failed to update strategy: ${response.status}`)
+      const errorData = await response.json()
+      const errorMessage = errorData?.error || errorData?.detail || JSON.stringify(errorData) || "Failed to update strategy"
+      throw new Error(errorMessage)
     }
 
     const responseData = await response.json()
@@ -528,13 +744,43 @@ export async function editStrategy(id, data) {
     throw error
   }
 }
-export const changePassword = async (old_password, new_password,user_id) => {
+/**
+ * Duplicate an existing strategy with a new name
+ * @param {string} id - The strategy ID to duplicate
+ * @param {string} newName - The new name for the duplicated strategy
+ * @returns {Promise} Promise with the duplicated strategy data
+ */
+export async function duplicateStrategy(id, newName) {
+  try {
+    const response = await Fetch(`/api/strategies/${id}/duplicate/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: newName }),
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData?.error || `Failed to duplicate strategy: ${response.status}`)
+    }
+
+    const responseData = await response.json()
+    console.log("🔍 DEBUG: duplicateStrategy response:", JSON.stringify(responseData, null, 2))
+    return responseData
+  } catch (error) {
+    console.error("Error duplicating strategy:", error)
+    throw error
+  }
+}
+
+export const changePassword = async (old_password, new_password, user_id) => {
 
   const response = await Fetch(`/api/change-password/${user_id}/`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-    
+
     },
     body: JSON.stringify({ old_password, new_password }),
   })
@@ -582,7 +828,7 @@ export const getOptimisationStatus = async (taskId) => {
 
 export const getOptimizationResults = async (params = {}) => {
   const queryParams = new URLSearchParams();
-  
+
   if (params.strategy_statement_id) {
     queryParams.append('strategy_statement_id', params.strategy_statement_id);
   }
@@ -651,7 +897,7 @@ export const deleteOptimizationResult = async (optimizationId) => {
 
 export const getStrategyOptimizationResults = async (strategyStatementId, params = {}) => {
   const queryParams = new URLSearchParams();
-  
+
   if (params.page) {
     queryParams.append('page', params.page);
   }
@@ -676,16 +922,57 @@ export const getStrategyOptimizationResults = async (strategyStatementId, params
 
 // Walk Forward Optimization API functions
 
-export const runWalkForwardOptimisation = async ({ statement, files, strategy_statement_id = null, wait = false, walk_forward_setting = null }) => {
-  const formData = new FormData()
+/**
+ * Run walk forward optimisation (async or sync)
+ * @param {Object} params
+ * @param {Object} params.statement - The strategy statement
+ * @param {Object} [params.files] - The files to upload (required if not using MetaAPI)
+ * @param {string|null} [params.strategy_statement_id] - Optional strategy statement ID
+ * @param {boolean} [params.wait] - If true, wait for completion and return result in response
+ * @param {Object|null} [params.walk_forward_setting] - Walk forward optimization settings
+ * @param {string|null} [params.metaapi_token] - MetaAPI token (for MetaAPI mode)
+ * @param {string|null} [params.metaapi_account_id] - MetaAPI account ID (for MetaAPI mode)
+ * @param {string|null} [params.symbol] - Trading symbol (for MetaAPI mode)
+ */
+export const runWalkForwardOptimisation = async ({
+  statement,
+  files = null,
+  strategy_statement_id = null,
+  wait = false,
+  walk_forward_setting = null,
+  metaapi_token = null,
+  metaapi_account_id = null,
+  symbol = null
+}) => {
+  // Validate input: either files OR MetaAPI credentials must be provided
+  const isMetaAPIMode = metaapi_token && metaapi_account_id && symbol;
+  const isFileMode = files && Object.keys(files).length > 0;
+
+  if (!isMetaAPIMode && !isFileMode) {
+    throw new Error("Either files or MetaAPI credentials (token, account_id, symbol) must be provided");
+  }
 
   // Log the payload being sent
   console.log("🚀 WALK FORWARD OPTIMIZATION PAYLOAD:");
   console.log("📋 Statement:", statement);
-  console.log("📁 Files:", Object.keys(files));
+  console.log("📁 Files:", isFileMode ? Object.keys(files) : 'N/A (using MetaAPI)');
   console.log("🆔 Strategy Statement ID:", strategy_statement_id);
   console.log("⏳ Wait:", wait);
   console.log("⚙️ Walk Forward Settings:", walk_forward_setting);
+
+  // Debug logging for MetaAPI mode
+  if (isMetaAPIMode) {
+    console.log('🔍 MetaAPI Walk Forward Optimisation Debug Info:', {
+      tokenLength: metaapi_token?.length || 0,
+      accountId: metaapi_account_id,
+      symbol: symbol,
+      tokenPrefix: metaapi_token?.substring(0, 20) + '...',
+      hasToken: !!metaapi_token,
+      hasAccountId: !!metaapi_account_id
+    });
+  }
+
+  const formData = new FormData()
 
   // Attach the statement JSON as a string
   formData.append("statement", JSON.stringify(statement))
@@ -705,10 +992,21 @@ export const runWalkForwardOptimisation = async ({ statement, files, strategy_st
     formData.append("wait", "true")
   }
 
-  // Attach each file using its timeframe key
-  for (const [timeframe, file] of Object.entries(files)) {
-    formData.append(timeframe, file)
-    console.log(`📎 Attached file: ${timeframe} -> ${file.name} (${file.size} bytes)`);
+  // MetaAPI mode: attach MetaAPI credentials
+  if (isMetaAPIMode) {
+    formData.append("metaapi_token", metaapi_token)
+    formData.append("metaapi_account_id", metaapi_account_id)
+    formData.append("symbol", symbol)
+    console.log('📡 Running walk forward optimisation with MetaAPI');
+  }
+
+  // File upload mode: attach each file using its timeframe key
+  if (isFileMode) {
+    for (const [timeframe, file] of Object.entries(files)) {
+      formData.append(timeframe, file)
+      console.log(`📎 Attached file: ${timeframe} -> ${file.name} (${file.size} bytes)`);
+    }
+    console.log('📁 Running walk forward optimisation with file upload');
   }
 
   // Log the FormData contents
@@ -729,6 +1027,7 @@ export const runWalkForwardOptimisation = async ({ statement, files, strategy_st
 
     if (!response.ok) {
       const error = await response.json()
+      console.error('🔍 Walk Forward Optimisation Backend Error:', error);
       throw new Error(error?.error || "Failed to start walk forward optimisation")
     }
     const data = await response.json();
@@ -742,7 +1041,7 @@ export const runWalkForwardOptimisation = async ({ statement, files, strategy_st
 
 export const getWalkForwardOptimizationResults = async (params = {}) => {
   const queryParams = new URLSearchParams();
-  
+
   if (params.strategy_statement_id) {
     queryParams.append('strategy_statement_id', params.strategy_statement_id);
   }
@@ -776,7 +1075,7 @@ export const getWalkForwardOptimizationResults = async (params = {}) => {
 
 export const getWalkForwardOptimizationResultDetail = async (optimizationId) => {
   console.log("API call: getWalkForwardOptimizationResultDetail for ID:", optimizationId)
-  
+
   const response = await Fetch(`/api/walkforward-optimization-results/${optimizationId}/`, {
     method: "GET",
     headers: {
@@ -815,7 +1114,7 @@ export const deleteWalkForwardOptimizationResult = async (optimizationId) => {
 
 export const getStrategyWalkForwardOptimizationResults = async (strategyStatementId, params = {}) => {
   const queryParams = new URLSearchParams();
-  
+
   if (params.page) {
     queryParams.append('page', params.page);
   }
@@ -869,54 +1168,124 @@ export const getOptimizationCosts = async () => {
  * Purpose: Start the optimization process
  * Headers: Authorization: Bearer {token}, Content-Type: application/json
  * Response: Job ID, droplet ID, estimated cost
+ * 
+ * NOTE: Backend fetches strategy from database using strategy_statement_id, so NO statement parameter needed!
+ * 
+ * @param {Object} params
+ * @param {string} params.strategy_statement_id - REQUIRED: Strategy statement ID (backend fetches from DB)
+ * @param {string} [params.type] - Type of optimization: "regular" or "walk_forward" (default: "regular")
+ * @param {Object} [params.files] - The files to upload (required if not using MetaAPI)
+ * @param {Object|null} [params.walk_forward_settings] - Walk forward optimization settings (for walk_forward type)
+ * @param {File|null} [params.csvFile] - CSV file for the backend (optional)
+ * @param {string|null} [params.metaapi_token] - MetaAPI token (for MetaAPI mode)
+ * @param {string|null} [params.metaapi_account_id] - MetaAPI account ID (for MetaAPI mode)
+ * @param {string|null} [params.symbol] - Trading symbol (for MetaAPI mode)
  */
-export const createOptimizationJob = async ({ statement, files, optimization_type = "regular", strategy_statement_id = null, walk_forward_setting = null, csvFile = null }) => {
+export const createOptimizationJob = async ({
+  strategy_statement_id, // REQUIRED - backend fetches strategy from DB
+  type = "regular",
+  files = null,
+  walk_forward_settings = null,
+  csvFile = null,
+  metaapi_token = null,
+  metaapi_account_id = null,
+  symbol = null
+}) => {
+  // Validate required parameters
+  if (!strategy_statement_id) {
+    throw new Error("strategy_statement_id is required");
+  }
+
+  // Validate input: either files OR MetaAPI credentials must be provided
+  const isMetaAPIMode = metaapi_token && metaapi_account_id && symbol;
+  const isFileMode = files && Object.keys(files).length > 0;
+
+  if (!isMetaAPIMode && !isFileMode) {
+    throw new Error("Either files or MetaAPI credentials (token, account_id, symbol) must be provided");
+  }
+
+  // Debug logging
+  console.log("🚀 OPTIMIZATION JOB PAYLOAD:");
+  console.log("🆔 Strategy Statement ID:", strategy_statement_id);
+  console.log("🔧 Optimization Type:", type);
+  console.log("📁 Files:", isFileMode ? Object.keys(files) : 'N/A (using MetaAPI)');
+  console.log("⚙️ Walk Forward Settings:", walk_forward_settings);
+
+  // Debug logging for MetaAPI mode
+  if (isMetaAPIMode) {
+    console.log('🔍 MetaAPI Optimization Job Debug Info:', {
+      tokenLength: metaapi_token?.length || 0,
+      accountId: metaapi_account_id,
+      symbol: symbol,
+      tokenPrefix: metaapi_token?.substring(0, 20) + '...',
+      hasToken: !!metaapi_token,
+      hasAccountId: !!metaapi_account_id
+    });
+  }
+
   const formData = new FormData();
 
-  // Attach the statement JSON as a string
-  formData.append("statement", JSON.stringify(statement));
+  // ❌ DO NOT send statement - backend fetches from database!
+  // ✅ Send strategy_statement_id instead
+  formData.append("strategy_statement_id", strategy_statement_id);
 
-  // Attach optimization type
-  formData.append("optimization_type", optimization_type);
+  // Attach optimization type (backend expects 'type')
+  formData.append("type", type);
 
-  // Attach strategy statement ID if provided
-  if (strategy_statement_id) {
-    formData.append("strategy_statement_id", strategy_statement_id);
+  // Attach walk forward settings if provided (backend expects 'walk_forward_settings')
+  if (walk_forward_settings) {
+    formData.append("walk_forward_settings", JSON.stringify(walk_forward_settings));
+    console.log("📋 Walk forward settings attached:", JSON.stringify(walk_forward_settings));
   }
 
-  // Attach walk forward settings if provided
-  if (walk_forward_setting) {
-    formData.append("walk_forward_setting", JSON.stringify(walk_forward_setting));
+  // MetaAPI mode: attach MetaAPI credentials
+  if (isMetaAPIMode) {
+    formData.append("metaapi_token", metaapi_token);
+    formData.append("metaapi_account_id", metaapi_account_id);
+    formData.append("symbol", symbol);
+    console.log('📡 Creating optimization job with MetaAPI');
   }
 
-  // Attach each file using its timeframe key
-  for (const [timeframe, file] of Object.entries(files)) {
-    formData.append(timeframe, file);
-  }
-
-  // Attach the CSV file for the backend
-  if (csvFile) {
-    formData.append("csvFile", csvFile);
-  } else {
-    // Fallback: use the first file from the files object if csvFile not provided
-    const fileEntries = Object.entries(files);
-    if (fileEntries.length > 0) {
-      const [, firstFile] = fileEntries[0];
-      formData.append("csvFile", firstFile);
+  // File upload mode: attach files
+  if (isFileMode) {
+    // Attach each file using its timeframe key
+    for (const [timeframe, file] of Object.entries(files)) {
+      formData.append(timeframe, file);
     }
+
+    // Attach the CSV file for the backend
+    if (csvFile) {
+      formData.append("csvFile", csvFile);
+    } else {
+      // Fallback: use the first file from the files object if csvFile not provided
+      const fileEntries = Object.entries(files);
+      if (fileEntries.length > 0) {
+        const [, firstFile] = fileEntries[0];
+        formData.append("csvFile", firstFile);
+      }
+    }
+    console.log('📁 Creating optimization job with file upload');
   }
 
-  const response = await Fetch("/api/optimization-jobs/create/", {
-    method: "POST",
-    body: formData,
-  });
+  try {
+    const response = await Fetch("/api/optimization-jobs/create/", {
+      method: "POST",
+      body: formData,
+    });
 
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.error || "Failed to create optimization job");
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('🔍 Optimization Job Backend Error:', errorData);
+      throw new Error(errorData.error || "Failed to create optimization job");
+    }
+
+    const data = await response.json();
+    console.log("✅ Optimization job created:", data);
+    return data;
+  } catch (err) {
+    console.error("❌ Optimization job creation failed:", err);
+    throw err;
   }
-
-  return response.json();
 };
 
 /**
@@ -974,7 +1343,7 @@ export const cancelOptimizationJob = async (jobId) => {
  */
 export const listOptimizationJobs = async (params = {}) => {
   const queryParams = new URLSearchParams();
-  
+
   if (params.limit) {
     queryParams.append('limit', params.limit);
   }
@@ -1000,3 +1369,602 @@ export const listOptimizationJobs = async (params = {}) => {
   return response.json();
 };
 
+/**
+ * Get Walk Forward Optimization results from droplet job
+ * Endpoint: GET /api/optimization-jobs/{job_id}/
+ * Purpose: Get walk forward optimization results with hypothesis testing
+ * Response includes: z_statistic, p_value, hypothesis_decision, avg_validation_return, etc.
+ */
+export const getWalkForwardDropletResults = async (jobId) => {
+  const response = await Fetch(`/api/optimization-jobs/${jobId}/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get walk forward optimization results");
+  }
+
+  return response.json();
+};
+
+/**
+ * List all walk forward optimization jobs for a strategy (from droplets)
+ * Endpoint: GET /api/strategies/{id}/walkforward-optimizations/
+ * Returns: List of walk forward optimization jobs with through_droplet flag
+ */
+export const listStrategyWalkForwardJobs = async (strategyId) => {
+  const response = await Fetch(`/api/strategies/${strategyId}/walkforward-optimizations/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to list walk forward optimization jobs");
+  }
+
+  return response.json();
+};
+
+// Backtest Results API Functions
+
+/**
+ * Get all backtest results with optional filtering
+ * @param {Object} params - Query parameters
+ * @param {string} [params.strategy_statement_id] - Filter by strategy ID
+ * @param {string} [params.account_id] - Filter by account ID
+ * @param {string} [params.status] - Filter by status (completed/failed)
+ * @param {string} [params.data_source] - Filter by data source (metaapi/file_upload)
+ * @param {number} [params.page] - Page number for pagination
+ * @param {number} [params.page_size] - Results per page
+ */
+export const getBacktestResults = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+
+  if (params.strategy_statement_id) {
+    queryParams.append('strategy_statement_id', params.strategy_statement_id);
+  }
+  if (params.account_id) {
+    queryParams.append('account_id', params.account_id);
+  }
+  if (params.status) {
+    queryParams.append('status', params.status);
+  }
+  if (params.data_source) {
+    queryParams.append('data_source', params.data_source);
+  }
+  if (params.page) {
+    queryParams.append('page', params.page);
+  }
+  if (params.page_size) {
+    queryParams.append('page_size', params.page_size);
+  }
+
+  const response = await Fetch(`/api/backtest-results/?${queryParams}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get backtest results");
+  }
+
+  return response.json();
+};
+
+/**
+ * Get backtest results for a specific strategy
+ * @param {string} strategyStatementId - The strategy ID
+ * @param {Object} params - Query parameters
+ * @param {number} [params.page] - Page number for pagination
+ * @param {number} [params.page_size] - Results per page
+ */
+export const getStrategyBacktestResults = async (strategyStatementId, params = {}) => {
+  const queryParams = new URLSearchParams();
+
+  if (params.page) {
+    queryParams.append('page', params.page);
+  }
+  if (params.page_size) {
+    queryParams.append('page_size', params.page_size);
+  }
+
+  const response = await Fetch(`/api/strategies/${strategyStatementId}/backtest-results/?${queryParams}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get strategy backtest results");
+  }
+
+  return response.json();
+};
+
+/**
+ * Get detailed backtest result by ID
+ * @param {string} backtestId - The backtest result ID
+ */
+export const getBacktestResultDetail = async (backtestId) => {
+  const response = await Fetch(`/api/backtest-results/${backtestId}/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get backtest result detail");
+  }
+
+  return response.json();
+};
+
+/**
+ * Delete a backtest result
+ * @param {string} backtestId - The backtest result ID to delete
+ */
+export const deleteBacktestResult = async (backtestId) => {
+  const response = await Fetch(`/api/backtest-results/${backtestId}/delete/`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to delete backtest result");
+  }
+
+  return response.json();
+};
+
+// Shortlist API Functions
+
+/**
+ * Add a strategy to shortlist
+ * @param {string} strategyId - The strategy ID to add to shortlist
+ */
+export const addToShortlist = async (strategyId) => {
+  const response = await Fetch(`/api/strategies/${strategyId}/shortlist/`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to add strategy to shortlist");
+  }
+
+  return response.json();
+};
+
+/**
+ * Remove a strategy from shortlist
+ * @param {string} strategyId - The strategy ID to remove from shortlist
+ */
+export const removeFromShortlist = async (strategyId) => {
+  const response = await Fetch(`/api/strategies/${strategyId}/remove-from-shortlist/`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to remove strategy from shortlist");
+  }
+
+  return response.json();
+};
+
+/**
+ * Get all shortlisted strategies with pagination
+ * @param {Object} params - Query parameters
+ * @param {number} [params.page] - Page number for pagination
+ * @param {number} [params.page_size] - Results per page
+ */
+export const getShortlistedStrategies = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+
+  if (params.page) {
+    queryParams.append('page', params.page);
+  }
+  if (params.page_size) {
+    queryParams.append('page_size', params.page_size);
+  }
+
+  const response = await Fetch(`/api/shortlisted-strategies/?${queryParams}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get shortlisted strategies");
+  }
+
+  return response.json();
+};
+
+
+// ============================================
+// Custom Components API (Developer Mode)
+// ============================================
+
+/**
+ * List all custom components owned by the authenticated user
+ * @param {string} [type] - Optional filter by type: "indicator" | "behavior" | "trade_management" | "strategy"
+ * @returns {Promise} Promise with array of custom components
+ */
+export const listCustomComponents = async (type = null) => {
+  let url = "/api/custom-components/";
+
+  // Add type filter if provided
+  if (type) {
+    url += `?type=${type}`;
+  }
+
+  const response = await Fetch(url, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to list custom components");
+  }
+
+  return response.json();
+};
+
+/**
+ * Create a new custom component
+ * @param {Object} params
+ * @param {string} params.name - Component name
+ * @param {string} params.type - Component type: "indicator" | "behavior" | "trade_management"
+ * @param {string} params.language - Programming language: "python" | "pinescript"
+ * @param {string} params.code - The component code
+ * @param {Object} [params.parameters] - Optional parameters object
+ * @returns {Promise} Promise with created component data
+ */
+export const createCustomComponent = async ({ name, type, language, code, parameters = {} }) => {
+  const response = await Fetch("/api/custom-components/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ name, type, language, code, parameters }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || errorData.detail || "Failed to create custom component");
+  }
+
+  return response.json();
+};
+
+/**
+ * Get details of a specific custom component
+ * @param {number} componentId - The component ID
+ * @returns {Promise} Promise with component details
+ */
+export const getCustomComponent = async (componentId) => {
+  const response = await Fetch(`/api/custom-components/${componentId}/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get custom component");
+  }
+
+  return response.json();
+};
+
+/**
+ * Update an existing custom component
+ * @param {number} componentId - The component ID
+ * @param {Object} data - Updated data (code, name, parameters, etc.)
+ * @returns {Promise} Promise with updated component data
+ */
+export const updateCustomComponent = async (componentId, data) => {
+  const response = await Fetch(`/api/custom-components/${componentId}/`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to update custom component");
+  }
+
+  return response.json();
+};
+
+/**
+ * Delete a custom component
+ * @param {number} componentId - The component ID
+ * @returns {Promise} Promise (204 No Content on success)
+ */
+export const deleteCustomComponent = async (componentId) => {
+  const response = await Fetch(`/api/custom-components/${componentId}/`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok && response.status !== 204) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to delete custom component");
+  }
+
+  return { success: true };
+};
+
+/**
+ * Validate code without saving (optionally updates a component)
+ * @param {Object} params
+ * @param {string} params.code - The code to validate
+ * @param {number} [params.component_id] - Optional component ID to update
+ * @returns {Promise} Promise with validation result
+ */
+export const validateCustomComponentCode = async ({ code, component_id = null }) => {
+  const payload = { code };
+  if (component_id) {
+    payload.component_id = component_id;
+  }
+
+  const response = await Fetch("/api/custom-components/validate/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to validate code");
+  }
+
+  return response.json();
+};
+
+/**
+ * Activate a compiled component for use in backtests
+ * @param {number} componentId - The component ID
+ * @returns {Promise} Promise with activation result
+ */
+export const activateCustomComponent = async (componentId) => {
+  const response = await Fetch(`/api/custom-components/${componentId}/activate/`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to activate component");
+  }
+
+  return response.json();
+};
+
+// ============================================
+// Custom Strategy APIs
+// ============================================
+
+/**
+ * List all custom strategies owned by the authenticated user
+ * @returns {Promise} Promise with array of custom strategies
+ */
+export const listCustomStrategies = async () => {
+  const response = await Fetch("/api/custom-strategies/", {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to list custom strategies");
+  }
+
+  return response.json();
+};
+
+/**
+ * Create a new custom strategy
+ * @param {Object} params
+ * @param {string} params.name - Strategy name
+ * @param {string} params.code - The strategy code
+ * @returns {Promise} Promise with created strategy data
+ */
+export const createCustomStrategy = async ({ name, code }) => {
+  const response = await Fetch("/api/custom-strategies/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ name, code }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || errorData.detail || "Failed to create custom strategy");
+  }
+
+  return response.json();
+};
+
+/**
+ * Get details of a specific custom strategy
+ * @param {number} strategyId - The strategy ID
+ * @returns {Promise} Promise with strategy details
+ */
+export const getCustomStrategy = async (strategyId) => {
+  const response = await Fetch(`/api/custom-strategies/${strategyId}/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get custom strategy");
+  }
+
+  return response.json();
+};
+
+/**
+ * Update an existing custom strategy
+ * @param {number} strategyId - The strategy ID
+ * @param {Object} data - Updated data (code, name, etc.)
+ * @returns {Promise} Promise with updated strategy data
+ */
+export const updateCustomStrategy = async (strategyId, data) => {
+  const response = await Fetch(`/api/custom-strategies/${strategyId}/`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to update custom strategy");
+  }
+
+  return response.json();
+};
+
+/**
+ * Delete a custom strategy
+ * @param {number} strategyId - The strategy ID
+ * @returns {Promise} Promise (204 No Content on success)
+ */
+export const deleteCustomStrategy = async (strategyId) => {
+  const response = await Fetch(`/api/custom-strategies/${strategyId}/`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok && response.status !== 204) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to delete custom strategy");
+  }
+
+  return { success: true };
+};
+
+/**
+ * Validate custom strategy code (syntax, security, contract)
+ * @param {Object} params
+ * @param {string} params.code - The code to validate
+ * @param {number} [params.component_id] - Optional component ID to update
+ * @returns {Promise} Promise with validation result
+ */
+export const validateCustomStrategyCode = async ({ code, component_id = null }) => {
+  const body = { code };
+  if (component_id) {
+    body.component_id = component_id;
+  }
+
+  const response = await Fetch("/api/custom-strategies/validate/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to validate custom strategy code");
+  }
+
+  return response.json();
+};
+
+/**
+ * Run a backtest on a custom strategy
+ * @param {Object} params
+ * @param {number} params.strategy_id - The strategy ID
+ * @param {Object} [params.params] - Strategy parameters to override
+ * @param {number} [params.initial_equity] - Initial equity for backtest
+ * @param {string} [params.symbol] - Trading symbol
+ * @returns {Promise} Promise with backtest results
+ */
+export const runCustomStrategyBacktest = async ({ strategy_id, params = {}, initial_equity = 10000, symbol = "XAUUSD" }) => {
+  const response = await Fetch("/api/custom-strategies/backtest/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ strategy_id, params, initial_equity, symbol }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to run custom strategy backtest");
+  }
+
+  return response.json();
+};
+
+/**
+ * Get a starter template for writing custom strategies
+ * @returns {Promise} Promise with template data
+ */
+export const getCustomStrategyTemplate = async () => {
+  const response = await Fetch("/api/custom-strategies/template/", {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to get strategy template");
+  }
+
+  return response.json();
+};
