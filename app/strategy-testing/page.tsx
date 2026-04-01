@@ -41,8 +41,12 @@ import {
   // Custom strategy API
   getCustomStrategy,
   runCustomStrategyBacktest,
+  // Backtest result API
+  getBacktestResultDetail,
+  getStrategyBacktestResults,
+  deleteBacktestResult,
 } from "../AllApiCalls" // Import new functions
-import { X, ArrowLeft } from "lucide-react"
+import { X, ArrowLeft, Layout, Maximize2 } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
 import { extractErrorMessage, formatErrorForDisplay } from "@/lib/error-utils"
 import { StrategyTab } from "@/components/strategy-tab"
@@ -164,7 +168,7 @@ export default function StrategyTestingPage() {
   const [statusPollingInterval, setStatusPollingInterval] = useState<NodeJS.Timeout | null>(null)
 
   // Add state for top-level optimisation tab and selected result
-  const [optimisationTab, setOptimisationTab] = useState<'results' | 'graph' | 'report'>('results');
+  const [optimisationTab, setOptimisationTab] = useState<'results' | 'graph' | 'report' | 'trades'>('results');
   const [selectedOptimisationRow, setSelectedOptimisationRow] = useState<any>(null);
 
   const [showPreviousOptimisationView, setShowPreviousOptimisationView] = useState(false);
@@ -208,6 +212,114 @@ export default function StrategyTestingPage() {
   // Timezone state (moved from TradingSessionModal to Strategy tab)
   const [timezone, setTimezone] = useState<string>("UTC")
 
+  // Add backtest detail state for showing results in the same page
+  const [backtestDetail, setBacktestDetail] = useState<any>(null)
+  const [backtestResultTab, setBacktestResultTab] = useState<'graph' | 'chart_data' | 'summary' | 'trades' | 'results' | 'report'>('graph')
+  const [iframeLoadedResult, setIframeLoadedResult] = useState(false)
+  const [isPlotExpandedResult, setIsPlotExpandedResult] = useState(false)
+
+  // Normalize raw API response to handle different field naming conventions
+  const normalizeBacktestResult = (raw: any): any => {
+    const pick = (...keys: string[]) => {
+      const rawKeys = Object.keys(raw)
+      for (const key of keys) {
+        if (raw[key] != null) return raw[key]
+        const foundKey = rawKeys.find(rk => rk.toLowerCase() === key.toLowerCase())
+        if (foundKey && raw[foundKey] != null) return raw[foundKey]
+      }
+      return undefined
+    }
+
+    return {
+      ...raw,
+      id: raw.id ?? raw.backtest_result_id,
+      strategy_statement_name: raw.strategy_statement_name ?? raw.name ?? raw._strategy ?? 'Unknown Strategy',
+      chart_data: raw.chart_data ?? null,
+      trades_data: raw.trades_data ?? [],
+      plot_html: raw.plot_html ?? '',
+      final_equity: pick('final_equity', 'equity_final', 'balance'),
+      return_percent: pick('return_percent', 'return_pct', 'total_return', 'return'),
+      return_ann_percent: pick('return_ann_percent', 'return_ann', 'annual_return', 'return_ann_percent_value'),
+      win_rate_percent: (() => {
+        const v = pick('win_rate_percent', 'win_rate', 'win_rate_pct')
+        if (v == null) return undefined
+        return (v > 0 && v <= 1) ? v * 100 : v
+      })(),
+      max_drawdown_percent: pick('max_drawdown_percent', 'max_drawdown', 'max_drawdown_pct'),
+      avg_drawdown_percent: pick('avg_drawdown_percent', 'avg_drawdown', 'avg_drawdown_pct'),
+      max_drawdown_duration: pick('max_drawdown_duration'),
+      avg_drawdown_duration: pick('avg_drawdown_duration'),
+      sharpe_ratio: pick('sharpe_ratio', 'sharpe'),
+      sortino_ratio: pick('sortino_ratio', 'sortino'),
+      calmar_ratio: pick('calmar_ratio', 'calmar'),
+      num_trades: pick('num_trades', 'total_trades', 'trades_count'),
+      best_trade_percent: pick('best_trade_percent', 'best_trade', 'best_trade_pct'),
+      worst_trade_percent: pick('worst_trade_percent', 'worst_trade', 'worst_trade_pct'),
+      exposure_time_percent: pick('exposure_time_percent', 'exposure_time', 'exposure'),
+      equity_peak: pick('equity_peak', 'peak_equity', 'peak'),
+      buy_hold_return_percent: pick('buy_hold_return_percent', 'buy_hold_return'),
+      volatility_ann_percent: pick('volatility_ann_percent', 'volatility_ann', 'volatility'),
+      avg_trade_percent: pick('avg_trade_percent', 'avg_trade', 'avg_trade_pct'),
+      max_trade_duration: pick('max_trade_duration'),
+      avg_trade_duration: pick('avg_trade_duration'),
+      profit_factor: pick('profit_factor'),
+      expectancy_percent: pick('expectancy_percent', 'expectancy'),
+      sqn: pick('sqn', 'SQN'),
+      data_source: raw.data_source ?? '',
+      symbol: raw.symbol ?? '',
+      data_start_date: raw.data_start_date ?? '',
+      data_end_date: raw.data_end_date ?? '',
+      status: raw.status ?? 'completed',
+      error_message: raw.error_message ?? null,
+    }
+  }
+
+  const loadBacktestResult = async (backtestId: string) => {
+    try {
+      setIsLoading(true)
+      const raw = await getBacktestResultDetail(backtestId)
+      const normalized = normalizeBacktestResult(raw)
+      setBacktestDetail(normalized)
+      setBacktestResultTab('graph')
+      if (normalized.plot_html) {
+        setPlotHtml(normalized.plot_html)
+      }
+      setActiveTab('backtest')
+      showToast("Backtest details loaded successfully", 'success')
+    } catch (err: any) {
+      showToast("Failed to load backtest results: " + err.message, 'error')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const formatDateForResult = (dateString: string) => {
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    } catch (e) {
+      return dateString
+    }
+  }
+
+  const formatDurationForResult = (startDate: string, endDate: string) => {
+    try {
+      const start = new Date(startDate)
+      const end = new Date(endDate)
+      const diffTime = Math.abs(end.getTime() - start.getTime())
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+      const diffHours = Math.floor((diffTime % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+      return `${diffDays} days ${diffHours.toString().padStart(2, '0')}:00:00`
+    } catch (e) {
+      return 'N/A'
+    }
+  }
+
   // Helper function to map MetaAPI symbols to Backtest instruments
   const mapSymbolToInstrument = (symbol: string): string | null => {
     const symbolUpper = symbol.toUpperCase().replace(/\./g, '') // Remove dots like in XAUUSD.a
@@ -243,6 +355,50 @@ export default function StrategyTestingPage() {
       if (interval) clearInterval(interval);
     };
   }, [isLoading]);
+
+  // Load last backtest result on mount
+  useEffect(() => {
+    if (strategy_id) {
+      getStrategyBacktestResults(strategy_id)
+        .then((response: any) => {
+          // Response might be direct array or paginated object { results: [] }
+          const results = Array.isArray(response) ? response : (response?.results || [])
+          if (results.length > 0) {
+            // Sort by date descending
+            const sorted = [...results].sort((a, b) =>
+              new Date(b.backtest_date || b.created_at || b.date).getTime() -
+              new Date(a.backtest_date || a.created_at || a.date).getTime()
+            )
+            loadBacktestResult(sorted[0].id.toString())
+          }
+        })
+        .catch(err => console.error("Error fetching initial backtest results:", err))
+
+      // Also load last optimization result
+      getStrategyOptimizationResults(strategy_id)
+        .then(async (response: any) => {
+          const results = Array.isArray(response) ? response : (response?.results || [])
+          if (results.length > 0) {
+            // Sort by date descending
+            const sorted = [...results].sort((a, b) =>
+              new Date(b.optimization_date || b.created_at || b.date).getTime() -
+              new Date(a.optimization_date || a.created_at || a.date).getTime()
+            )
+            const latestId = sorted[0].id;
+            console.log("🚀 Auto-loading latest optimization result:", latestId);
+            try {
+              const detail = await getOptimizationResultDetail(latestId);
+              setOptimisationResult(detail);
+              setShowOptimisationResults(true);
+              setOptimisationTab('results');
+            } catch (err) {
+              console.error("❌ Failed to load latest optimization detail:", err);
+            }
+          }
+        })
+        .catch(err => console.error("Error fetching initial optimization results:", err))
+    }
+  }, [strategy_id])
 
   // Animate progress bar for optimisation
   useEffect(() => {
@@ -997,9 +1153,9 @@ export default function StrategyTestingPage() {
           // Store the result in sessionStorage for the results page
           sessionStorage.setItem('customBacktestResult', JSON.stringify(normalizedResult))
 
-          // Store the result for display in modal
-          setCustomStrategyBacktestResult(normalizedResult)
-          setShowCustomStrategyBacktestResults(true)
+          // Set backtest detail for in-page display
+          setBacktestDetail(normalizeBacktestResult(normalizedResult))
+          setBacktestResultTab('chart_data')
 
           // Also set plot HTML if available
           if (normalizedResult.plot_html) {
@@ -1061,8 +1217,8 @@ export default function StrategyTestingPage() {
         // Handle trades CSV data — redirect to results page
         const resultId = result?.backtest_result_id || result?.backtest_id || result?.result?.backtest_result_id
         if (resultId) {
-          showToast("Backtest completed! Redirecting to results...", 'success')
-          setTimeout(() => { router.push(`/backtest-results?id=${resultId}`) }, 800)
+          showToast("Backtest completed!", 'success')
+          loadBacktestResult(resultId)
         } else if (result?.trades_csv) {
           showToast("Backtest completed but no result ID returned.", 'warning')
         } else if (!result?.plot_html) {
@@ -1107,8 +1263,8 @@ export default function StrategyTestingPage() {
 
         const resultId2 = result?.backtest_result_id || result?.backtest_id || result?.result?.backtest_result_id
         if (resultId2) {
-          showToast("Backtest completed! Redirecting to results...", 'success')
-          setTimeout(() => { router.push(`/backtest-results?id=${resultId2}`) }, 800)
+          showToast("Backtest completed!", 'success')
+          loadBacktestResult(resultId2)
         } else if (result?.trades_csv) {
           showToast("Backtest completed but no result ID returned.", 'warning')
         } else if (!result?.plot_html) {
@@ -1247,6 +1403,7 @@ export default function StrategyTestingPage() {
 
       let result: any
 
+      let startData: any = null;
       // Use MetaAPI or file upload based on the mode
       if (useMetaAPI) {
         const symbol = metaAPIConfig?.symbol || "XAUUSD"
@@ -1258,7 +1415,7 @@ export default function StrategyTestingPage() {
           throw new Error("MetaAPI credentials not configured. Please check environment variables.")
         }
 
-        const startData = await (runOptimisation as any)({
+        startData = await (runOptimisation as any)({
           statement: optimisationStatement,
           strategy_statement_id: strategy_id ? strategy_id : null,
           wait,
@@ -1283,7 +1440,7 @@ export default function StrategyTestingPage() {
           result = startData
         }
       } else {
-        const startData = await (runOptimisation as any)({
+        startData = await (runOptimisation as any)({
           statement: optimisationStatement,
           files: timeframeFiles,
           strategy_statement_id: strategy_id ? strategy_id : null,
@@ -1316,12 +1473,49 @@ export default function StrategyTestingPage() {
       setOptimisationMessage(polledResult?.message || result?.message || "")
       setOptimisationStdout(polledResult?.stdout || result?.stdout || "")
       setOptimisationStderr(polledResult?.stderr || result?.stderr || "")
-
       // Handle the response — treat polledResult as the actual result data
       if (polledResult) {
-        setOptimisationResult(polledResult)
-        setActiveTab("optimisation")
-        setShowPreviousOptimisationView(true)
+        // If we have a run_id, fetch the full detail to ensure we have previewRows/table data
+        const runId = result?.run_id || startData?.run_id || polledResult?.id || polledResult?.run_id || result?.id || result?.runId;
+
+        // Add a small delay and a retry mechanism to ensure backend has finished processing
+        const fetchWithRetry = async (retryCount = 0) => {
+          try {
+            console.log(`🔄 Fetching full optimization detail (Attempt ${retryCount + 1}) for ID:`, runId);
+            const fullDetail = await getOptimizationResultDetail(runId);
+
+            // Verify if the result is actually "full" (has table or preview rows)
+            const hasTableData = fullDetail?.optimisation_preview?.length > 0 ||
+              fullDetail?.full_optimization_results?.length > 0 ||
+              fullDetail?.table?.length > 0 ||
+              fullDetail?.results?.length > 0;
+
+            if (hasTableData || retryCount >= 3) {
+              console.log("✅ Successfully fetched full optimization data");
+              setOptimisationResult(fullDetail);
+              if (fullDetail.heatmap_plot_html) {
+                setPlotHeatmapHtml(fullDetail.heatmap_plot_html);
+              }
+            } else {
+              console.log("⏳ Data not yet available, retrying in 2s...");
+              setTimeout(() => fetchWithRetry(retryCount + 1), 2000);
+            }
+          } catch (fetchErr) {
+            console.error("❌ Failed to fetch full detail, using polled result:", fetchErr);
+            setOptimisationResult(polledResult);
+          }
+        };
+
+        if (runId) {
+          // Start the fetch process after a small initial delay
+          setTimeout(() => fetchWithRetry(0), 1000);
+        } else {
+          setOptimisationResult(polledResult);
+        }
+
+        setActiveTab("optimisation");
+        setShowOptimisationResults(true);
+        setOptimisationTab('results');
         setOptimizationResults(prev => Array.isArray(prev) ? [...prev, polledResult] : [polledResult])
         if (polledResult.heatmap_plot_html) {
           setPlotHeatmapHtml(polledResult.heatmap_plot_html)
@@ -2119,19 +2313,19 @@ export default function StrategyTestingPage() {
     });
 
     return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-      </head>
-      <body style="margin:0;">
-        <div id="plot" style="width:100%;height:100%;"></div>
-        <script>
-          Plotly.newPlot('plot', ${plotlyData}, ${layout}, {responsive: true});
-        </script>
-      </body>
-      </html>
-    `;
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+        </head>
+        <body style="margin:0;">
+          <div id="plot" style="width:100%;height:100%;"></div>
+          <script>
+            Plotly.newPlot('plot', ${plotlyData}, ${layout}, {responsive: true});
+          </script>
+        </body>
+        </html>
+      `;
   };
 
   // Helper function to generate heatmap plot HTML
@@ -2171,19 +2365,19 @@ export default function StrategyTestingPage() {
       });
 
       return `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-        </head>
-        <body style="margin:0;">
-          <div id="plot" style="width:100%;height:100%;"></div>
-          <script>
-            Plotly.newPlot('plot', ${plotlyData}, ${layout}, {responsive: true});
-          </script>
-        </body>
-        </html>
-      `;
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+          </head>
+          <body style="margin:0;">
+            <div id="plot" style="width:100%;height:100%;"></div>
+            <script>
+              Plotly.newPlot('plot', ${plotlyData}, ${layout}, {responsive: true});
+            </script>
+          </body>
+          </html>
+        `;
     }
 
     const x = heatmapData.map(d => d[param1Key]);
@@ -2216,19 +2410,19 @@ export default function StrategyTestingPage() {
     });
 
     return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-      </head>
-      <body style="margin:0;">
-        <div id="plot" style="width:100%;height:100%;"></div>
-        <script>
-          Plotly.newPlot('plot', ${plotlyData}, ${layout}, {responsive: true});
-        </script>
-      </body>
-      </html>
-    `;
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+        </head>
+        <body style="margin:0;">
+          <div id="plot" style="width:100%;height:100%;"></div>
+          <script>
+            Plotly.newPlot('plot', ${plotlyData}, ${layout}, {responsive: true});
+          </script>
+        </body>
+        </html>
+      `;
   };
 
   // Optimization Droplets states
@@ -2752,8 +2946,8 @@ export default function StrategyTestingPage() {
 
         <MobileSidebar currentPage="home" />
 
-        <main className="flex-1 flex flex-col relative">
-          {/* Show PreviousOptimisationView if toggled */}
+        <main className="flex-1 flex flex-col relative ml-[63px] min-w-0 overflow-x-hidden">
+          {/* Show PreviousOptimisationView if toggled (legacy full-screen) */}
           {showPreviousOptimisationView ? (
             <PreviousOptimisationView
               optimisationResults={optimizationResults}
@@ -2762,72 +2956,491 @@ export default function StrategyTestingPage() {
             />
           ) : (
             <>
-              {/* Chart area with light blue background */}
-              {plotHtml ? (
-                <div className="relative">
-                  <div
-                    className={`transition-all duration-500 ease-in-out ${isChartExpanded ? "fixed inset-0 z-50 bg-black" : "relative"}`}
-                  >
-                    <iframe
-                      title="Plotly Chart"
-                      style={{
-                        width: "100%",
-                        height: isChartExpanded ? "100vh" : "calc(100vh - 300px)",
-                        border: "none",
-                        backgroundColor: "#f8f8f8",
-                        transition: "height 0.5s ease-in-out",
-                      }}
-                      srcDoc={plotHtml}
-                    />
+              {/* Top Result Tabs - Professional Workstation Design */}
+              <div className="flex bg-[#0a0b12] border-b border-gray-800/50 sticky top-0 z-30 w-full overflow-hidden">
+                <div className={`grid ${activeTab === 'optimisation' ? 'grid-cols-4' : 'grid-cols-6'} w-full`}>
+                  {(activeTab === 'optimisation' ? ['results', 'graph', 'report', 'trades'] : ['graph', 'chart_data', 'summary', 'trades', 'results', 'report']).map(tab => (
                     <button
-                      onClick={toggleChartExpansion}
-                      className={`absolute ${isChartExpanded ? "top-4 right-4" : "top-2 right-2"} bg-[#1E2132] hover:bg-[#2B2E38] text-white p-2 rounded-full transition-all duration-300`}
-                      aria-label={isChartExpanded ? "Minimize chart" : "Expand chart"}
+                      key={tab}
+                      className={`py-4 text-center text-[9px] font-black uppercase tracking-[0.2em] transition-all border-b-2 ${(activeTab === 'optimisation' ? optimisationTab === tab : backtestResultTab === tab)
+                        ? 'text-[#85e1fe] bg-[#121420] border-[#85e1fe]'
+                        : 'text-gray-500 hover:text-white hover:bg-[#121420] border-transparent'
+                        }`}
+                      onClick={() => {
+                        if (activeTab === 'optimisation') {
+                          setOptimisationTab(tab as any);
+                        } else {
+                          setBacktestResultTab(tab as any);
+                        }
+                      }}
                     >
-                      {isChartExpanded ? (
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <path
-                            d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      ) : (
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <path
-                            d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      )}
+                      {tab === 'chart_data' ? 'Chart Data' : tab}
                     </button>
-                  </div>
+                  ))}
                 </div>
-              ) : (
-                <div className="w-full h-[calc(100vh-300px)] bg-[#f8f8f8]"></div>
-              )}
+              </div>
+              {/* Result Content Area - Reduced height further to keep settings tabs visible */}
+              <div className="h-[670px] overflow-y-auto bg-[#000000] border-b border-gray-800/10">
+                {activeTab === 'optimisation' ? (
+                  <div className="w-full min-h-full flex flex-col">
+                    {(() => {
+                      // 1. Data extraction and normalization
+                      const previewRows = (() => {
+                        if (!optimisationResult) return [];
+                        return (
+                          optimisationResult.optimisation_preview ||
+                          optimisationResult.full_optimization_results ||
+                          optimisationResult.table ||
+                          optimisationResult.results ||
+                          optimisationResult.data ||
+                          optimisationResult.result?.table ||
+                          optimisationResult.result?.results ||
+                          optimisationResult.result?.optimisation_preview ||
+                          []
+                        );
+                      })();
 
-              {/* Tabs */}
-              <div className="flex w-full">
-                {["strategy", "backtest", "optimisation", "properties"].map((tab) => (
-                  <button
-                    key={tab}
-                    className={`flex-1 py-3 text-center font-medium ${activeTab === tab ? "bg-[#141721] text-[#85e1fe]" : "bg-[#1A1D2D] text-gray-400"
-                      }`}
-                    onClick={() => handleTabChange(tab)}
-                  >
-                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                  </button>
-                ))}
+                      if (!optimisationResult) {
+                        return (
+                          <div className="flex-1 bg-[#0a0b12] flex flex-col items-center justify-center min-h-[400px]">
+                            <div className="text-gray-600 text-[10px] font-black uppercase tracking-[0.5em]">No optimization data</div>
+                            <div className="text-gray-800 text-[8px] font-bold mt-4 uppercase tracking-[0.3em]">Configure and run optimization below</div>
+                          </div>
+                        );
+                      }
+
+                      // 2. Tab rendering
+                      return (
+                        <div className="p-6 bg-[#000] text-white">
+                          {/* Save Button */}
+                          <div className="flex justify-end mb-6">
+                            <button
+                              onClick={() => setShowOptimisationResults(false)}
+                              className="bg-[#85e1fe] text-black px-4 py-1.5 rounded-md hover:bg-[#6bcae2] font-black uppercase tracking-widest text-[10px] shadow-[0_0_15px_rgba(133,225,254,0.3)] transition-all"
+                            >
+                              Save results of optimisation
+                            </button>
+                          </div>
+
+                          {/* Error Box Suppression */}
+                          {(() => {
+                            const isFatalError = (msg: string) => {
+                              if (!msg) return false;
+                              const nonFatalKeywords = ['UserWarning', 'Available cash', 'leverage', 'enough for this trade', 'No optimization results found for this generation'];
+                              return !nonFatalKeywords.some(kw => msg.includes(kw));
+                            };
+                            const hasOutput = (optimisationStdout && optimisationStdout.length > 0) || isFatalError(optimisationMessage) || isFatalError(optimisationStderr);
+                            const isCompleted = optimizationStatus === "completed";
+                            if (!previewRows.length && !isCompleted && hasOutput) {
+                              return (
+                                <OptimizationErrorDisplay
+                                  message={optimisationMessage}
+                                  stdout={optimisationStdout}
+                                  stderr={optimisationStderr}
+                                  className="mb-8"
+                                />
+                              );
+                            }
+                            return null;
+                          })()}
+
+                          {/* Sub-Tabs Grid */}
+                          {optimisationTab === 'results' && (
+                            <div className="space-y-8">
+                              <div className="overflow-x-auto">
+                                <table className="min-w-full text-[10px] border-separate border-spacing-y-2">
+                                  <thead>
+                                    <tr className="bg-[#000] text-gray-500 font-black uppercase tracking-widest">
+                                      <th className="px-4 py-3 text-left">Pass</th>
+                                      <th className="px-4 py-3 text-left">Equity Final [$]</th>
+                                      <th className="px-4 py-3 text-left">Return [%]</th>
+                                      <th className="px-4 py-3 text-left">Profit Factor</th>
+                                      <th className="px-4 py-3 text-left">Drawdown %</th>
+                                      <th className="px-4 py-3 text-left">Win Rate [%]</th>
+                                      <th className="px-4 py-3 text-left"># Trades</th>
+                                      <th className="px-4 py-3 text-left">Generation</th>
+                                      <th className="px-4 py-3 text-left">Inputs</th>
+                                      <th className="px-4 py-3 text-left"></th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {previewRows.map((row: any, idx: number) => (
+                                      <tr
+                                        key={idx}
+                                        className={`bg-[#080A10] text-[#85e1fe] cursor-pointer hover:bg-[#121420] border-l-2 ${selectedOptimisationRow === row ? 'border-[#85e1fe] bg-[#121420]' : 'border-transparent'}`}
+                                        onClick={() => { setSelectedOptimisationRow(row); setOptimisationTab('report'); }}
+                                      >
+                                        <td className="px-4 py-3 font-black">{idx + 1}</td>
+                                        <td className="px-4 py-3 font-mono text-white">${row['Equity Final [$]'] ?? '-'}</td>
+                                        <td className="px-4 py-3 font-mono">{row['Return [%]'] ?? '-'}%</td>
+                                        <td className="px-4 py-3 font-mono">{row['Profit Factor'] ?? '-'}</td>
+                                        <td className="px-4 py-3 font-mono text-red-500">{row['Max. Drawdown [%]'] ?? '-'}%</td>
+                                        <td className="px-4 py-3 font-mono text-white">{row['Win Rate [%]'] ?? '-'}%</td>
+                                        <td className="px-4 py-3 font-mono text-white">{row['# Trades'] ?? '-'}</td>
+                                        <td className="px-4 py-3 font-mono text-white">{row['generation'] ?? '-'}</td>
+                                        <td className="px-4 py-3 max-w-[250px] truncate text-gray-400" title={JSON.stringify(row)}>
+                                          {Object.entries(row)
+                                            .filter(([k]) => k.startsWith('param_'))
+                                            .map(([k, v]) => `${k}: ${v}`)
+                                            .join(', ') || Object.keys(row)
+                                              .filter(key => !['Return [%]', 'Equity Final [$]', '# Trades', 'Win Rate [%]', 'Profit Factor', 'Max. Drawdown [%]', 'Sharpe Ratio', 'Sortino Ratio', 'Calmar Ratio', 'Return (Ann.) [%]', 'Volatility (Ann.) [%]', 'Start', 'End', 'Duration', 'SQN', 'Exposure Time [%]', 'Equity Peak [$]', 'Avg. Trade [%]', 'Best Trade [%]', 'Worst Trade [%]', 'Avg. Drawdown [%]', 'Avg. Drawdown Duration', 'Max. Drawdown Duration', 'Avg. Trade Duration', 'Max. Trade Duration', 'Buy & Hold Return [%]', 'Expectancy [%]', 'Unnamed: 0', 'generation'].includes(key))
+                                              .map(key => `${key}=${row[key]}`)
+                                              .join(', ')}
+                                        </td>
+                                        <td className="px-4 py-3 text-right">
+                                          <button className="text-gray-500 hover:text-white transition-colors">
+                                            <Maximize2 className="w-3 h-3" />
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                              {/* Scatter Plot Inline */}
+                              {(optimisationResult?.heatmap_plot_html || optimisationResult?.plots_html?.['optimise_plot.html']) && (
+                                <div className="space-y-4 pt-10 border-t border-gray-900">
+                                  <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.4em]">Scatter Plot</h3>
+                                  <div className="w-full bg-[#000] border border-gray-900 rounded-lg overflow-hidden">
+                                    <iframe
+                                      title="Scatter Plot"
+                                      className="w-full h-[450px]"
+                                      style={{ border: 'none' }}
+                                      srcDoc={optimisationResult?.heatmap_plot_html || optimisationResult?.plots_html?.['optimise_plot.html']}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {optimisationTab === 'graph' && (
+                            <div className="space-y-12 pb-10">
+                              {[
+                                { title: 'Scatter Plot', html: optimisationResult?.heatmap_plot_html || optimisationResult?.plots_html?.['optimise_plot.html'] },
+                                { title: 'Trades Plot', html: optimisationResult?.trades_plot_html || optimisationResult?.plots_html?.['Plotly.html'] },
+                                { title: 'Convergence Plot', html: optimisationResult?.convergence_data?.length > 0 ? generateConvergencePlotHTML(optimisationResult.convergence_data) : null },
+                                { title: 'Optimization Heatmap', html: optimisationResult?.optimization_heatmap_data?.length > 0 ? generateHeatmapPlotHTML(optimisationResult.optimization_heatmap_data) : null }
+                              ].map((g, idx) => g.html ? (
+                                <div key={idx} className="space-y-4">
+                                  <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.4em]">{g.title}</h3>
+                                  <div className="w-full bg-[#000] border border-gray-900 rounded-lg overflow-hidden">
+                                    <iframe
+                                      title={g.title}
+                                      className="w-full h-[500px]"
+                                      style={{ border: 'none' }}
+                                      srcDoc={g.html}
+                                    />
+                                  </div>
+                                </div>
+                              ) : null)}
+                            </div>
+                          )}
+
+                          {optimisationTab === 'report' && (() => {
+                            const preview = selectedOptimisationRow || previewRows[0] || null;
+                            if (preview) {
+                              return (
+                                <div className="space-y-12">
+                                  <h3 className="text-[10px] font-black text-[#85e1fe] text-center uppercase tracking-[0.8em]">Detailed Report</h3>
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
+                                    <div className="space-y-6">
+                                      <h4 className="text-[9px] font-black text-gray-500 uppercase tracking-widest border-b border-gray-900 pb-2">Execution</h4>
+                                      {[
+                                        ['Start', preview['Start']],
+                                        ['End', preview['End']],
+                                        ['Duration', preview['Duration']],
+                                        ['Exposure %', preview['Exposure Time [%]']],
+                                        ['Equity Final', preview['Equity Final [$]']],
+                                        ['Equity Peak', preview['Equity Peak [$]']],
+                                      ].map(([l, v]) => (
+                                        <div key={l} className="flex justify-between text-[11px] border-b border-gray-900/50 py-1">
+                                          <span className="text-gray-500 font-medium">{l}</span>
+                                          <span className="text-white font-mono">{v ?? '-'}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                    <div className="space-y-6">
+                                      <h4 className="text-[9px] font-black text-gray-500 uppercase tracking-widest border-b border-gray-900 pb-2">Performance</h4>
+                                      {[
+                                        ['Sharpe', preview['Sharpe Ratio']],
+                                        ['Sortino', preview['Sortino Ratio']],
+                                        ['Max DD %', preview['Max. Drawdown [%]']],
+                                        ['Return %', preview['Return [%]']],
+                                        ['Profit Factor', preview['Profit Factor']],
+                                        ['# Trades', preview['# Trades']],
+                                      ].map(([l, v]) => (
+                                        <div key={l} className="flex justify-between text-[11px] border-b border-gray-900/50 py-1">
+                                          <span className="text-gray-500 font-medium">{l}</span>
+                                          <span className="text-[#85e1fe] font-mono">{v ?? '-'}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                    <div className="space-y-6">
+                                      <h4 className="text-[9px] font-black text-gray-500 uppercase tracking-widest border-b border-gray-900 pb-2">Trade Metrics</h4>
+                                      {[
+                                        ['Win Rate %', preview['Win Rate [%]']],
+                                        ['Best Trade %', preview['Best Trade [%]']],
+                                        ['Worst Trade %', preview['Worst Trade [%]']],
+                                        ['Avg Trade %', preview['Avg. Trade [%]']],
+                                        ['Expectancy %', preview['Expectancy [%]']],
+                                        ['SQN', preview['SQN']],
+                                      ].map(([l, v]) => (
+                                        <div key={l} className="flex justify-between text-[11px] border-b border-gray-800/50 py-1">
+                                          <span className="text-gray-500 font-medium">{l}</span>
+                                          <span className="text-white font-mono">{v ?? '-'}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return (
+                              <div className="text-center text-gray-500 py-10 uppercase tracking-widest text-[9px]">Select a result pass to view detailed report</div>
+                            );
+                          })()}
+
+                          {optimisationTab === 'trades' && (
+                            <div className="p-6 space-y-8">
+                              <h3 className="text-xs font-black text-gray-500 mb-6 uppercase tracking-[0.4em]">Previous Optimisation Results</h3>
+                              <OptimisationHistoryList
+                                strategyId={strategy_id || ''}
+                                onSelect={async (id) => {
+                                  const detail = await getOptimizationResultDetail(id as any);
+                                  setOptimisationResult(detail);
+                                  setShowOptimisationResults(true);
+                                  setOptimisationTab('results');
+                                }}
+                                isInline={true}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                ) : backtestDetail ? (
+                  <div className="w-full">
+                    {/* Graph Tab */}
+                    {backtestResultTab === 'graph' && (
+                      <div className={`w-full relative group transition-all duration-500 ${isChartExpanded ? 'fixed inset-0 z-[200] bg-black p-10 overflow-auto' : ''}`}>
+                        <div className={`bg-[#000000] ${isChartExpanded ? '' : 'p-6'}`}>
+                          {plotHtml ? (
+                            <div className="relative">
+                              <div className="absolute right-4 top-4 z-10 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button
+                                  onClick={() => setIsChartExpanded(!isChartExpanded)}
+                                  className="bg-[#1A1D2D] border border-gray-700 p-2 rounded hover:bg-gray-800 text-[#85e1fe] transition-all"
+                                  title={isChartExpanded ? "Exit Full Page" : "View Full Page"}
+                                >
+                                  <Maximize2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    const win = window.open('', '_blank');
+                                    if (win) {
+                                      win.document.write(`<html><body style="margin:0;padding:0;background:#000;">${plotHtml}</body></html>`);
+                                      win.document.close();
+                                    }
+                                  }}
+                                  className="bg-[#1A1D2D] border border-gray-700 p-2 rounded hover:bg-gray-800 text-[#85e1fe] transition-all"
+                                  title="Open in New Tab"
+                                >
+                                  <Layout className="w-4 h-4" />
+                                </button>
+                              </div>
+                              <iframe
+                                title="Equity Plot"
+                                style={{ width: "100%", height: isChartExpanded ? "calc(100vh - 120px)" : "550px", border: "none", backgroundColor: "#000" }}
+                                srcDoc={plotHtml}
+                              />
+                            </div>
+                          ) : (
+                            <div className="text-center text-gray-400 py-20 font-medium uppercase tracking-widest text-[10px]">Run backtest to view results</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Chart Data Tab */}
+                    {backtestResultTab === 'chart_data' && (
+                      <div className="p-6">
+                        {backtestDetail.chart_data && backtestDetail.chart_data.length > 0 ? (
+                          <div className="bg-[#080A10] rounded-lg overflow-hidden border border-gray-800">
+                            <div className="overflow-x-auto max-h-[600px]">
+                              <table className="min-w-full text-[10px]">
+                                <thead className="bg-[#000000] text-gray-400 sticky top-0 uppercase tracking-widest font-black">
+                                  <tr>
+                                    <th className="px-4 py-3 text-left">#</th>
+                                    {Object.keys(backtestDetail.chart_data[0]).map((col) => (
+                                      <th key={col} className="px-4 py-3 text-left whitespace-nowrap">{col}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {backtestDetail.chart_data.slice(0, 100).map((row: any, i: number) => (
+                                    <tr key={i} className="border-t border-gray-900 hover:bg-[#121420]">
+                                      <td className="px-4 py-2 text-gray-500">{i + 1}</td>
+                                      {Object.values(row).map((val: any, j: number) => (
+                                        <td key={j} className="px-4 py-2 text-white whitespace-nowrap">
+                                          {typeof val === 'number' ? val.toFixed(2) : String(val)}
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-center text-gray-500 py-20 font-bold uppercase tracking-widest text-xs">No chart data available</div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Trades Tab with History */}
+                    {backtestResultTab === 'trades' && (
+                      <div className="p-6 space-y-12">
+                        {/* History Section - Only Backtest History here */}
+                        <div>
+                          <h3 className="text-xs font-black text-gray-500 mb-6 uppercase tracking-[0.4em]">Backtest History</h3>
+                          <BacktestHistoryList
+                            strategyId={strategy_id || ''}
+                            onSelect={loadBacktestResult}
+                            isInline={true}
+                          />
+                        </div>
+
+                        {/* Current Results Section */}
+                        <div>
+                          <h3 className="text-xs font-black text-gray-500 mb-6 uppercase tracking-[0.4em]">Current Trades</h3>
+                          {backtestDetail.trades_data && backtestDetail.trades_data.length > 0 ? (
+                            <div className="bg-[#080A10] rounded-lg overflow-hidden border border-gray-800">
+                              <div className="overflow-x-auto max-h-[500px]">
+                                <table className="min-w-full text-[10px]">
+                                  <thead className="bg-[#000000] text-gray-400 sticky top-0 uppercase tracking-widest font-black">
+                                    <tr>
+                                      <th className="px-4 py-3 text-left">#</th>
+                                      <th className="px-4 py-3 text-left">Time</th>
+                                      <th className="px-4 py-3 text-left">Type</th>
+                                      <th className="px-4 py-3 text-left">Size</th>
+                                      <th className="px-4 py-3 text-left">Price</th>
+                                      <th className="px-4 py-3 text-left">Profit</th>
+                                      <th className="px-4 py-3 text-left">Balance</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {backtestDetail.trades_data.map((trade: any, index: number) => (
+                                      <tr key={index} className="border-t border-gray-900 hover:bg-[#121420]">
+                                        <td className="px-4 py-3 text-white">{index + 1}</td>
+                                        <td className="px-4 py-3 text-white">{trade.EntryTime || trade.Time || 'N/A'}</td>
+                                        <td className="px-4 py-3 text-white">{trade.Type || 'N/A'}</td>
+                                        <td className="px-4 py-3 text-white">{trade.Size ?? 'N/A'}</td>
+                                        <td className="px-4 py-3 text-white">{trade.EntryPrice != null ? trade.EntryPrice.toFixed(5) : trade.Price != null ? trade.Price.toFixed(5) : 'N/A'}</td>
+                                        <td className={`px-4 py-3 font-semibold ${(trade.PnL || trade.Profit || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                          {trade.PnL != null ? `$${trade.PnL.toFixed(2)}` : trade.Profit != null ? `$${trade.Profit.toFixed(2)}` : 'N/A'}
+                                        </td>
+                                        <td className="px-4 py-3 text-white">{trade.Balance != null ? `$${trade.Balance.toFixed(2)}` : 'N/A'}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-center text-gray-500 py-20 font-bold uppercase tracking-widest text-xs">No trades data available</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Summary / Report Tab */}
+                    {(backtestResultTab === 'summary' || backtestResultTab === 'report') && (
+                      <div className="p-6">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                          {/* Column 1 */}
+                          <div className="space-y-4">
+                            <h3 className="text-xs font-black text-gray-500 mb-4 uppercase tracking-widest">General</h3>
+                            <div className="space-y-3">
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Start:</span>
+                                <span className="text-white font-medium">{formatDateForResult(backtestDetail.data_start_date)}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">End:</span>
+                                <span className="text-white font-medium">{formatDateForResult(backtestDetail.data_end_date)}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Return (%):</span>
+                                <span className={`font-bold ${(backtestDetail.return_percent || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                  {backtestDetail.return_percent != null ? backtestDetail.return_percent.toFixed(4) : 'N/A'}%
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          {/* Column 2 */}
+                          <div className="space-y-4">
+                            <h3 className="text-xs font-black text-gray-500 mb-4 uppercase tracking-widest">Risk/Reward</h3>
+                            <div className="space-y-3">
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Sharpe Ratio:</span>
+                                <span className="text-white font-medium">{backtestDetail.sharpe_ratio != null ? backtestDetail.sharpe_ratio.toFixed(4) : 'N/A'}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Max DD (%):</span>
+                                <span className="text-red-500 font-bold">{backtestDetail.max_drawdown_percent != null ? backtestDetail.max_drawdown_percent.toFixed(4) : 'N/A'}%</span>
+                              </div>
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Win Rate (%):</span>
+                                <span className="text-white font-medium">{backtestDetail.win_rate_percent != null ? backtestDetail.win_rate_percent.toFixed(2) : 'N/A'}%</span>
+                              </div>
+                            </div>
+                          </div>
+                          {/* Column 3 */}
+                          <div className="space-y-4">
+                            <h3 className="text-xs font-black text-gray-500 mb-4 uppercase tracking-widest">Strategy</h3>
+                            <div className="space-y-3">
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Trades:</span>
+                                <span className="text-white font-medium">{backtestDetail.num_trades ?? 'N/A'}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Final Equity:</span>
+                                <span className="text-white font-medium">${backtestDetail.final_equity != null ? backtestDetail.final_equity.toFixed(2) : 'N/A'}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="w-full h-[400px] bg-[#000000] flex items-center justify-center">
+                    <p className="text-gray-800 font-black uppercase tracking-[0.5em] text-[10px]">Run backtest to view results</p>
+                  </div>
+                )}
+              </div>
+
+
+              {/* Bottom Navigation Tabs - Sticky above footer */}
+              <div className="flex bg-[#0a0b12] border-y border-gray-800 sticky bottom-[90px] z-40 w-full overflow-hidden">
+                <div className="grid grid-cols-4 w-full">
+                  {["strategy", "backtest", "optimisation", "properties"].map((tab) => (
+                    <button
+                      key={tab}
+                      className={`py-4 text-center text-[10px] font-black uppercase tracking-widest transition-all border-t-2 ${activeTab === tab ? "bg-[#121420] text-[#85e1fe] border-[#85e1fe]" : "bg-[#0a0b12] text-gray-500 hover:text-gray-300 hover:bg-[#161927] border-transparent"
+                        }`}
+                      onClick={() => handleTabChange(tab)}
+                    >
+                      {tab}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* Content area with overflow to allow scrolling */}
-              <div className="flex-1 overflow-y-auto pb-[160px] bg-[#000000] ml-[63px]">
+              <div className="flex-1 overflow-y-auto pb-[160px] bg-[#000000]">
                 {/* Back Button - Sticky */}
                 {strategy_id && (
                   <div className="sticky top-4 z-50 w-fit ml-5 mt-4 md:ml-10">
@@ -2878,15 +3491,7 @@ export default function StrategyTestingPage() {
                       </p>
                     </div>
 
-                    {/* Previous Backtests Button - Always Visible */}
-                    <div className="mb-4 flex justify-end">
-                      <button
-                        onClick={() => setShowBacktestHistory(true)}
-                        className="bg-gray-600 hover:bg-gray-700 text-white rounded-full px-6 py-3 text-sm font-medium"
-                      >
-                        Previous Backtests
-                      </button>
-                    </div>
+
 
                     {/* MetaAPI Configuration or File Upload */}
                     {useMetaAPI ? (
@@ -2929,55 +3534,6 @@ export default function StrategyTestingPage() {
                         </div>
 
                         <div className="flex gap-3">
-                          {/* <button
-                            className="bg-[#141721] hover:bg-[#2B2E38] text-white rounded-full px-4 py-2 text-sm"
-                            onClick={async () => {
-                              try {
-                                const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
-                                const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
-                                if (!token || !accountId) {
-                                  showToast('MetaAPI credentials not configured', 'error')
-                                  return
-                                }
-                                const res = await getAllBrokerSymbols({ metaapi_token: token, metaapi_account_id: accountId })
-                                const gold = res?.results?.gold_silver_symbols?.[0] ||
-                                  (Array.isArray(res?.results?.all_symbols) ? res.results.all_symbols.find((s: any) => typeof s.symbol === 'string' && s.symbol.toUpperCase().includes('XAU')) : undefined)
-                                if (gold?.symbol) {
-                                  const updated = { token, accountId, symbol: gold.symbol }
-                                  setMetaAPIConfig(updated as any)
-                                  showToast(`Detected broker gold symbol: ${gold.symbol}`, 'success')
-                                } else {
-                                  showToast('No gold symbols found. Try without filter.', 'warning')
-                                }
-                              } catch (e: any) {
-                                showToast(`Failed to fetch symbols: ${e.message}`, 'error')
-                              }
-                            }}
-                          >
-                            Find Broker Symbols (Gold)
-                          </button> */}
-                          {/* <button
-                            className="bg-[#141721] hover:bg-[#2B2E38] text-white rounded-full px-4 py-2 text-sm"
-                            onClick={async () => {
-                              try {
-                                const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
-                                const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
-                                const symbol = metaAPIConfig?.symbol || 'XAUUSD'
-                                if (!token || !accountId) {
-                                  showToast('MetaAPI credentials not configured', 'error')
-                                  return
-                                }
-                                const res = await getSymbolTimeframes({ metaapi_token: token, metaapi_account_id: accountId, symbol })
-                                const available = res?.results?.available_timeframes || []
-                                const unavailable = res?.results?.unavailable_timeframes || []
-                                showToast(`Available: ${available.join(', ')} | Unavailable: ${unavailable.join(', ')}`, 'success')
-                              } catch (e: any) {
-                                showToast(`Timeframe check failed: ${e.message}`, 'error')
-                              }
-                            }}
-                          >
-                            Check Timeframes
-                          </button> */}
                         </div>
                       </div>
                     ) : (
@@ -3058,206 +3614,8 @@ export default function StrategyTestingPage() {
                   />
                 )}
 
-                {activeTab === "optimisation" && showOptimisationResults && optimisationResult && (
-                  <div className="p-6 bg-[#000000] text-white min-h-[600px]">
-                    {/* Optimisation response info (message/stdout/stderr) - Enhanced Error Display */}
-                    {(optimisationMessage || optimisationStdout || optimisationStderr) && (
-                      <OptimizationErrorDisplay
-                        message={optimisationMessage}
-                        stdout={optimisationStdout}
-                        stderr={optimisationStderr}
-                        className="mb-4"
-                      />
-                    )}
-
-                    {/* Top-level tabs: Results | Graph | Report */}
-                    <div className="flex border-b border-gray-700 mb-6">
-                      <button
-                        className={`px-6 py-3 font-semibold ${optimisationTab === 'results' ? 'text-[#85e1fe] border-b-2 border-[#85e1fe]' : 'text-gray-400'}`}
-                        onClick={() => setOptimisationTab('results')}
-                      >
-                        Results
-                      </button>
-                      <button
-                        className={`px-6 py-3 font-semibold ${optimisationTab === 'graph' ? 'text-[#85e1fe] border-b-2 border-[#85e1fe]' : 'text-gray-400'}`}
-                        onClick={() => setOptimisationTab('graph')}
-                      >
-                        Graph
-                      </button>
-                      <button
-                        className={`px-6 py-3 font-semibold ${optimisationTab === 'report' ? 'text-[#85e1fe] border-b-2 border-[#85e1fe]' : 'text-gray-400'}`}
-                        onClick={() => setOptimisationTab('report')}
-                      >
-                        Report
-                      </button>
-                    </div>
-
-                    {/* Results Tab */}
-                    {optimisationTab === 'results' && (
-                      <div>
-                        <div className="overflow-x-auto mb-8">
-                          <table className="min-w-full text-xs border-separate border-spacing-y-2">
-                            <thead>
-                              <tr className="bg-[#1A1D2D] text-white">
-                                <th className="px-2 py-2">#</th>
-                                <th className="px-2 py-2">Return [%]</th>
-                                <th className="px-2 py-2">Equity Final [$]</th>
-                                <th className="px-2 py-2"># Trades</th>
-                                <th className="px-2 py-2">Win Rate [%]</th>
-                                <th className="px-2 py-2">Profit Factor</th>
-                                <th className="px-2 py-2">Max. Drawdown [%]</th>
-                                <th className="px-2 py-2">Sharpe Ratio</th>
-                                <th className="px-2 py-2">Parameters</th>
-                                <th className="px-2 py-2"> </th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {(optimisationResult.convergence_data || optimisationResult.full_optimization_results || optimisationResult.table || []).map((row: any, idx: number) => {
-                                // Extract parameters (all fields that are not standard metrics)
-                                const standardFields = ['Return [%]', 'Equity Final [$]', '# Trades', 'Win Rate [%]',
-                                  'Profit Factor', 'Max. Drawdown [%]', 'Sharpe Ratio', 'Sortino Ratio', 'Calmar Ratio',
-                                  'Return (Ann.) [%]', 'Volatility (Ann.) [%]', 'Start', 'End', 'Duration', 'SQN',
-                                  'Exposure Time [%]', 'Equity Peak [$]', 'Avg. Trade [%]', 'Best Trade [%]',
-                                  'Worst Trade [%]', 'Avg. Drawdown [%]', 'Avg. Drawdown Duration', 'Max. Drawdown Duration',
-                                  'Avg. Trade Duration', 'Max. Trade Duration', 'Buy & Hold Return [%]', 'Expectancy [%]',
-                                  'Unnamed: 0', 'generation'];
-
-                                const parameters = Object.keys(row)
-                                  .filter(key => !standardFields.includes(key))
-                                  .map(key => `${key}=${row[key]}`)
-                                  .join(', ');
-
-                                return (
-                                  <tr
-                                    key={idx}
-                                    className={`bg-[#141721] text-white cursor-pointer hover:bg-[#1e2132] ${selectedOptimisationRow === row ? 'bg-[#23263a]' : ''}`}
-                                    onClick={() => {
-                                      setSelectedOptimisationRow(row);
-                                      setOptimisationTab('report');
-                                    }}
-                                  >
-                                    <td className="px-2 py-2">{idx + 1}</td>
-                                    <td className="px-2 py-2">{row['Return [%]']?.toFixed(2) || row.profit || '-'}</td>
-                                    <td className="px-2 py-2">{row['Equity Final [$]']?.toFixed(2) || '-'}</td>
-                                    <td className="px-2 py-2">{row['# Trades'] || row.total_trades || '-'}</td>
-                                    <td className="px-2 py-2">{row['Win Rate [%]']?.toFixed(2) || row.win_rate_percent || row.win_rate || '-'}</td>
-                                    <td className="px-2 py-2">{row['Profit Factor']?.toFixed(2) || row.profit_factor || '-'}</td>
-                                    <td className="px-2 py-2">{row['Max. Drawdown [%]']?.toFixed(2) || row.drawdown_percent || '-'}</td>
-                                    <td className="px-2 py-2">{row['Sharpe Ratio']?.toFixed(2) || '-'}</td>
-                                    <td className="px-2 py-2 max-w-[200px] truncate" title={parameters || row.inputs}>{parameters || row.inputs || '-'}</td>
-                                    <td className="px-2 py-2 text-right">
-                                      <button
-                                        className="text-[#85e1fe] hover:underline text-xs"
-                                        onClick={e => { e.stopPropagation(); setSelectedOptimisationRow(row); setOptimisationTab('report'); }}
-                                      >
-                                        View Report
-                                      </button>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Graph Tab */}
-                    {optimisationTab === 'graph' && (
-                      <div>
-                        {/* Convergence Plot */}
-                        {optimisationResult.convergence_data && optimisationResult.convergence_data.length > 0 && (() => {
-                          const plotHTML = generateConvergencePlotHTML(optimisationResult.convergence_data);
-                          return plotHTML ? (
-                            <div className="mb-8">
-                              <h3 className="mb-2 text-lg font-semibold text-white">Convergence Plot</h3>
-                              <iframe
-                                title="Convergence Plot"
-                                style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#0e1018" }}
-                                srcDoc={plotHTML}
-                              />
-                            </div>
-                          ) : null;
-                        })()}
-
-                        {/* Heatmap Plot */}
-                        {optimisationResult.optimization_heatmap_data && optimisationResult.optimization_heatmap_data.length > 0 && (() => {
-                          const plotHTML = generateHeatmapPlotHTML(optimisationResult.optimization_heatmap_data);
-                          return plotHTML ? (
-                            <div className="mb-8">
-                              <h3 className="mb-2 text-lg font-semibold text-white">Parameter Optimization Heatmap</h3>
-                              <iframe
-                                title="Optimization Heatmap"
-                                style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#0e1018" }}
-                                srcDoc={plotHTML}
-                              />
-                            </div>
-                          ) : null;
-                        })()}
-
-                        {/* Legacy plots - still show if available */}
-                        {optimisationResult.heatmap_plot_html && (
-                          <div className="mb-8">
-                            <h3 className="mb-2 text-lg font-semibold text-white">Scatter Plot (Legacy)</h3>
-                            <iframe
-                              title="Scatter Plot"
-                              style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#f8f8f8" }}
-                              srcDoc={optimisationResult.heatmap_plot_html}
-                            />
-                          </div>
-                        )}
-                        {optimisationResult.trades_plot_html && (
-                          <div className="mb-8">
-                            <h3 className="mb-2 text-lg font-semibold text-white">Trades Plot</h3>
-                            <iframe
-                              title="Trades Plot"
-                              style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#f8f8f8" }}
-                              srcDoc={optimisationResult.trades_plot_html}
-                            />
-                          </div>
-                        )}
-
-                        {/* No data message */}
-                        {!optimisationResult.convergence_data &&
-                          !optimisationResult.optimization_heatmap_data &&
-                          !optimisationResult.heatmap_plot_html &&
-                          !optimisationResult.trades_plot_html && (
-                            <div className="text-center text-gray-400 py-8">
-                              No plot data available
-                            </div>
-                          )}
-                      </div>
-                    )}
-
-                    {/* Report Tab */}
-                    {optimisationTab === 'report' && selectedOptimisationRow && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div>
-                          <div className="mb-2 flex flex-col gap-1">
-                            {Object.entries(selectedOptimisationRow).map(([key, value]) => (
-                              typeof value === 'number' || typeof value === 'string' ? (
-                                <div key={key} className="flex justify-between border-b border-gray-800 py-1 text-sm">
-                                  <span className="text-gray-400">{key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
-                                  <span className="text-white font-semibold">{value}</span>
-                                </div>
-                              ) : null
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-                {activeTab === "optimisation" && (!showOptimisationResults || !optimisationResult) && (
+                {activeTab === "optimisation" && (
                   <>
-                    <div className="flex justify-end p-4">
-                      <button
-                        className="bg-[#85e1fe] text-black px-4 py-2 rounded-md hover:bg-[#6bcae2]"
-                        onClick={() => setShowOptimisationHistory(true)}
-                      >
-                        See Previous Optimisation
-                      </button>
-                    </div>
                     <OptimisationTab
                       isLimitationsCollapsed={isLimitationsCollapsed}
                       setIsLimitationsCollapsed={setIsLimitationsCollapsed}
@@ -3290,648 +3648,638 @@ export default function StrategyTestingPage() {
                 )}
               </div>
 
-              {/* Sticky footer with progress and buttons */}
-              <div className="absolute bottom-0 left-0 right-0 bg-black border-t border-gray-800 z-10 ml-[63px]">
-                {/* Progress Bar */}
-                <div className="p-4">
-                  <div className="flex justify-between items-center mb-2">
-                    <span>Progress</span>
-                    <span>Time left: ---</span>
-                  </div>
-                  <div className="w-full bg-gray-700 h-2 rounded-full overflow-hidden">
-                    <div
-                      className="bg-green-500 h-full transition-all duration-300"
-                      style={{
-                        width: (isLoading
-                          ? `${Math.min(progress, 100)}%`
-                          : isLoading2
-                            ? `${Math.min(progress2, 100)}%`
-                            : isLoading3
-                              ? `${Math.min(progress3, 100)}%`
-                              : "0%"),
-                        opacity: (isLoading || isLoading2 || isLoading3) ? 1 : 0,
-                      }}
-                    ></div>
-                  </div>
-                </div>
+              {/* File Upload Success Modal */}
+              {showSuccessModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                  <div className="bg-[#f5f5f5] rounded-lg shadow-lg w-full max-w-md p-6">
+                    <div className="flex justify-between items-center mb-4">
+                      <h2 className="text-2xl font-bold text-black">File Upload Successful</h2>
+                      <button onClick={() => setShowSuccessModal(false)} className="text-gray-500 hover:text-gray-700">
+                        <X className="w-6 h-6" />
+                      </button>
+                    </div>
 
-                {/* Action Buttons */}
-                <div className="p-4 flex gap-4">
-                  <button
-                    className={`flex-1 py-3 rounded-full transition-colors ${isLoading
-                      ? 'bg-red-600 hover:bg-red-700 text-white font-semibold'
-                      : (!useMetaAPI && (requiredTimeframes.length > uploadedFiles.length))
-                        ? 'bg-gray-600 cursor-not-allowed text-gray-300'
-                        : (activeTab === 'strategy' || activeTab === 'backtest')
-                          ? 'bg-[#85e1fe] text-black hover:bg-[#6bcae2] font-semibold'
-                          : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
-                      }`}
-                    onClick={isLoading ? cancelBacktestRun : handleRunBacktest}
-                    disabled={!isLoading && (!useMetaAPI && (requiredTimeframes.length > uploadedFiles.length))}
-                  >
-                    {isLoading ? 'Cancel Backtest' : 'Run Backtest'}
-                  </button>
-                  <button
-                    onClick={isLoading2 ? cancelOptimisation : () => handleOptimisation(false)}
-                    className={`flex-1 py-3 rounded-full transition-colors ${isLoading2
-                      ? 'bg-red-600 hover:bg-red-700 text-white font-semibold'
-                      : (activeTab === 'optimisation' || activeTab === 'properties')
-                        ? 'bg-[#85e1fe] text-black hover:bg-[#6bcae2] font-semibold'
-                        : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
-                      }`}
-                  >
-                    {isLoading2 ? 'Cancel Optimisation' : 'Run Optimisation (Legacy)'}
-                  </button>
-                  <button
-                    onClick={isLoading2 || isCreatingOptimizationJob ? cancelOptimisation : () => handleOptimizationWithDroplets('regular')}
-                    className={`flex-1 py-3 rounded-full font-semibold transition-colors ${isLoading2 || isCreatingOptimizationJob
-                      ? 'bg-red-600 hover:bg-red-700 text-white'
-                      : (activeTab === 'optimisation' || activeTab === 'properties')
-                        ? 'bg-[#85e1fe] text-black hover:bg-[#6bcae2]'
-                        : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
-                      }`}
-                  >
-                    {isLoading2 || isCreatingOptimizationJob ? 'Cancel Optimization' : 'Run Optimization (Droplets)'}
-                  </button>
+                    <div className="flex flex-col items-center py-6">
+                      <div className="w-24 h-24 bg-[#85e1fe] rounded-full flex items-center justify-center mb-6">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path
+                            d="M5 12L10 17L20 7"
+                            stroke="white"
+                            strokeWidth="3"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </div>
+
+                      <div className="flex items-center">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path
+                            d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z"
+                            stroke="black"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                          <path d="M14 2V8H20" stroke="black" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        <span className="ml-2 text-black">{currentFile}</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {/* Loading Modal */}
+
+              {isChartExpanded && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 z-40" onClick={toggleChartExpansion} />
+              )}
+
+              {/* Advanced Settings Modal */}
+              {showAdvancedSettingsModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                  <AdvancedSettingsModalContent
+                    populationSize={populationSize}
+                    setPopulationSize={setPopulationSize}
+                    generations={generations}
+                    setGenerations={setGenerations}
+                    mutationRate={mutationRate}
+                    setMutationRate={setMutationRate}
+                    tournamentSize={tournamentSize}
+                    setTournamentSize={setTournamentSize}
+                    onClose={() => setShowAdvancedSettingsModal(false)}
+                    onSave={handleSaveAdvancedSettings}
+                  />
+                </div>
+              )}
+
+              {/* Optimization History Modal */}
+              {showOptimizationHistory && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                  <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-6xl max-h-[80vh] overflow-hidden">
+                    <div className="flex justify-between items-center p-6 border-b border-gray-700">
+                      <h2 className="text-2xl font-bold text-white">Optimization History</h2>
+                      <button
+                        onClick={() => setShowOptimizationHistory(false)}
+                        className="text-gray-400 hover:text-white"
+                      >
+                        <X className="w-6 h-6" />
+                      </button>
+                    </div>
+
+                    <div className="p-6 overflow-y-auto max-h-[60vh]">
+                      {optimizationResults.length === 0 ? (
+                        <div className="text-center text-gray-400 py-8">
+                          No optimization results found
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {optimizationResults.map((result) => (
+                            <div key={result.id} className="bg-[#141721] rounded-lg p-4 border border-gray-700">
+                              <div className="flex justify-between items-start mb-4">
+                                <div>
+                                  <h3 className="text-lg font-semibold text-white">
+                                    Optimization #{result.id}
+                                  </h3>
+                                  <p className="text-gray-400 text-sm">
+                                    Algorithm: {result.algorithm}
+                                  </p>
+                                  <p className="text-gray-400 text-sm">
+                                    Date: {new Date(result.optimization_date).toLocaleDateString()}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className={`px-3 py-1 rounded-full text-xs font-bold ${result.status === "completed" ? "bg-green-500 text-white" :
+                                    result.status === "running" ? "bg-yellow-500 text-black" :
+                                      result.status === "failed" ? "bg-red-500 text-white" :
+                                        "bg-gray-500 text-white"
+                                    }`}>
+                                    {result.status}
+                                  </span>
+                                  <button
+                                    onClick={() => deleteOptimizationResultHandler(result.id)}
+                                    className="text-red-400 hover:text-red-300"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              {result.status === "completed" && (
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                                  <div className="text-center">
+                                    <p className="text-gray-400 text-sm">Final Equity</p>
+                                    <p className="text-white font-semibold">
+                                      ${result.final_equity?.toFixed(2) || "N/A"}
+                                    </p>
+                                  </div>
+                                  <div className="text-center">
+                                    <p className="text-gray-400 text-sm">Return (Ann.)</p>
+                                    <p className="text-white font-semibold text-lg">
+                                      {result.return_ann_percent?.toFixed(2) || "N/A"}%
+                                    </p>
+                                  </div>
+                                  <div className="text-center">
+                                    <p className="text-gray-400 text-sm">Win Rate</p>
+                                    <p className="text-white font-semibold text-lg">
+                                      {result.win_rate_percent?.toFixed(2) || "N/A"}%
+                                    </p>
+                                  </div>
+                                  <div className="text-center">
+                                    <p className="text-gray-400 text-sm">Max Drawdown</p>
+                                    <p className="text-white font-semibold text-lg">
+                                      {result.max_drawdown_percent?.toFixed(2) || "N/A"}%
+                                    </p>
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => viewOptimizationResult(result.id)}
+                                  className="bg-[#85e1fe] text-black px-4 py-2 rounded-md hover:bg-[#6bcae2] text-sm"
+                                >
+                                  View Details
+                                </button>
+                                {result.status === "completed" && (
+                                  <button
+                                    onClick={() => {
+                                      // Load this result into the main view
+                                      setOptimisationResult(result)
+                                      setShowOptimisationResults(true)
+                                      setShowOptimizationHistory(false)
+                                    }}
+                                    className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 text-sm"
+                                  >
+                                    Load Result
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Optimization Result Details Modal */}
+              {selectedOptimizationResult && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                  <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-4xl max-h-[80vh] overflow-hidden">
+                    <div className="flex justify-between items-center p-6 border-b border-gray-700">
+                      <h2 className="text-2xl font-bold text-white">
+                        Optimization Result Details
+                      </h2>
+                      <button
+                        onClick={() => setSelectedOptimizationResult(null)}
+                        className="text-gray-400 hover:text-white"
+                      >
+                        <X className="w-6 h-6" />
+                      </button>
+                    </div>
+
+                    <div className="p-6 overflow-y-auto max-h-[60vh]">
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-6 mb-6">
+                        <div className="text-center">
+                          <p className="text-gray-400 text-sm">Final Equity</p>
+                          <p className="text-white font-semibold text-lg">
+                            ${selectedOptimizationResult.final_equity?.toFixed(2) || "N/A"}
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-gray-400 text-sm">Return (Ann.)</p>
+                          <p className="text-white font-semibold text-lg">
+                            {selectedOptimizationResult.return_ann_percent?.toFixed(2) || "N/A"}%
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-gray-400 text-sm">Win Rate</p>
+                          <p className="text-white font-semibold text-lg">
+                            {selectedOptimizationResult.win_rate_percent?.toFixed(2) || "N/A"}%
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-gray-400 text-sm">Max Drawdown</p>
+                          <p className="text-white font-semibold text-lg">
+                            {selectedOptimizationResult.max_drawdown_percent?.toFixed(2) || "N/A"}%
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-gray-400 text-sm">Sharpe Ratio</p>
+                          <p className="text-white font-semibold text-lg">
+                            {selectedOptimizationResult.sharpe_ratio?.toFixed(2) || "N/A"}
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-gray-400 text-sm">Number of Trades</p>
+                          <p className="text-white font-semibold text-lg">
+                            {selectedOptimizationResult.num_trades || "N/A"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {selectedOptimizationResult.optimized_parameters && (
+                        <div className="mb-6">
+                          <h3 className="text-lg font-semibold text-white mb-3">Optimized Parameters</h3>
+                          <div className="bg-[#141721] rounded-lg p-4">
+                            <pre className="text-sm text-gray-300 whitespace-pre-wrap">
+                              {JSON.stringify(selectedOptimizationResult.optimized_parameters, null, 2)}
+                            </pre>
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedOptimizationResult.trades_plot_html && (
+                        <div className="mb-6">
+                          <h3 className="text-lg font-semibold text-white mb-3">Trades Plot</h3>
+                          <iframe
+                            title="Trades Plot"
+                            style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#f8f8f8" }}
+                            srcDoc={selectedOptimizationResult.trades_plot_html}
+                          />
+                        </div>
+                      )}
+
+                      {selectedOptimizationResult.heatmap_plot_html && (
+                        <div className="mb-6">
+                          <h3 className="text-lg font-semibold text-white mb-3">Heatmap Plot</h3>
+                          <iframe
+                            title="Heatmap Plot"
+                            style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#f8f8f8" }}
+                            srcDoc={selectedOptimizationResult.heatmap_plot_html}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {showOptimisationHistory && !selectedOptimisationDetail && (
+                <OptimisationHistoryList
+                  strategyId={strategy_id || ''}
+                  onSelect={async (id) => {
+                    const detail = await getOptimizationResultDetail(id);
+                    setSelectedOptimisationDetail(detail);
+                  }}
+                  onClose={() => setShowOptimisationHistory(false)}
+                />
+              )}
+              {selectedOptimisationDetail && (
+                <PreviousOptimisationView
+                  optimisationResults={[selectedOptimisationDetail]}
+                  onClose={() => {
+                    setSelectedOptimisationDetail(null);
+                    setShowOptimisationHistory(false);
+                  }}
+                  isFullScreen={true}
+                />
+              )}
+
+              {/* Walk Forward Optimization Results Modal */}
+              {showWalkForwardOptimizationResults && (
+                <WalkForwardOptimizationResults
+                  results={walkForwardOptimizationResults}
+                  onClose={() => setShowWalkForwardOptimizationResults(false)}
+                  onViewDetail={(result) => viewWalkForwardOptimizationResult(result.id)}
+                  onDelete={(id) => deleteWalkForwardOptimizationResultHandler(id)}
+                  onLoadResult={(result) => {
+                    setSelectedWalkForwardResult(result);
+                    setShowWalkForwardOptimizationResults(false);
+                    // Optionally display result in main view
+                    if (result.trades_plot_html) {
+                      setPlotHtml(result.trades_plot_html);
+                    }
+                    if (result.heatmap_plot_html) {
+                      setPlotHeatmapHtml(result.heatmap_plot_html);
+                    }
+                  }}
+                />
+              )}
+
+              {/* Walk Forward Optimization Details Modal */}
+              {walkForwardDetailResult && (
+                <WalkForwardOptimisationView
+                  result={walkForwardDetailResult}
+                  onClose={() => setWalkForwardDetailResult(null)}
+                  isFullScreen={true}
+                />
+              )}
+
+              {/* Custom Strategy Backtest Results Modal */}
+              {showCustomStrategyBacktestResults && customStrategyBacktestResult && (
+                <CustomStrategyBacktestResults
+                  result={customStrategyBacktestResult}
+                  onClose={() => {
+                    setShowCustomStrategyBacktestResults(false)
+                    setCustomStrategyBacktestResult(null)
+                  }}
+                  onViewFullResults={() => {
+                    setShowCustomStrategyBacktestResults(false)
+                    router.push('/custom-backtest-results')
+                  }}
+                />
+              )}
+
+              {/* Optimization Cost Dialog */}
+              <OptimizationCostDialog
+                isOpen={showCostDialog}
+                onClose={() => setShowCostDialog(false)}
+                onConfirm={handleCostConfirmation}
+                optimizationType={optimizationType}
+              />
+
+              {/* Optimization Job Creation Loading Modal */}
+              {isCreatingOptimizationJob && (
+                <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+                  <div className="bg-[#1A1D2D] rounded-lg shadow-lg p-8 max-w-md w-full">
+                    <div className="flex flex-col items-center">
+                      {/* Spinner */}
+                      <div className="relative w-20 h-20 mb-6">
+                        <div className="absolute top-0 left-0 w-full h-full">
+                          <div className="w-20 h-20 border-4 border-gray-600 border-t-[#85e1fe] rounded-full animate-spin"></div>
+                        </div>
+                      </div>
+
+                      {/* Loading Text */}
+                      <h3 className="text-xl font-semibold text-white mb-2">
+                        Creating Optimization Job
+                      </h3>
+                      <p className="text-gray-400 text-center">
+                        {optimizationType === 'walk_forward'
+                          ? 'Setting up walk forward optimization with droplets...'
+                          : 'Setting up regular optimization with droplets...'}
+                      </p>
+                      <p className="text-sm text-gray-500 text-center mt-2">
+                        Please wait, this may take a few moments
+                      </p>
+                      <button
+                        onClick={cancelOptimisation}
+                        className="mt-6 px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-full font-medium transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Backtest History Modal */}
+              {showBacktestHistory && (
+                <BacktestHistoryList
+                  strategyId={strategy_id || ''}
+                  onClose={() => setShowBacktestHistory(false)}
+                  onSelect={loadBacktestResult}
+                />
+              )}
+
+              {/* Walk Forward Droplet Results Modal */}
+              {dropletJobResults && dropletJobResults.results && (
+                <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+                  <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-5xl max-h-[90vh] overflow-hidden">
+                    <div className="flex justify-between items-center p-6 border-b border-gray-700">
+                      <div>
+                        <h2 className="text-2xl font-bold text-white">{dropletJobResults.strategy_name}</h2>
+                        <p className="text-gray-400 text-sm mt-1">{dropletJobResults.type}</p>
+                      </div>
+                      <button
+                        onClick={() => setDropletJobResults(null)}
+                        className="text-gray-400 hover:text-white"
+                      >
+                        <X className="w-6 h-6" />
+                      </button>
+                    </div>
+
+                    <div className="p-6 overflow-y-auto max-h-[75vh]">
+                      {/* Hypothesis Testing Results */}
+                      <div className="mb-6">
+                        <h3 className="text-lg font-semibold text-white mb-4">Hypothesis Testing</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          <div className="bg-[#141721] rounded-lg p-4">
+                            <p className="text-gray-400 text-sm">Z-Statistic</p>
+                            <p className="text-white font-semibold text-lg">
+                              {dropletJobResults.results.z_statistic?.toFixed(4) || 'N/A'}
+                            </p>
+                          </div>
+                          <div className="bg-[#141721] rounded-lg p-4">
+                            <p className="text-gray-400 text-sm">P-Value</p>
+                            <p className="text-white font-semibold text-lg">
+                              {dropletJobResults.results.p_value?.toFixed(4) || 'N/A'}
+                            </p>
+                          </div>
+                          <div className="bg-[#141721] rounded-lg p-4">
+                            <p className="text-gray-400 text-sm">Avg Validation Return</p>
+                            <p className={`font-semibold text-lg ${(dropletJobResults.results.avg_validation_return || 0) > 0 ? 'text-green-500' : 'text-red-500'
+                              }`}>
+                              {dropletJobResults.results.avg_validation_return?.toFixed(2) || 'N/A'}%
+                            </p>
+                          </div>
+                          <div className="bg-[#141721] rounded-lg p-4">
+                            <p className="text-gray-400 text-sm">Decision</p>
+                            <p className={`font-semibold text-sm ${(dropletJobResults.results.p_value || 1) < 0.05 ? 'text-green-500' : 'text-yellow-500'
+                              }`}>
+                              {(dropletJobResults.results.p_value || 1) < 0.05 ? '✅ Profitable' : '⚠️ Not Profitable'}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 bg-[#141721] rounded-lg p-4">
+                          <p className="text-gray-400 text-sm mb-2">Hypothesis Decision:</p>
+                          <p className="text-white text-sm">
+                            {dropletJobResults.results.hypothesis_decision || 'No decision available'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Plot Files Information */}
+                      {dropletJobResults.results.plot_files && (
+                        <div className="mb-6">
+                          <h3 className="text-lg font-semibold text-white mb-4">
+                            Plot Files ({Object.keys(dropletJobResults.results.plot_files).length} available)
+                          </h3>
+                          <div className="grid grid-cols-1 gap-3">
+                            {Object.entries(dropletJobResults.results.plot_files).map(([type, info]: [string, any]) => (
+                              <div
+                                key={type}
+                                className="bg-[#141721] rounded-lg p-4 flex justify-between items-center"
+                              >
+                                <div>
+                                  <p className="text-white font-semibold">
+                                    {type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                  </p>
+                                  <p className="text-gray-400 text-sm">{info.filename}</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-[#85e1fe] font-semibold">
+                                    {(info.size / 1024 / 1024).toFixed(2)} MB
+                                  </p>
+                                  <p className="text-gray-400 text-xs">
+                                    {info.available ? '✅ Available' : '❌ Not available'}
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          <p className="text-gray-400 text-sm mt-3">
+                            ℹ️ Plots were generated on the droplet. Download from output directory: {dropletJobResults.results.output_dir}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Walk Forward Settings */}
+                      {dropletJobResults.job_parameters?.walk_forward_settings && (
+                        <div className="mb-6">
+                          <h3 className="text-lg font-semibold text-white mb-4">Walk Forward Settings</h3>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="bg-[#141721] rounded-lg p-4">
+                              <p className="text-gray-400 text-sm">Warmup Bars</p>
+                              <p className="text-white font-semibold">
+                                {dropletJobResults.job_parameters.walk_forward_settings.warmup_bars}
+                              </p>
+                            </div>
+                            <div className="bg-[#141721] rounded-lg p-4">
+                              <p className="text-gray-400 text-sm">Lookback Bars</p>
+                              <p className="text-white font-semibold">
+                                {dropletJobResults.job_parameters.walk_forward_settings.lookback_bars}
+                              </p>
+                            </div>
+                            <div className="bg-[#141721] rounded-lg p-4">
+                              <p className="text-gray-400 text-sm">Validation Bars</p>
+                              <p className="text-white font-semibold">
+                                {dropletJobResults.job_parameters.walk_forward_settings.validation_bars}
+                              </p>
+                            </div>
+                            <div className="bg-[#141721] rounded-lg p-4">
+                              <p className="text-gray-400 text-sm">Anchor</p>
+                              <p className="text-white font-semibold">
+                                {dropletJobResults.job_parameters.walk_forward_settings.anchor ? 'Yes' : 'No'}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Job Information */}
+                      <div className="bg-[#141721] rounded-lg p-4">
+                        <h3 className="text-lg font-semibold text-white mb-3">Job Information</h3>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Job ID:</span>
+                              <span className="text-white font-semibold">{dropletJobResults.id}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Status:</span>
+                              <span className="text-green-500 font-semibold">{dropletJobResults.status}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Runtime:</span>
+                              <span className="text-white font-semibold">{dropletJobResults.runtime_minutes} min</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Droplet Size:</span>
+                              <span className="text-white font-semibold">{dropletJobResults.droplet_size}</span>
+                            </div>
+                          </div>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Estimated Cost:</span>
+                              <span className="text-white font-semibold">${dropletJobResults.estimated_cost}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Actual Cost:</span>
+                              <span className="text-green-500 font-semibold">${dropletJobResults.actual_cost}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Droplet ID:</span>
+                              <span className="text-white font-semibold">{dropletJobResults.droplet_id}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Completed At:</span>
+                              <span className="text-white font-semibold">
+                                {new Date(dropletJobResults.completed_at).toLocaleString()}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </main>
+      </div>
 
-        {/* File Upload Success Modal */}
-        {showSuccessModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-[#f5f5f5] rounded-lg shadow-lg w-full max-w-md p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-2xl font-bold text-black">File Upload Successful</h2>
-                <button onClick={() => setShowSuccessModal(false)} className="text-gray-500 hover:text-gray-700">
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-
-              <div className="flex flex-col items-center py-6">
-                <div className="w-24 h-24 bg-[#85e1fe] rounded-full flex items-center justify-center mb-6">
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path
-                      d="M5 12L10 17L20 7"
-                      stroke="white"
-                      strokeWidth="3"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </div>
-
-                <div className="flex items-center">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path
-                      d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z"
-                      stroke="black"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                    <path d="M14 2V8H20" stroke="black" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  <span className="ml-2 text-black">{currentFile}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Loading Modal */}
-
-        {isChartExpanded && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 z-40" onClick={toggleChartExpansion} />
-        )}
-
-        {/* Advanced Settings Modal */}
-        {showAdvancedSettingsModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <AdvancedSettingsModalContent
-              populationSize={populationSize}
-              setPopulationSize={setPopulationSize}
-              generations={generations}
-              setGenerations={setGenerations}
-              mutationRate={mutationRate}
-              setMutationRate={setMutationRate}
-              tournamentSize={tournamentSize}
-              setTournamentSize={setTournamentSize}
-              onClose={() => setShowAdvancedSettingsModal(false)}
-              onSave={handleSaveAdvancedSettings}
+      <footer className="fixed bottom-0 left-[63px] right-0 bg-[#000000] border-t border-gray-900 z-[100] h-[90px] flex items-center shadow-[0_-10px_30px_rgba(0,0,0,0.5)] px-10">
+        <div className="absolute top-0 left-0 w-full h-[2px] bg-gray-900 overflow-hidden">
+          {(progress > 0 || progress2 > 0 || backtestDetail || optimisationResult || dropletJobResults) && (
+            <div
+              className="h-full bg-[#00ff9d] shadow-[0_0_10px_rgba(0,255,157,0.8)] transition-all duration-300"
+              style={{ width: `${(progress > 0 || progress2 > 0) ? Math.max(progress, progress2) : (backtestDetail || optimisationResult || dropletJobResults) ? 100 : 0}%` }}
             />
-          </div>
-        )}
+          )}
+        </div>
 
-        {/* Optimization History Modal */}
-        {showOptimizationHistory && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-6xl max-h-[80vh] overflow-hidden">
-              <div className="flex justify-between items-center p-6 border-b border-gray-700">
-                <h2 className="text-2xl font-bold text-white">Optimization History</h2>
-                <button
-                  onClick={() => setShowOptimizationHistory(false)}
-                  className="text-gray-400 hover:text-white"
-                >
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
+        <div className="flex items-center gap-4 w-full">
+          {/* Run Backtest - only shown outside optimisation tab */}
 
-              <div className="p-6 overflow-y-auto max-h-[60vh]">
-                {optimizationResults.length === 0 ? (
-                  <div className="text-center text-gray-400 py-8">
-                    No optimization results found
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {optimizationResults.map((result) => (
-                      <div key={result.id} className="bg-[#141721] rounded-lg p-4 border border-gray-700">
-                        <div className="flex justify-between items-start mb-4">
-                          <div>
-                            <h3 className="text-lg font-semibold text-white">
-                              Optimization #{result.id}
-                            </h3>
-                            <p className="text-gray-400 text-sm">
-                              Algorithm: {result.algorithm}
-                            </p>
-                            <p className="text-gray-400 text-sm">
-                              Date: {new Date(result.optimization_date).toLocaleDateString()}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${result.status === "completed" ? "bg-green-500 text-white" :
-                              result.status === "running" ? "bg-yellow-500 text-black" :
-                                result.status === "failed" ? "bg-red-500 text-white" :
-                                  "bg-gray-500 text-white"
-                              }`}>
-                              {result.status}
-                            </span>
-                            <button
-                              onClick={() => deleteOptimizationResultHandler(result.id)}
-                              className="text-red-400 hover:text-red-300"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
+          <button
+            onClick={isLoading ? () => cancelBacktestRun() : () => handleRunBacktest()}
+            className={`flex-1 h-11 border rounded-full transition-all text-sm font-medium ${(activeTab === 'strategy' || activeTab === 'backtest') && !isLoading
+              ? "border-[#85e1fe] text-[#85e1fe] bg-[#85e1fe]/10 shadow-[0_0_15px_rgba(133,225,254,0.1)]"
+              : "border-white text-white hover:bg-white/10"
+              } ${isLoading ? "border-red-500 text-red-500 bg-red-500/10" : ""}`}
+          >
+            {isLoading ? "Cancel Backtest" : "Run Backtest"}
+          </button>
 
-                        {result.status === "completed" && (
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                            <div className="text-center">
-                              <p className="text-gray-400 text-sm">Final Equity</p>
-                              <p className="text-white font-semibold">
-                                ${result.final_equity?.toFixed(2) || "N/A"}
-                              </p>
-                            </div>
-                            <div className="text-center">
-                              <p className="text-gray-400 text-sm">Return (Ann.)</p>
-                              <p className="text-white font-semibold text-lg">
-                                {result.return_ann_percent?.toFixed(2) || "N/A"}%
-                              </p>
-                            </div>
-                            <div className="text-center">
-                              <p className="text-gray-400 text-sm">Win Rate</p>
-                              <p className="text-white font-semibold text-lg">
-                                {result.win_rate_percent?.toFixed(2) || "N/A"}%
-                              </p>
-                            </div>
-                            <div className="text-center">
-                              <p className="text-gray-400 text-sm">Max Drawdown</p>
-                              <p className="text-white font-semibold text-lg">
-                                {result.max_drawdown_percent?.toFixed(2) || "N/A"}%
-                              </p>
-                            </div>
-                          </div>
-                        )}
+          <button
+            onClick={isLoading2 ? () => cancelOptimisation() : () => handleOptimisation()}
+            className={`flex-1 h-11 border rounded-full transition-all text-sm font-medium ${(activeTab === 'optimisation' || activeTab === 'properties') && !isLoading2
+              ? "border-[#85e1fe] text-[#85e1fe] bg-[#85e1fe]/10 shadow-[0_0_15px_rgba(133,225,254,0.1)]"
+              : "border-white text-white hover:bg-white/10"
+              } ${isLoading2 ? "border-red-500 text-red-500 bg-red-500/10" : ""}`}
+          >
+            {isLoading2 ? "Cancel Legacy" : "Run Optimisation (Legacy)"}
+          </button>
+          <button
+            onClick={() => handleOptimizationWithDroplets('regular')}
+            disabled={isCreatingOptimizationJob || isLoading2}
+            className={`flex-1 h-11 border rounded-full transition-all text-sm font-medium ${(activeTab === 'optimisation' || activeTab === 'properties') && !isCreatingOptimizationJob
+              ? "border-purple-400 text-purple-400 bg-purple-400/10 shadow-[0_0_15px_rgba(192,132,252,0.1)]"
+              : "border-white text-white hover:bg-white/10"
+              } ${isCreatingOptimizationJob ? "border-yellow-500 text-yellow-500 bg-yellow-500/10" : ""} disabled:opacity-50`}
+          >
+            {isCreatingOptimizationJob ? "Creating Job..." : "Run Optimisation (Droplets)"}
+          </button>
+        </div>
+      </footer>
 
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => viewOptimizationResult(result.id)}
-                            className="bg-[#85e1fe] text-black px-4 py-2 rounded-md hover:bg-[#6bcae2] text-sm"
-                          >
-                            View Details
-                          </button>
-                          {result.status === "completed" && (
-                            <button
-                              onClick={() => {
-                                // Load this result into the main view
-                                setOptimisationResult(result)
-                                setShowOptimisationResults(true)
-                                setShowOptimizationHistory(false)
-                              }}
-                              className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 text-sm"
-                            >
-                              Load Result
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Optimization Result Details Modal */}
-        {selectedOptimizationResult && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-4xl max-h-[80vh] overflow-hidden">
-              <div className="flex justify-between items-center p-6 border-b border-gray-700">
-                <h2 className="text-2xl font-bold text-white">
-                  Optimization Result Details
-                </h2>
-                <button
-                  onClick={() => setSelectedOptimizationResult(null)}
-                  className="text-gray-400 hover:text-white"
-                >
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-
-              <div className="p-6 overflow-y-auto max-h-[60vh]">
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-6 mb-6">
-                  <div className="text-center">
-                    <p className="text-gray-400 text-sm">Final Equity</p>
-                    <p className="text-white font-semibold text-lg">
-                      ${selectedOptimizationResult.final_equity?.toFixed(2) || "N/A"}
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-gray-400 text-sm">Return (Ann.)</p>
-                    <p className="text-white font-semibold text-lg">
-                      {selectedOptimizationResult.return_ann_percent?.toFixed(2) || "N/A"}%
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-gray-400 text-sm">Win Rate</p>
-                    <p className="text-white font-semibold text-lg">
-                      {selectedOptimizationResult.win_rate_percent?.toFixed(2) || "N/A"}%
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-gray-400 text-sm">Max Drawdown</p>
-                    <p className="text-white font-semibold text-lg">
-                      {selectedOptimizationResult.max_drawdown_percent?.toFixed(2) || "N/A"}%
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-gray-400 text-sm">Sharpe Ratio</p>
-                    <p className="text-white font-semibold text-lg">
-                      {selectedOptimizationResult.sharpe_ratio?.toFixed(2) || "N/A"}
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-gray-400 text-sm">Number of Trades</p>
-                    <p className="text-white font-semibold text-lg">
-                      {selectedOptimizationResult.num_trades || "N/A"}
-                    </p>
-                  </div>
-                </div>
-
-                {selectedOptimizationResult.optimized_parameters && (
-                  <div className="mb-6">
-                    <h3 className="text-lg font-semibold text-white mb-3">Optimized Parameters</h3>
-                    <div className="bg-[#141721] rounded-lg p-4">
-                      <pre className="text-sm text-gray-300 whitespace-pre-wrap">
-                        {JSON.stringify(selectedOptimizationResult.optimized_parameters, null, 2)}
-                      </pre>
-                    </div>
-                  </div>
-                )}
-
-                {selectedOptimizationResult.trades_plot_html && (
-                  <div className="mb-6">
-                    <h3 className="text-lg font-semibold text-white mb-3">Trades Plot</h3>
-                    <iframe
-                      title="Trades Plot"
-                      style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#f8f8f8" }}
-                      srcDoc={selectedOptimizationResult.trades_plot_html}
-                    />
-                  </div>
-                )}
-
-                {selectedOptimizationResult.heatmap_plot_html && (
-                  <div className="mb-6">
-                    <h3 className="text-lg font-semibold text-white mb-3">Heatmap Plot</h3>
-                    <iframe
-                      title="Heatmap Plot"
-                      style={{ width: "100%", height: "400px", border: "none", backgroundColor: "#f8f8f8" }}
-                      srcDoc={selectedOptimizationResult.heatmap_plot_html}
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {showOptimisationHistory && !selectedOptimisationDetail && (
-          <OptimisationHistoryList
-            strategyId={strategy_id || ''}
-            onSelect={async (id) => {
-              const detail = await getOptimizationResultDetail(id);
-              setSelectedOptimisationDetail(detail);
-            }}
-            onClose={() => setShowOptimisationHistory(false)}
-          />
-        )}
-        {selectedOptimisationDetail && (
-          <PreviousOptimisationView
-            optimisationResults={[selectedOptimisationDetail]}
-            onClose={() => {
-              setSelectedOptimisationDetail(null);
-              setShowOptimisationHistory(false);
-            }}
-            isFullScreen={true}
-          />
-        )}
-
-        {/* Walk Forward Optimization Results Modal */}
-        {showWalkForwardOptimizationResults && (
-          <WalkForwardOptimizationResults
-            results={walkForwardOptimizationResults}
-            onClose={() => setShowWalkForwardOptimizationResults(false)}
-            onViewDetail={(result) => viewWalkForwardOptimizationResult(result.id)}
-            onDelete={(id) => deleteWalkForwardOptimizationResultHandler(id)}
-            onLoadResult={(result) => {
-              setSelectedWalkForwardResult(result);
-              setShowWalkForwardOptimizationResults(false);
-              // Optionally display result in main view
-              if (result.trades_plot_html) {
-                setPlotHtml(result.trades_plot_html);
-              }
-              if (result.heatmap_plot_html) {
-                setPlotHeatmapHtml(result.heatmap_plot_html);
-              }
-            }}
-          />
-        )}
-
-        {/* Walk Forward Optimization Details Modal */}
-        {walkForwardDetailResult && (
-          <WalkForwardOptimisationView
-            result={walkForwardDetailResult}
-            onClose={() => setWalkForwardDetailResult(null)}
-            isFullScreen={true}
-          />
-        )}
-
-        {/* Custom Strategy Backtest Results Modal */}
-        {showCustomStrategyBacktestResults && customStrategyBacktestResult && (
-          <CustomStrategyBacktestResults
-            result={customStrategyBacktestResult}
-            onClose={() => {
-              setShowCustomStrategyBacktestResults(false)
-              setCustomStrategyBacktestResult(null)
-            }}
-            onViewFullResults={() => {
-              setShowCustomStrategyBacktestResults(false)
-              router.push('/custom-backtest-results')
-            }}
-          />
-        )}
-
-        {/* Optimization Cost Dialog */}
-        <OptimizationCostDialog
-          isOpen={showCostDialog}
-          onClose={() => setShowCostDialog(false)}
-          onConfirm={handleCostConfirmation}
-          optimizationType={optimizationType}
-        />
-
-        {/* Optimization Job Creation Loading Modal */}
-        {isCreatingOptimizationJob && (
-          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-            <div className="bg-[#1A1D2D] rounded-lg shadow-lg p-8 max-w-md w-full">
-              <div className="flex flex-col items-center">
-                {/* Spinner */}
-                <div className="relative w-20 h-20 mb-6">
-                  <div className="absolute top-0 left-0 w-full h-full">
-                    <div className="w-20 h-20 border-4 border-gray-600 border-t-[#85e1fe] rounded-full animate-spin"></div>
-                  </div>
-                </div>
-
-                {/* Loading Text */}
-                <h3 className="text-xl font-semibold text-white mb-2">
-                  Creating Optimization Job
-                </h3>
-                <p className="text-gray-400 text-center">
-                  {optimizationType === 'walk_forward'
-                    ? 'Setting up walk forward optimization with droplets...'
-                    : 'Setting up regular optimization with droplets...'}
-                </p>
-                <p className="text-sm text-gray-500 text-center mt-2">
-                  Please wait, this may take a few moments
-                </p>
-                <button
-                  onClick={cancelOptimisation}
-                  className="mt-6 px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-full font-medium transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Backtest History Modal */}
-        {showBacktestHistory && (
-          <BacktestHistoryList
-            strategyId={strategy_id || ''}
-            onClose={() => setShowBacktestHistory(false)}
-          />
-        )}
-
-        {/* Walk Forward Droplet Results Modal */}
-        {dropletJobResults && dropletJobResults.results && (
-          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-            <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-5xl max-h-[90vh] overflow-hidden">
-              <div className="flex justify-between items-center p-6 border-b border-gray-700">
-                <div>
-                  <h2 className="text-2xl font-bold text-white">{dropletJobResults.strategy_name}</h2>
-                  <p className="text-gray-400 text-sm mt-1">{dropletJobResults.type}</p>
-                </div>
-                <button
-                  onClick={() => setDropletJobResults(null)}
-                  className="text-gray-400 hover:text-white"
-                >
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-
-              <div className="p-6 overflow-y-auto max-h-[75vh]">
-                {/* Hypothesis Testing Results */}
-                <div className="mb-6">
-                  <h3 className="text-lg font-semibold text-white mb-4">Hypothesis Testing</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="bg-[#141721] rounded-lg p-4">
-                      <p className="text-gray-400 text-sm">Z-Statistic</p>
-                      <p className="text-white font-semibold text-lg">
-                        {dropletJobResults.results.z_statistic?.toFixed(4) || 'N/A'}
-                      </p>
-                    </div>
-                    <div className="bg-[#141721] rounded-lg p-4">
-                      <p className="text-gray-400 text-sm">P-Value</p>
-                      <p className="text-white font-semibold text-lg">
-                        {dropletJobResults.results.p_value?.toFixed(4) || 'N/A'}
-                      </p>
-                    </div>
-                    <div className="bg-[#141721] rounded-lg p-4">
-                      <p className="text-gray-400 text-sm">Avg Validation Return</p>
-                      <p className={`font-semibold text-lg ${(dropletJobResults.results.avg_validation_return || 0) > 0 ? 'text-green-500' : 'text-red-500'
-                        }`}>
-                        {dropletJobResults.results.avg_validation_return?.toFixed(2) || 'N/A'}%
-                      </p>
-                    </div>
-                    <div className="bg-[#141721] rounded-lg p-4">
-                      <p className="text-gray-400 text-sm">Decision</p>
-                      <p className={`font-semibold text-sm ${(dropletJobResults.results.p_value || 1) < 0.05 ? 'text-green-500' : 'text-yellow-500'
-                        }`}>
-                        {(dropletJobResults.results.p_value || 1) < 0.05 ? '✅ Profitable' : '⚠️ Not Profitable'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 bg-[#141721] rounded-lg p-4">
-                    <p className="text-gray-400 text-sm mb-2">Hypothesis Decision:</p>
-                    <p className="text-white text-sm">
-                      {dropletJobResults.results.hypothesis_decision || 'No decision available'}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Plot Files Information */}
-                {dropletJobResults.results.plot_files && (
-                  <div className="mb-6">
-                    <h3 className="text-lg font-semibold text-white mb-4">
-                      Plot Files ({Object.keys(dropletJobResults.results.plot_files).length} available)
-                    </h3>
-                    <div className="grid grid-cols-1 gap-3">
-                      {Object.entries(dropletJobResults.results.plot_files).map(([type, info]: [string, any]) => (
-                        <div
-                          key={type}
-                          className="bg-[#141721] rounded-lg p-4 flex justify-between items-center"
-                        >
-                          <div>
-                            <p className="text-white font-semibold">
-                              {type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                            </p>
-                            <p className="text-gray-400 text-sm">{info.filename}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-[#85e1fe] font-semibold">
-                              {(info.size / 1024 / 1024).toFixed(2)} MB
-                            </p>
-                            <p className="text-gray-400 text-xs">
-                              {info.available ? '✅ Available' : '❌ Not available'}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <p className="text-gray-400 text-sm mt-3">
-                      ℹ️ Plots were generated on the droplet. Download from output directory: {dropletJobResults.results.output_dir}
-                    </p>
-                  </div>
-                )}
-
-                {/* Walk Forward Settings */}
-                {dropletJobResults.job_parameters?.walk_forward_settings && (
-                  <div className="mb-6">
-                    <h3 className="text-lg font-semibold text-white mb-4">Walk Forward Settings</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="bg-[#141721] rounded-lg p-4">
-                        <p className="text-gray-400 text-sm">Warmup Bars</p>
-                        <p className="text-white font-semibold">
-                          {dropletJobResults.job_parameters.walk_forward_settings.warmup_bars}
-                        </p>
-                      </div>
-                      <div className="bg-[#141721] rounded-lg p-4">
-                        <p className="text-gray-400 text-sm">Lookback Bars</p>
-                        <p className="text-white font-semibold">
-                          {dropletJobResults.job_parameters.walk_forward_settings.lookback_bars}
-                        </p>
-                      </div>
-                      <div className="bg-[#141721] rounded-lg p-4">
-                        <p className="text-gray-400 text-sm">Validation Bars</p>
-                        <p className="text-white font-semibold">
-                          {dropletJobResults.job_parameters.walk_forward_settings.validation_bars}
-                        </p>
-                      </div>
-                      <div className="bg-[#141721] rounded-lg p-4">
-                        <p className="text-gray-400 text-sm">Anchor</p>
-                        <p className="text-white font-semibold">
-                          {dropletJobResults.job_parameters.walk_forward_settings.anchor ? 'Yes' : 'No'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Job Information */}
-                <div className="bg-[#141721] rounded-lg p-4">
-                  <h3 className="text-lg font-semibold text-white mb-3">Job Information</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Job ID:</span>
-                        <span className="text-white font-semibold">{dropletJobResults.id}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Status:</span>
-                        <span className="text-green-500 font-semibold">{dropletJobResults.status}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Runtime:</span>
-                        <span className="text-white font-semibold">{dropletJobResults.runtime_minutes} min</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Droplet Size:</span>
-                        <span className="text-white font-semibold">{dropletJobResults.droplet_size}</span>
-                      </div>
-                    </div>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Estimated Cost:</span>
-                        <span className="text-white font-semibold">${dropletJobResults.estimated_cost}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Actual Cost:</span>
-                        <span className="text-green-500 font-semibold">${dropletJobResults.actual_cost}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Droplet ID:</span>
-                        <span className="text-white font-semibold">{dropletJobResults.droplet_id}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Completed At:</span>
-                        <span className="text-white font-semibold">
-                          {new Date(dropletJobResults.completed_at).toLocaleString()}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* MetaAPI Debug Modal */}
-        {showMetaAPIDebugModal && metaAPIError && metaAPIConfig && (
+      {
+        showMetaAPIDebugModal && metaAPIError && metaAPIConfig && (
           <MetaAPIDebugModal
             isOpen={showMetaAPIDebugModal}
             onClose={() => setShowMetaAPIDebugModal(false)}
             error={metaAPIError}
             metaAPIConfig={metaAPIConfig}
           />
-        )}
-      </div>
-    </AuthGuard>
+        )
+      }
+
+      {
+        showBacktestHistory && (
+          <BacktestHistoryList
+            strategyId={strategy_id || ""}
+            onClose={() => setShowBacktestHistory(false)}
+            onSelect={loadBacktestResult}
+          />
+        )
+      }
+    </AuthGuard >
   )
 }
-

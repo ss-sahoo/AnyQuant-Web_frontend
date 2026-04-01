@@ -354,6 +354,16 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   // Add a new state variable to track the currently selected search result index
   const [selectedSearchIndex, setSelectedSearchIndex] = useState<number>(-1)
 
+  // Add cursor position tracking for component navigation
+  // cursorPosition tracks where the cursor is in the component sequence
+  // -1 means at the end (default), 0 means before first component, etc.
+  const [cursorPosition, setCursorPosition] = useState<Record<number, number>>({})
+  
+  // Helper to get cursor position for a statement (default to -1 = end)
+  const getCursorPosition = (statementIndex: number) => {
+    return cursorPosition[statementIndex] ?? -1
+  }
+
   // Update localStorage whenever strategyId prop changes (from URL)
   // This ensures localStorage always matches the current strategy being edited
   useEffect(() => {
@@ -815,90 +825,123 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
   // Modify the handleKeyDown function to handle arrow keys and Enter key
   const handleKeyDown = (statementIndex: number, e: React.KeyboardEvent<HTMLInputElement>) => {
-    // Handle backspace for component removal (existing functionality)
-    if (e.key === "Backspace" && searchTerm === "") {
-      e.preventDefault()
+    const currentStatement = statements[statementIndex]
+    const strategy = currentStatement.strategy
+    const currentCursorPos = getCursorPosition(statementIndex)
 
-      const currentStatement = statements[statementIndex]
-      const strategy = currentStatement.strategy
-
-      // First, try to remove Trading Session if set (appears at end of components)
-      if (currentStatement.TradingSession) {
-        const newStatements = [...statements]
-        delete newStatements[statementIndex].TradingSession
-        setStatements(newStatements)
+    // Handle arrow keys for component navigation when search is empty
+    if (searchTerm === "" && searchResults.length === 0) {
+      if (e.key === "ArrowLeft") {
+        e.preventDefault()
+        // Count total components to determine valid cursor positions
+        const totalComponents = countComponents(currentStatement)
+        const newPos = Math.max(0, currentCursorPos === -1 ? totalComponents - 1 : currentCursorPos - 1)
+        setCursorPosition(prev => ({ ...prev, [statementIndex]: newPos }))
         return
-      }
-
-      // Then, try to remove equity rules (last to first)
-      if (currentStatement.Equity && currentStatement.Equity.length > 0) {
-        const newStatements = [...statements]
-        newStatements[statementIndex].Equity.pop()
-        setStatements(newStatements)
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault()
+        const totalComponents = countComponents(currentStatement)
+        const newPos = currentCursorPos >= totalComponents - 1 ? -1 : currentCursorPos + 1
+        setCursorPosition(prev => ({ ...prev, [statementIndex]: newPos }))
         return
-      }
-
-      // Then, try to remove Buy/Sell if set
-      if (currentStatement.side === "B" || currentStatement.side === "S") {
-        const newStatements = [...statements]
-        newStatements[statementIndex].side = ""
-        setStatements(newStatements)
-        return
-      }
-
-      if (strategy.length === 0) return
-
-      // Find the last condition that has removable components
-      for (let i = strategy.length - 1; i >= 0; i--) {
-        const condition = strategy[i]
-
-        // Remove Then first if it exists
-        if (condition.Then) {
-          removeComponent(statementIndex, i, "then")
-          return
-        }
-
-        // Remove Accumulate if it exists
-        if (condition.Accumulate) {
-          removeComponent(statementIndex, i, "accumulate")
-          return
-        }
-
-        // Remove inp2 if it exists
-        if (condition.inp2) {
-          removeComponent(statementIndex, i, "inp2")
-          return
-        }
-
-        // Then remove operator if it exists
-        if (condition.operator_name) {
-          removeComponent(statementIndex, i, "operator")
-          return
-        }
-
-        // Then remove inp1 if it exists
-        if (condition.inp1) {
-          removeComponent(statementIndex, i, "inp1")
-          return
-        }
-
-        // Then remove timeframe if it exists and it's not the first condition
-        if (i > 0 && (condition.timeframe || (condition.inp1 && "timeframe" in condition.inp1))) {
-          removeComponent(statementIndex, i, "timeframe")
-          return
-        }
-
-        // Finally remove the entire condition if it's not the first "if" statement
-        if (i > 0 && condition.statement && condition.statement.toLowerCase() !== "if") {
-          console.log("Removing statement:", condition.statement, "at index:", i)
-          removeComponent(statementIndex, i, "statement")
-          return
-        }
       }
     }
 
+    // Handle backspace for component removal
+    if (e.key === "Backspace" && searchTerm === "") {
+      e.preventDefault()
+
+      // If cursor is at the end (-1), use the old behavior (remove from right to left)
+      if (currentCursorPos === -1) {
+        // First, try to remove Trading Session if set (appears at end of components)
+        if (currentStatement.TradingSession) {
+          const newStatements = [...statements]
+          delete newStatements[statementIndex].TradingSession
+          setStatements(newStatements)
+          return
+        }
+
+        // Then, try to remove equity rules (last to first)
+        if (currentStatement.Equity && currentStatement.Equity.length > 0) {
+          const newStatements = [...statements]
+          newStatements[statementIndex].Equity.pop()
+          setStatements(newStatements)
+          return
+        }
+
+        // Then, try to remove Buy/Sell if set
+        if (currentStatement.side === "B" || currentStatement.side === "S") {
+          const newStatements = [...statements]
+          newStatements[statementIndex].side = ""
+          setStatements(newStatements)
+          return
+        }
+
+        if (strategy.length === 0) return
+
+        // Find the last condition that has removable components
+        for (let i = strategy.length - 1; i >= 0; i--) {
+          const condition = strategy[i]
+
+          // Remove Then first if it exists
+          if (condition.Then) {
+            removeComponent(statementIndex, i, "then")
+            return
+          }
+
+          // Remove Accumulate if it exists
+          if (condition.Accumulate) {
+            removeComponent(statementIndex, i, "accumulate")
+            return
+          }
+
+          // Remove inp2 if it exists
+          if (condition.inp2) {
+            removeComponent(statementIndex, i, "inp2")
+            return
+          }
+
+          // Then remove operator if it exists
+          if (condition.operator_name) {
+            removeComponent(statementIndex, i, "operator")
+            return
+          }
+
+          // Then remove inp1 if it exists
+          if (condition.inp1) {
+            removeComponent(statementIndex, i, "inp1")
+            return
+          }
+
+          // Then remove timeframe if it exists and it's not the first condition
+          if (i > 0 && (condition.timeframe || (condition.inp1 && "timeframe" in condition.inp1))) {
+            removeComponent(statementIndex, i, "timeframe")
+            return
+          }
+
+          // Finally remove the entire condition if it's not the first "if" statement
+          if (i > 0 && condition.statement && condition.statement.toLowerCase() !== "if") {
+            console.log("Removing statement:", condition.statement, "at index:", i)
+            removeComponent(statementIndex, i, "statement")
+            return
+          }
+        }
+      } else {
+        // Cursor is at a specific position - delete the component to the left of cursor
+        if (currentCursorPos > 0) {
+          const componentToDelete = getComponentAtPosition(currentStatement, currentCursorPos - 1)
+          if (componentToDelete) {
+            removeComponent(statementIndex, componentToDelete.conditionIndex, componentToDelete.componentType)
+            // Move cursor left after deletion
+            setCursorPosition(prev => ({ ...prev, [statementIndex]: currentCursorPos - 1 }))
+          }
+        }
+      }
+      return
+    }
+
     // Handle arrow keys for search result navigation
-    else if (searchResults.length > 0) {
+    if (searchResults.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault()
         // Move selection down, wrapping around to the top if at the bottom
@@ -1455,6 +1498,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       const strategy = [...statement.strategy]
 
       switch (componentType) {
+        case "side":
+          // Remove Buy/Sell
+          statement.side = ""
+          break
         case "then":
           const conditionThen = { ...strategy[conditionIndex] }
           delete conditionThen.Then
@@ -1494,12 +1541,42 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           }
           strategy[conditionIndex] = conditionTimeframe
           break
+        case "at-candle-inp1":
+          const conditionAtCandleInp1 = { ...strategy[conditionIndex] }
+          if (conditionAtCandleInp1.inp1 && typeof conditionAtCandleInp1.inp1 === "object") {
+            delete conditionAtCandleInp1.inp1.index
+          }
+          strategy[conditionIndex] = conditionAtCandleInp1
+          break
+        case "at-candle-inp2":
+          const conditionAtCandleInp2 = { ...strategy[conditionIndex] }
+          if (conditionAtCandleInp2.inp2 && typeof conditionAtCandleInp2.inp2 === "object") {
+            delete conditionAtCandleInp2.inp2.index
+          }
+          strategy[conditionIndex] = conditionAtCandleInp2
+          break
+        case "wait-inp1":
+        case "wait-inp2":
+          // Wait buttons are not deletable via backspace, only toggleable
+          break
         case "statement":
           console.log("Before splice - strategy length:", strategy.length, "conditionIndex:", conditionIndex)
           strategy.splice(conditionIndex, 1)
           console.log("After splice - strategy length:", strategy.length)
           break
         default:
+          // Handle pending at candle cases
+          if (componentType.startsWith("pending-at-candle-")) {
+            const inputType = componentType.replace("pending-at-candle-", "")
+            const conditionPending = { ...strategy[conditionIndex] }
+            if (conditionPending.pendingAtCandle) {
+              delete conditionPending.pendingAtCandle[inputType]
+              if (Object.keys(conditionPending.pendingAtCandle).length === 0) {
+                delete conditionPending.pendingAtCandle
+              }
+            }
+            strategy[conditionIndex] = conditionPending
+          }
           break
       }
 
@@ -1522,6 +1599,169 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       return newStatements
     })
   }
+
+  // Helper function to count total components in a statement
+  const countComponents = (statement: StrategyStatement): number => {
+    let count = 0
+    
+    // Count side (Buy/Sell)
+    if (statement.side === "B" || statement.side === "S") count++
+    
+    // Count each condition's components
+    statement.strategy.forEach((condition) => {
+      // Count statement (AND, OR, etc.) - but not IF
+      if (condition.statement && condition.statement.toLowerCase() !== "if") count++
+      
+      // Count timeframe
+      const timeframeValue = condition.inp1 && "timeframe" in condition.inp1 ? condition.inp1.timeframe : condition.timeframe
+      if (timeframeValue) count++
+      
+      // Count pending at candle
+      if (condition.pendingAtCandle) {
+        count += Object.keys(condition.pendingAtCandle).length
+      }
+      
+      // Count at candle for inp1
+      if (condition.inp1 && typeof condition.inp1 === "object" && condition.inp1.index !== undefined) count++
+      
+      // Count inp1
+      if (condition.inp1) count++
+      
+      // Count wait button for inp1
+      if (condition.inp1) count++
+      
+      // Count operator
+      if (condition.operator_name) count++
+      
+      // Count inp2 timeframe
+      if (condition.inp2 && typeof condition.inp2 === "object" && "timeframe" in condition.inp2 && condition.inp2.timeframe) count++
+      
+      // Count inp2
+      if (condition.inp2) count++
+      
+      // Count wait button for inp2
+      if (condition.inp2 && typeof condition.inp2 === "object" && "type" in condition.inp2) count++
+      
+      // Count at candle for inp2
+      if (condition.inp2 && typeof condition.inp2 === "object" && condition.inp2.index !== undefined) count++
+      
+      // Count accumulator
+      if (condition.Accumulate) count++
+      
+      // Count then
+      if (condition.Then) count++
+    })
+    
+    return count
+  }
+
+  // Helper function to get component at a specific position
+  const getComponentAtPosition = (statement: StrategyStatement, position: number): { conditionIndex: number, componentType: string } | null => {
+    let currentPos = 0
+    
+    // Check side (Buy/Sell)
+    if (statement.side === "B" || statement.side === "S") {
+      if (currentPos === position) return { conditionIndex: -1, componentType: "side" }
+      currentPos++
+    }
+    
+    // Check each condition's components
+    for (let i = 0; i < statement.strategy.length; i++) {
+      const condition = statement.strategy[i]
+      
+      // Check statement (AND, OR, etc.) - but not IF
+      if (condition.statement && condition.statement.toLowerCase() !== "if") {
+        if (currentPos === position) return { conditionIndex: i, componentType: "statement" }
+        currentPos++
+      }
+      
+      // Check timeframe
+      const timeframeValue = condition.inp1 && "timeframe" in condition.inp1 ? condition.inp1.timeframe : condition.timeframe
+      if (timeframeValue) {
+        if (currentPos === position) return { conditionIndex: i, componentType: "timeframe" }
+        currentPos++
+      }
+      
+      // Check pending at candle
+      if (condition.pendingAtCandle) {
+        for (const inputType of Object.keys(condition.pendingAtCandle)) {
+          if (currentPos === position) return { conditionIndex: i, componentType: `pending-at-candle-${inputType}` }
+          currentPos++
+        }
+      }
+      
+      // Check at candle for inp1
+      if (condition.inp1 && typeof condition.inp1 === "object" && condition.inp1.index !== undefined) {
+        if (currentPos === position) return { conditionIndex: i, componentType: "at-candle-inp1" }
+        currentPos++
+      }
+      
+      // Check inp1
+      if (condition.inp1) {
+        if (currentPos === position) return { conditionIndex: i, componentType: "inp1" }
+        currentPos++
+      }
+      
+      // Check wait button for inp1
+      if (condition.inp1) {
+        if (currentPos === position) return { conditionIndex: i, componentType: "wait-inp1" }
+        currentPos++
+      }
+      
+      // Check operator
+      if (condition.operator_name) {
+        if (currentPos === position) return { conditionIndex: i, componentType: "operator" }
+        currentPos++
+      }
+      
+      // Check inp2 timeframe
+      if (condition.inp2 && typeof condition.inp2 === "object" && "timeframe" in condition.inp2 && condition.inp2.timeframe) {
+        if (currentPos === position) return { conditionIndex: i, componentType: "inp2-timeframe" }
+        currentPos++
+      }
+      
+      // Check inp2
+      if (condition.inp2) {
+        if (currentPos === position) return { conditionIndex: i, componentType: "inp2" }
+        currentPos++
+      }
+      
+      // Check wait button for inp2
+      if (condition.inp2 && typeof condition.inp2 === "object" && "type" in condition.inp2) {
+        if (currentPos === position) return { conditionIndex: i, componentType: "wait-inp2" }
+        currentPos++
+      }
+      
+      // Check at candle for inp2
+      if (condition.inp2 && typeof condition.inp2 === "object" && condition.inp2.index !== undefined) {
+        if (currentPos === position) return { conditionIndex: i, componentType: "at-candle-inp2" }
+        currentPos++
+      }
+      
+      // Check accumulator
+      if (condition.Accumulate) {
+        if (currentPos === position) return { conditionIndex: i, componentType: "accumulate" }
+        currentPos++
+      }
+      
+      // Check then
+      if (condition.Then) {
+        if (currentPos === position) return { conditionIndex: i, componentType: "then" }
+        currentPos++
+      }
+    }
+    
+    return null
+  }
+
+  // Reset cursor position when adding a new component
+  useEffect(() => {
+    // Reset cursor to end when statements change
+    setStatements(prev => {
+      // This effect just monitors changes, doesn't modify
+      return prev
+    })
+  }, [statements])
 
   // Add a function to handle At Candle selection
   const handleAtCandleSelection = (candleNumber: number) => {
@@ -4625,7 +4865,48 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       )
     }
 
-    return components
+    return components.reduce((acc: JSX.Element[], component, idx) => {
+      const currentCursorPos = getCursorPosition(statementIndex)
+      
+      // Add cursor indicator before this component if cursor is at this position
+      if (currentCursorPos === idx) {
+        acc.push(
+          <div 
+            key={`cursor-${idx}`} 
+            className="w-0.5 h-5 bg-[#85e1fe] animate-pulse mx-0.5"
+            style={{ alignSelf: 'flex-end', marginBottom: '0.5rem' }}
+          />
+        )
+      }
+      
+      // Add clickable gap before component to position cursor
+      acc.push(
+        <div
+          key={`gap-${idx}`}
+          className="w-1 h-full cursor-text hover:bg-[#85e1fe]/10"
+          onClick={() => {
+            setCursorPosition(prev => ({ ...prev, [statementIndex]: idx }))
+            searchInputRefs.current[statementIndex]?.focus()
+          }}
+        />
+      )
+      
+      // Add the actual component
+      acc.push(component)
+      
+      // Add cursor indicator after last component if cursor is at end
+      if (idx === components.length - 1 && currentCursorPos === -1) {
+        acc.push(
+          <div 
+            key="cursor-end" 
+            className="w-0.5 h-5 bg-[#85e1fe] animate-pulse mx-0.5"
+            style={{ alignSelf: 'flex-end', marginBottom: '0.5rem' }}
+          />
+        )
+      }
+      
+      return acc
+    }, [] as JSX.Element[])
   }
 
   // Function to render equity rules
