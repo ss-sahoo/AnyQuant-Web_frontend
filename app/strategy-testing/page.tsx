@@ -358,9 +358,34 @@ export default function StrategyTestingPage() {
 
   // Load last backtest result on mount
   useEffect(() => {
+    let isCancelled = false
+
     if (strategy_id) {
+      // Reset result states when switching strategies to avoid showing stale data
+      setBacktestDetail(null)
+      setPlotHtml(null)
+      setOptimisationResult(null)
+      setShowOptimisationResults(false)
+      setPlotHeatmapHtml(null)
+      setWalkForwardOptimizationResults([])
+      setWalkForwardDetailResult(null)
+      setShowWalkForwardOptimizationResults(false)
+      setBacktestResultTab('graph')
+      setOptimisationTab('results')
+      setOptimisationStdout("")
+      setOptimisationStderr("")
+      setTradesData({
+        tradesCsv: '',
+        tradesCsvFilename: '',
+        tradesCsvDownloadUrl: '',
+        stdout: '',
+        stderr: ''
+      })
+
       getStrategyBacktestResults(strategy_id)
         .then((response: any) => {
+          if (isCancelled) return
+
           // Response might be direct array or paginated object { results: [] }
           const results = Array.isArray(response) ? response : (response?.results || [])
           if (results.length > 0) {
@@ -377,6 +402,8 @@ export default function StrategyTestingPage() {
       // Also load last optimization result
       getStrategyOptimizationResults(strategy_id)
         .then(async (response: any) => {
+          if (isCancelled) return
+
           const results = Array.isArray(response) ? response : (response?.results || [])
           if (results.length > 0) {
             // Sort by date descending
@@ -388,6 +415,8 @@ export default function StrategyTestingPage() {
             console.log("🚀 Auto-loading latest optimization result:", latestId);
             try {
               const detail = await getOptimizationResultDetail(latestId);
+              if (isCancelled) return
+
               setOptimisationResult(detail);
               setShowOptimisationResults(true);
               setOptimisationTab('results');
@@ -397,6 +426,10 @@ export default function StrategyTestingPage() {
           }
         })
         .catch(err => console.error("Error fetching initial optimization results:", err))
+    }
+
+    return () => {
+      isCancelled = true
     }
   }, [strategy_id])
 
