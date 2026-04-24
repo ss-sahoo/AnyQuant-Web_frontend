@@ -1659,8 +1659,11 @@ export const createCustomComponent = async ({ name, type, language, code, parame
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.error || errorData.detail || "Failed to create custom component");
+    const errorData = await response.json().catch(() => ({}));
+    const err = new Error(errorData.error || errorData.detail || "Failed to create custom component");
+    err.response = errorData;
+    err.status = response.status;
+    throw err;
   }
 
   return response.json();
@@ -1703,8 +1706,11 @@ export const updateCustomComponent = async (componentId, data) => {
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.error || "Failed to update custom component");
+    const errorData = await response.json().catch(() => ({}));
+    const err = new Error(errorData.error || errorData.detail || "Failed to update custom component");
+    err.response = errorData;
+    err.status = response.status;
+    throw err;
   }
 
   return response.json();

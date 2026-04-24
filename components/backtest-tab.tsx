@@ -4,6 +4,7 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import { TradingSessionModal } from "./trading-session-modal"
 import { DateRangeModal } from "./date-range-modal"
+import { TradeTimingModal, type TradeTimingSettings } from "./modals/trade-timing-modal"
 
 interface BacktestTabProps {
   dateRange: string
@@ -40,6 +41,9 @@ interface BacktestTabProps {
   initialTradingSession?: any
   onTradingSessionSave?: (session: any) => void
   timezone?: string
+  // Trade Execution Timing integration
+  tradeTiming?: TradeTimingSettings
+  onTradeTimingSave?: (settings: TradeTimingSettings) => void
 }
 
 export function BacktestTab({
@@ -76,10 +80,18 @@ export function BacktestTab({
   initialTradingSession,
   onTradingSessionSave,
   timezone = "UTC",
+  tradeTiming,
+  onTradeTimingSave,
 }: BacktestTabProps) {
   const [showTradingSessionModal, setShowTradingSessionModal] = useState(false)
   const [showDateRangeModal, setShowDateRangeModal] = useState(false)
+  const [showTradeTimingModal, setShowTradeTimingModal] = useState(false)
   const [tradingSessionSummary, setTradingSessionSummary] = useState<string>("")
+  const currentTiming: TradeTimingSettings = tradeTiming ?? { trade_at: "bar close" }
+  const tradeTimingSummary =
+    currentTiming.trade_at === "tick"
+      ? `Tick level (exit timeframe: ${currentTiming.exit_timeframe || "—"})`
+      : "Bar close"
 
   // Keep a small formatter for summary display
   const summarize = (session: any) => {
@@ -132,6 +144,22 @@ export function BacktestTab({
             <div className="text-xs text-gray-400 mt-1">{tradingSessionSummary || "Not configured"}</div>
           </div>
           <button className="px-4 py-2 bg-[#2b2e38] text-white rounded-md hover:bg-[#3a3e4a]" onClick={() => setShowTradingSessionModal(true)}>
+            Configure
+          </button>
+        </div>
+      </div>
+
+      {/* Trade Execution Timing Panel */}
+      <div className="mb-6 p-4 bg-[#141721] rounded-md border border-[#2b2e38]">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-white font-medium">Trade Execution Timing</div>
+            <div className="text-xs text-gray-400 mt-1">{tradeTimingSummary}</div>
+          </div>
+          <button
+            className="px-4 py-2 bg-[#2b2e38] text-white rounded-md hover:bg-[#3a3e4a]"
+            onClick={() => setShowTradeTimingModal(true)}
+          >
             Configure
           </button>
         </div>
@@ -565,6 +593,18 @@ export function BacktestTab({
         currentDateRange={dateRange}
         onSave={(newDateRange) => setDateRange(newDateRange)}
       />
+
+      {/* Trade Execution Timing Modal */}
+      {showTradeTimingModal && (
+        <TradeTimingModal
+          onClose={() => setShowTradeTimingModal(false)}
+          initialSettings={currentTiming}
+          onSave={(settings) => {
+            setShowTradeTimingModal(false)
+            if (onTradeTimingSave) onTradeTimingSave(settings)
+          }}
+        />
+      )}
     </div>
   )
-} 
+}

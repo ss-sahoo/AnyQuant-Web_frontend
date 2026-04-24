@@ -3,6 +3,15 @@
 import { useState, useEffect } from "react"
 import { ArrowLeft, Code, FileCode, AlertCircle, CheckCircle, Loader2, Save, Play, ChevronDown, FlaskConical, Trash2, Edit3, List } from "lucide-react"
 import dynamic from "next/dynamic"
+import {
+  ParameterSchema,
+  ParameterType,
+  OHLCV_SOURCES,
+  coerceDefault,
+  isValidPythonIdentifier,
+  normalizeStoredParameters,
+  validateSchemas,
+} from "@/lib/custom-component-schema"
 
 // Dynamically import Monaco Editor to avoid SSR issues
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false })
@@ -42,7 +51,7 @@ interface CompileData {
   componentName?: string
   strategyName?: string
   componentType?: "indicator" | "behavior" | "trade_management"
-  parameters?: Parameter[]
+  parameters?: ParameterSchema[]
   componentId?: number  // For editing existing components
 }
 
@@ -56,6 +65,8 @@ interface CompileResult {
   errors?: CompileError[]
   warnings?: string[]
   strategyId?: number // For complete strategy, return the ID for backtesting
+  // Row-indexed per-parameter errors from the backend, if any.
+  parameterErrors?: Record<number, string[]>
 }
 
 interface CompileError {
@@ -65,11 +76,10 @@ interface CompileError {
   type: "error" | "warning"
 }
 
-interface Parameter {
-  name: string
-  defaultValue: string
-  type: "number" | "string" | "boolean"
-}
+// Deprecated alias for the old flat-shape parameter. Kept so existing
+// template code that referenced it still compiles, but the editor now
+// operates on ParameterSchema.
+type Parameter = ParameterSchema
 
 const PYTHON_COMPONENT_TEMPLATE = `# ============================================================================
 # ⚠️ CRITICAL: CUSTOM INDICATOR COMPONENT - Required Function
@@ -687,9 +697,11 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
   const [componentName, setComponentName] = useState("")
   const [strategyName, setStrategyName] = useState("")
   const [componentType, setComponentType] = useState<"indicator" | "behavior" | "trade_management">("indicator")
-  const [parameters, setParameters] = useState<Parameter[]>([
-    { name: "period", defaultValue: "14", type: "number" }
+  const [parameters, setParameters] = useState<ParameterSchema[]>([
+    { name: "period", type: "int", default: 14 }
   ])
+  const [parameterRowErrors, setParameterRowErrors] = useState<Record<number, string>>({})
+  const [serverParamErrors, setServerParamErrors] = useState<Record<number, string[]>>({})
   const [code, setCode] = useState(PYTHON_COMPONENT_TEMPLATE)
   const [isCompiling, setIsCompiling] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -771,15 +783,12 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
       setComponentType(editingComponent.type as "indicator" | "behavior" | "trade_management")
       setCode(editingComponent.code || "")
       
-      // Convert parameters from {name: value} to Parameter[]
-      if (editingComponent.parameters) {
-        const params: Parameter[] = Object.entries(editingComponent.parameters).map(([name, value]) => ({
-          name,
-          defaultValue: String(value),
-          type: typeof value === "number" ? "number" : typeof value === "boolean" ? "boolean" : "string"
-        }))
-        setParameters(params.length > 0 ? params : [{ name: "period", defaultValue: "14", type: "number" }])
-      }
+      // Load parameter schema — handles both the new `{parameters: [...]}` shape
+      // and the legacy flat `{name: value}` shape saved before this feature.
+      const loaded = normalizeStoredParameters(editingComponent.parameters)
+      setParameters(loaded.length > 0 ? loaded : [{ name: "period", type: "int", default: 14 }])
+      setParameterRowErrors({})
+      setServerParamErrors({})
     } else {
       // Reset editing state when no component is being edited
       setIsEditing(false)
@@ -858,9 +867,24 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
       }
     }
 
+    // Local parameter-schema validation before we hit the backend.
+    if (codeType === "component") {
+      const { rowErrors } = validateSchemas(parameters)
+      setParameterRowErrors(rowErrors)
+      if (Object.keys(rowErrors).length > 0) {
+        setCompileResult({
+          success: false,
+          message: "Fix parameter errors before compiling.",
+          errors: Object.values(rowErrors).map((m) => ({ message: m, type: "error" })),
+        })
+        return
+      }
+    }
+
     setIsCompiling(true)
     setCompileResult(null)
     setCompiledStrategyId(null)
+    setServerParamErrors({})
 
     try {
       const result = await onCompile({
@@ -874,6 +898,7 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
         componentId: isEditing && editingComponent ? editingComponent.id : undefined  // Pass ID when editing
       })
       setCompileResult(result)
+      setServerParamErrors(result.parameterErrors || {})
       
       // If complete strategy compiled successfully, store the ID for backtesting
       if (result.success && codeType === "strategy" && result.strategyId) {
@@ -891,7 +916,20 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
   }
 
   const handleSave = async (isDraft: boolean) => {
+    if (codeType === "component") {
+      const { rowErrors } = validateSchemas(parameters)
+      setParameterRowErrors(rowErrors)
+      if (Object.keys(rowErrors).length > 0) {
+        setCompileResult({
+          success: false,
+          message: "Fix parameter errors before saving.",
+          errors: Object.values(rowErrors).map((m) => ({ message: m, type: "error" })),
+        })
+        return
+      }
+    }
     setIsSaving(true)
+    setServerParamErrors({})
     try {
       await onSave({
         code,
@@ -922,17 +960,49 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
   }
 
   const addParameter = () => {
-    setParameters([...parameters, { name: "", defaultValue: "", type: "number" }])
+    setParameters([...parameters, { name: "", type: "int", default: 0 }])
   }
 
-  const updateParameter = (index: number, field: keyof Parameter, value: string) => {
+  const updateParameter = (index: number, patch: Partial<ParameterSchema>) => {
     const newParams = [...parameters]
-    newParams[index] = { ...newParams[index], [field]: value }
+    newParams[index] = { ...newParams[index], ...patch }
     setParameters(newParams)
+    // Any local edit invalidates the previous server error for this row.
+    if (serverParamErrors[index]) {
+      const next = { ...serverParamErrors }
+      delete next[index]
+      setServerParamErrors(next)
+    }
+  }
+
+  const changeParameterType = (index: number, type: ParameterType) => {
+    const cur = parameters[index]
+    let def: number | string | boolean = cur.default
+    if (type === "int") def = Number.isFinite(Number(cur.default)) ? Math.trunc(Number(cur.default)) : 0
+    else if (type === "float") def = Number.isFinite(Number(cur.default)) ? Number(cur.default) : 0
+    else if (type === "bool") def = typeof cur.default === "boolean" ? cur.default : String(cur.default) === "true"
+    else if (type === "select") def = (cur.options && cur.options[0]) || ""
+    else if (type === "source") def = OHLCV_SOURCES.includes(String(cur.default)) ? String(cur.default) : "Close"
+    else def = String(cur.default ?? "")
+    updateParameter(index, {
+      type,
+      default: def,
+      min: type === "int" || type === "float" ? cur.min : undefined,
+      max: type === "int" || type === "float" ? cur.max : undefined,
+      step: type === "int" || type === "float" ? cur.step : undefined,
+      options: type === "select" ? (cur.options && cur.options.length ? cur.options : [""]) : undefined,
+    })
   }
 
   const removeParameter = (index: number) => {
     setParameters(parameters.filter((_, i) => i !== index))
+    const next: Record<number, string[]> = {}
+    Object.entries(serverParamErrors).forEach(([k, v]) => {
+      const i = parseInt(k, 10)
+      if (i < index) next[i] = v
+      else if (i > index) next[i - 1] = v
+    })
+    setServerParamErrors(next)
   }
 
   // Get Monaco language based on selected language
@@ -1241,33 +1311,190 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
                   </button>
                 </div>
                 <div className="space-y-3">
-                  {parameters.map((param, index) => (
-                    <div key={index} className="p-3 bg-[#151718] rounded-lg border border-[#2A2D42]">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs text-gray-500">Parameter {index + 1}</span>
-                        <button
-                          onClick={() => removeParameter(index)}
-                          className="text-xs text-red-400 hover:text-red-300"
-                        >
-                          Remove
-                        </button>
+                  {parameters.map((param, index) => {
+                    const localErr = parameterRowErrors[index]
+                    const serverErrs = serverParamErrors[index]
+                    const isNumeric = param.type === "int" || param.type === "float"
+                    const defaultInputType =
+                      param.type === "int" || param.type === "float"
+                        ? "number"
+                        : param.type === "bool"
+                        ? "checkbox"
+                        : "text"
+                    return (
+                      <div
+                        key={index}
+                        className={`p-3 bg-[#151718] rounded-lg border ${
+                          localErr || serverErrs ? "border-red-500/60" : "border-[#2A2D42]"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs text-gray-500">Parameter {index + 1}</span>
+                          <button
+                            onClick={() => removeParameter(index)}
+                            className="text-xs text-red-400 hover:text-red-300"
+                          >
+                            Remove
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 mb-2">
+                          <input
+                            type="text"
+                            value={param.name}
+                            onChange={(e) => updateParameter(index, { name: e.target.value })}
+                            placeholder="name (e.g., period)"
+                            className="px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
+                          />
+                          <select
+                            value={param.type}
+                            onChange={(e) => changeParameterType(index, e.target.value as ParameterType)}
+                            className="px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-sm focus:outline-none focus:border-[#85e1fe]"
+                          >
+                            <option value="int">int</option>
+                            <option value="float">float</option>
+                            <option value="bool">bool</option>
+                            <option value="string">string</option>
+                            <option value="select">select</option>
+                            <option value="source">source (OHLCV)</option>
+                          </select>
+                        </div>
+
+                        <input
+                          type="text"
+                          value={param.display_name ?? ""}
+                          onChange={(e) => updateParameter(index, { display_name: e.target.value || undefined })}
+                          placeholder="Display name (optional)"
+                          className="w-full px-3 py-2 mb-2 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
+                        />
+
+                        {/* Default value */}
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-xs text-gray-500 w-16">Default</span>
+                          {param.type === "bool" ? (
+                            <input
+                              type="checkbox"
+                              checked={!!param.default}
+                              onChange={(e) => updateParameter(index, { default: e.target.checked })}
+                              className="w-4 h-4 accent-[#85e1fe]"
+                            />
+                          ) : param.type === "select" ? (
+                            <select
+                              value={String(param.default ?? "")}
+                              onChange={(e) => updateParameter(index, { default: e.target.value })}
+                              className="flex-1 px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-sm focus:outline-none focus:border-[#85e1fe]"
+                            >
+                              {(param.options ?? []).map((opt, i) => (
+                                <option key={`${opt}-${i}`} value={opt}>{opt || "(empty)"}</option>
+                              ))}
+                            </select>
+                          ) : param.type === "source" ? (
+                            <select
+                              value={String(param.default ?? "Close")}
+                              onChange={(e) => updateParameter(index, { default: e.target.value })}
+                              className="flex-1 px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-sm focus:outline-none focus:border-[#85e1fe]"
+                            >
+                              {OHLCV_SOURCES.map((s) => (
+                                <option key={s} value={s}>{s}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              type={defaultInputType}
+                              value={String(param.default ?? "")}
+                              onChange={(e) =>
+                                updateParameter(index, { default: coerceDefault(param.type, e.target.value) })
+                              }
+                              placeholder={param.type === "int" ? "14" : param.type === "float" ? "1.5" : "text"}
+                              className="flex-1 px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
+                            />
+                          )}
+                        </div>
+
+                        {/* Numeric bounds */}
+                        {isNumeric && (
+                          <div className="grid grid-cols-3 gap-2 mb-2">
+                            <input
+                              type="number"
+                              value={param.min ?? ""}
+                              onChange={(e) => {
+                                const v = e.target.value
+                                updateParameter(index, { min: v === "" ? undefined : Number(v) })
+                              }}
+                              placeholder="min"
+                              className="px-2 py-1.5 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-xs placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
+                            />
+                            <input
+                              type="number"
+                              value={param.max ?? ""}
+                              onChange={(e) => {
+                                const v = e.target.value
+                                updateParameter(index, { max: v === "" ? undefined : Number(v) })
+                              }}
+                              placeholder="max"
+                              className="px-2 py-1.5 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-xs placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
+                            />
+                            <input
+                              type="number"
+                              value={param.step ?? ""}
+                              onChange={(e) => {
+                                const v = e.target.value
+                                updateParameter(index, { step: v === "" ? undefined : Number(v) })
+                              }}
+                              placeholder="step"
+                              className="px-2 py-1.5 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-xs placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
+                            />
+                          </div>
+                        )}
+
+                        {/* Select options editor */}
+                        {param.type === "select" && (
+                          <div className="mb-2">
+                            <div className="text-xs text-gray-500 mb-1">Options</div>
+                            <textarea
+                              rows={2}
+                              value={(param.options ?? []).join("\n")}
+                              onChange={(e) => {
+                                const opts = e.target.value.split(/\n/).map((s) => s.trim()).filter(Boolean)
+                                const patch: Partial<ParameterSchema> = { options: opts }
+                                if (!opts.includes(String(param.default))) {
+                                  patch.default = opts[0] ?? ""
+                                }
+                                updateParameter(index, patch)
+                              }}
+                              placeholder={"one per line\nsma\nema\nwma"}
+                              className="w-full px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-xs placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
+                            />
+                          </div>
+                        )}
+
+                        <input
+                          type="text"
+                          value={param.description ?? ""}
+                          onChange={(e) => updateParameter(index, { description: e.target.value || undefined })}
+                          placeholder="Description (optional)"
+                          className="w-full px-3 py-2 mb-2 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-xs placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
+                        />
+
+                        <label className="inline-flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!!param.optimizable}
+                            onChange={(e) => updateParameter(index, { optimizable: e.target.checked })}
+                            className="w-3.5 h-3.5 accent-[#85e1fe]"
+                          />
+                          Optimizable
+                        </label>
+
+                        {(localErr || serverErrs) && (
+                          <div className="mt-2 text-xs text-red-400 space-y-0.5">
+                            {localErr && <div>{localErr}</div>}
+                            {serverErrs?.map((m, i) => <div key={i}>{m}</div>)}
+                          </div>
+                        )}
                       </div>
-                      <input
-                        type="text"
-                        value={param.name}
-                        onChange={(e) => updateParameter(index, "name", e.target.value)}
-                        placeholder="Name (e.g., period)"
-                        className="w-full px-3 py-2 mb-2 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
-                      />
-                      <input
-                        type="text"
-                        value={param.defaultValue}
-                        onChange={(e) => updateParameter(index, "defaultValue", e.target.value)}
-                        placeholder="Default value (e.g., 14)"
-                        className="w-full px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
-                      />
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             </>

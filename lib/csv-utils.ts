@@ -6,6 +6,7 @@ export interface Trade {
   Size: number
   EntryTime: string
   ExitTime: string
+  ExitTimeTick?: string | null
   EntryPrice: number
   ExitPrice: number
   PnL: number

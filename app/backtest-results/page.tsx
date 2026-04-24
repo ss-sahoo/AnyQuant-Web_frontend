@@ -17,6 +17,7 @@ interface Trade {
   ReturnPct: number
   EntryTime: string
   ExitTime: string
+  ExitTimeTick?: string | null
   Duration: string
   [key: string]: any // Allow additional trade fields from backend
 }
@@ -535,6 +536,7 @@ function BacktestResultsClient() {
                               <th className="px-4 py-3 text-left">#</th>
                               <th className="px-4 py-3 text-left">Entry Time</th>
                               <th className="px-4 py-3 text-left">Exit Time</th>
+                              <th className="px-4 py-3 text-left">Exit Time (Tick)</th>
                               <th className="px-4 py-3 text-left">Size</th>
                               <th className="px-4 py-3 text-left">Entry Price</th>
                               <th className="px-4 py-3 text-left">Exit Price</th>
@@ -551,6 +553,20 @@ function BacktestResultsClient() {
                                 <td className="px-4 py-3 text-white">{index + 1}</td>
                                 <td className="px-4 py-3 text-white">{trade.EntryTime || 'N/A'}</td>
                                 <td className="px-4 py-3 text-white">{trade.ExitTime || 'N/A'}</td>
+                                <td
+                                  className={`px-4 py-3 ${
+                                    trade.ExitTimeTick && trade.ExitTime && trade.ExitTimeTick !== trade.ExitTime
+                                      ? 'text-yellow-300'
+                                      : 'text-white'
+                                  }`}
+                                  title={
+                                    trade.ExitTimeTick && trade.ExitTime && trade.ExitTimeTick !== trade.ExitTime
+                                      ? 'Tick-level exit differs from bar-close exit'
+                                      : undefined
+                                  }
+                                >
+                                  {trade.ExitTimeTick ? trade.ExitTimeTick : '—'}
+                                </td>
                                 <td className="px-4 py-3 text-white">{trade.Size ?? 'N/A'}</td>
                                 <td className="px-4 py-3 text-white">{trade.EntryPrice != null ? trade.EntryPrice.toFixed(5) : 'N/A'}</td>
                                 <td className="px-4 py-3 text-white">{trade.ExitPrice != null ? trade.ExitPrice.toFixed(5) : 'N/A'}</td>

@@ -53,6 +53,11 @@ import { StrategyTab } from "@/components/strategy-tab"
 import { BacktestTab } from "@/components/backtest-tab"
 import { OptimisationTab } from "@/components/optimisation-tab"
 import { PropertiesTab } from "@/components/properties-tab"
+import {
+  collectCustomComponentRows,
+  buildCustomStrategyRows,
+  mergeOptimisationRows,
+} from "@/lib/custom-component-params-sync"
 import { AdvancedSettingsModalContent } from "@/components/advanced-settings-modal-content"
 import { PreviousOptimisationView } from '@/components/PreviousOptimisationView'
 import { OptimisationHistoryList } from '@/components/OptimisationHistoryList'
@@ -382,22 +387,8 @@ export default function StrategyTestingPage() {
         stderr: ''
       })
 
-      getStrategyBacktestResults(strategy_id)
-        .then((response: any) => {
-          if (isCancelled) return
-
-          // Response might be direct array or paginated object { results: [] }
-          const results = Array.isArray(response) ? response : (response?.results || [])
-          if (results.length > 0) {
-            // Sort by date descending
-            const sorted = [...results].sort((a, b) =>
-              new Date(b.backtest_date || b.created_at || b.date).getTime() -
-              new Date(a.backtest_date || a.created_at || a.date).getTime()
-            )
-            loadBacktestResult(sorted[0].id.toString())
-          }
-        })
-        .catch(err => console.error("Error fetching initial backtest results:", err))
+      // Do not auto-load the most recent backtest chart on navigation — users
+      // pick a run from the sidebar list explicitly.
 
       // Also load last optimization result
       getStrategyOptimizationResults(strategy_id)
@@ -645,6 +636,24 @@ export default function StrategyTestingPage() {
             } else {
               // Fetch regular strategy
               strategyData = await fetchStatementDetail(id)
+
+              // Backend may strip trade_at/exit_timeframe; rehydrate from per-strategy fallback.
+              try {
+                const sid = String(id)
+                const raw = localStorage.getItem(`trade_timing_${sid}`)
+                if (raw && strategyData && strategyData.trade_at == null) {
+                  const parsed = JSON.parse(raw)
+                  if (parsed?.trade_at === "tick") {
+                    strategyData = {
+                      ...strategyData,
+                      trade_at: "tick",
+                      ...(parsed.exit_timeframe ? { exit_timeframe: parsed.exit_timeframe } : {}),
+                    }
+                  } else if (parsed?.trade_at === "bar close") {
+                    strategyData = { ...strategyData, trade_at: "bar close" }
+                  }
+                }
+              } catch { }
             }
 
             // Store the fetched data in localStorage
@@ -655,6 +664,33 @@ export default function StrategyTestingPage() {
               localStorage.setItem("is_custom_strategy", "true")
             } else {
               localStorage.removeItem("is_custom_strategy")
+            }
+
+            // Inject user-defined custom-component parameter rows into the
+            // optimisation_form so they appear in the Strategy-Tester
+            // Properties tab. The backend only knows about built-in
+            // indicators; everything the user defines in Developer Mode has
+            // to be surfaced from the frontend.
+            try {
+              const customRows = isCustomStrategy
+                ? buildCustomStrategyRows(strategyData)
+                : await collectCustomComponentRows(strategyData)
+
+              if (customRows.length > 0) {
+                const baseForm = strategyData.optimisation_form || {
+                  parameters: [],
+                  maximise_options: [],
+                  algorithm_options: [],
+                  default_algorithm: "",
+                  algorithm_defaults: { population_size: 100, generations: 50, mutation_rate: 0.1, tournament_size: 3 },
+                  simple_constraints: [],
+                  Constraints: [],
+                }
+                baseForm.parameters = mergeOptimisationRows(baseForm.parameters, customRows)
+                strategyData.optimisation_form = baseForm
+              }
+            } catch (err) {
+              console.warn("Failed to inject custom-component params into properties form:", err)
             }
 
             // Check if timeframes_required exists in the response and store it
@@ -1018,9 +1054,15 @@ export default function StrategyTestingPage() {
   const [requiredTimeframes, setRequiredTimeframes] = useState<string[]>([])
 
   useEffect(() => {
-    const tf = JSON.parse(localStorage.getItem("timeframes_required") || "[]")
-    setRequiredTimeframes(tf)
-  }, [])
+    const tf: string[] = JSON.parse(localStorage.getItem("timeframes_required") || "[]")
+    // If strategy requests tick-level exit timing, also require its exit_timeframe file
+    const exitTf =
+      parsedStatement?.trade_at === "tick" && typeof parsedStatement?.exit_timeframe === "string"
+        ? parsedStatement.exit_timeframe.trim()
+        : ""
+    const merged = exitTf && !tf.includes(exitTf) ? [...tf, exitTf] : tf
+    setRequiredTimeframes(merged)
+  }, [parsedStatement])
 
   // Helper function to match timeframes with filenames
   function matchesTimeframe(filename: string, timeframe: string) {
@@ -2208,7 +2250,12 @@ export default function StrategyTestingPage() {
         // Add date range
         date_range: dateRange,
         // Preserve TradingSession if it exists
-        ...(parsedStatement.TradingSession && { TradingSession: parsedStatement.TradingSession })
+        ...(parsedStatement.TradingSession && { TradingSession: parsedStatement.TradingSession }),
+        // Preserve trade execution timing (backend may ignore these fields; included for forward-compat)
+        ...(parsedStatement.trade_at ? { trade_at: parsedStatement.trade_at } : {}),
+        ...(parsedStatement.trade_at === "tick" && parsedStatement.exit_timeframe
+          ? { exit_timeframe: parsedStatement.exit_timeframe }
+          : {}),
       }
 
       console.log("🔍 DEBUG: updatedStrategyData being sent to editStrategy:", updatedStrategyData)
@@ -2218,14 +2265,46 @@ export default function StrategyTestingPage() {
 
       // Update the local strategy object with the response from the API
       if (result) {
-        // Preserve the TradingSession from the original data since the API doesn't return it
-        const finalResult = {
+        // Preserve fields the API doesn't round-trip (TradingSession, trade_at, exit_timeframe)
+        const finalResult: any = {
           ...result,
-          TradingSession: updatedStrategyData.TradingSession
+          TradingSession: updatedStrategyData.TradingSession,
+        }
+        if (updatedStrategyData.trade_at) {
+          finalResult.trade_at = updatedStrategyData.trade_at
+        }
+        if (
+          updatedStrategyData.trade_at === "tick" &&
+          (updatedStrategyData as any).exit_timeframe
+        ) {
+          finalResult.exit_timeframe = (updatedStrategyData as any).exit_timeframe
         }
 
         setParsedStatement(finalResult)
         localStorage.setItem("savedStrategy", JSON.stringify(finalResult))
+
+        // Persist the per-strategy fallback so reload paths can rehydrate even if backend strips it
+        try {
+          const sid = result.id ? String(result.id) : String(strategy_id)
+          if (sid) {
+            if (finalResult.trade_at === "tick") {
+              localStorage.setItem(
+                `trade_timing_${sid}`,
+                JSON.stringify({
+                  trade_at: "tick",
+                  ...(finalResult.exit_timeframe
+                    ? { exit_timeframe: finalResult.exit_timeframe }
+                    : {}),
+                })
+              )
+            } else if (finalResult.trade_at === "bar close") {
+              localStorage.setItem(
+                `trade_timing_${sid}`,
+                JSON.stringify({ trade_at: "bar close" })
+              )
+            }
+          }
+        } catch { }
 
         // Update strategy_id if it changed
         if (result.id && result.id.toString() !== strategy_id) {
@@ -3462,7 +3541,7 @@ export default function StrategyTestingPage() {
                   {["strategy", "backtest", "optimisation", "properties"].map((tab) => (
                     <button
                       key={tab}
-                      className={`py-4 text-center text-[10px] font-black uppercase tracking-widest transition-all border-t-2 ${activeTab === tab ? "bg-[#121420] text-[#85e1fe] border-[#85e1fe]" : "bg-[#0a0b12] text-gray-500 hover:text-gray-300 hover:bg-[#161927] border-transparent"
+                      className={`py-4 text-center text-[13px] font-black uppercase tracking-widest transition-all border-t-2 ${activeTab === tab ? "bg-[#121420] text-[#85e1fe] border-[#85e1fe]" : "bg-[#0a0b12] text-gray-500 hover:text-gray-300 hover:bg-[#161927] border-transparent"
                         }`}
                       onClick={() => handleTabChange(tab)}
                     >
@@ -3624,6 +3703,40 @@ export default function StrategyTestingPage() {
                     onShowTradesSummary={() => setShowTradesSummary(true)}
                     initialTradingSession={parsedStatement?.TradingSession}
                     timezone={timezone}
+                    tradeTiming={
+                      parsedStatement?.trade_at === "tick"
+                        ? { trade_at: "tick", exit_timeframe: parsedStatement?.exit_timeframe || "" }
+                        : { trade_at: "bar close" }
+                    }
+                    onTradeTimingSave={(settings) => {
+                      try {
+                        const next: any = { ...(parsedStatement || {}), trade_at: settings.trade_at }
+                        if (settings.trade_at === "tick" && settings.exit_timeframe) {
+                          next.exit_timeframe = settings.exit_timeframe
+                        } else {
+                          delete next.exit_timeframe
+                        }
+                        setParsedStatement(next)
+                        localStorage.setItem("savedStrategy", JSON.stringify(next))
+                        if (strategy_id) {
+                          const fallback: any = { trade_at: settings.trade_at }
+                          if (settings.trade_at === "tick" && settings.exit_timeframe) {
+                            fallback.exit_timeframe = settings.exit_timeframe
+                          }
+                          localStorage.setItem(
+                            `trade_timing_${strategy_id}`,
+                            JSON.stringify(fallback)
+                          )
+                        }
+                        const toast = document.createElement('div')
+                        toast.className = 'fixed bottom-10 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded shadow-lg z-50 text-black bg-[#85e1fe]'
+                        toast.textContent = 'Trade Execution Timing saved'
+                        document.body.appendChild(toast)
+                        setTimeout(() => document.body.removeChild(toast), 2000)
+                      } catch (e) {
+                        console.error('Failed to save trade_at:', e)
+                      }
+                    }}
                     onTradingSessionSave={(session) => {
                       try {
                         // Ensure timezone from state is included in the session

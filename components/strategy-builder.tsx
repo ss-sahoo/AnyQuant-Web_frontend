@@ -33,11 +33,19 @@ import { AboveSettingsModal } from "./modals/above-settings-modal"
 import { MovingOperatorSettingsModal } from "@/components/modals/moving-operator-settings-modal"
 import { PartialTPSettingsModal, type PartialTPSettings } from "@/components/modals/partial-tp-settings-modal"
 import { ManageExitSettingsModal, type ManageExitSettings } from "@/components/modals/manage-exit-settings-modal"
+import { TradeTimingModal, type TradeTimingSettings } from "@/components/modals/trade-timing-modal"
 import { VolumeDeltaSettingsModal } from "@/components/modals/volume-delta-settings-modal"
 import { HistoricalPriceLevelSettingsModal } from "@/components/modals/historical-price-level-settings-modal"
 import { CandleSizeSettingsModal } from "@/components/modals/candle-size-settings-modal"
 import { DeveloperModePage } from "@/components/developer-mode-page"
 import { CustomIndicatorSettingsModal } from "@/components/modals/custom-indicator-settings-modal"
+import { CustomComponentPropertiesDialog, type CustomComponentKind } from "@/components/modals/custom-component-properties-dialog"
+import {
+  ParameterSchema,
+  ParamRuntimeValue,
+  normalizeStoredParameters,
+  parseDrfParameterErrors,
+} from "@/lib/custom-component-schema"
 import { EditStrategyModal } from "@/components/edit-strategy-modal"
 import { TradingSessionModal } from "./trading-session-modal"
 import type { Algorithm } from "@/lib/types"
@@ -217,6 +225,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   })
   const [showPartialTPModal, setShowPartialTPModal] = useState(false)
   const [showManageExitModal, setShowManageExitModal] = useState(false)
+  const [showTradeTimingModal, setShowTradeTimingModal] = useState(false)
+  const [tradeTiming, setTradeTiming] = useState<TradeTimingSettings>({ trade_at: "bar close" })
   const [showVolumeDeltaModal, setShowVolumeDeltaModal] = useState(false)
   const [showHistoricalPriceLevelModal, setShowHistoricalPriceLevelModal] = useState(false)
   const [showCandleSizeModal, setShowCandleSizeModal] = useState(false)
@@ -494,6 +504,109 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   // State for custom trade management - stores custom trade management data by name for lookup
   const [customTradeManagementRegistry, setCustomTradeManagementRegistry] = useState<Record<string, any>>({})
 
+  // Holds the pending custom-component insertion that's waiting on the
+  // properties dialog. Set when the user picks a custom component in the
+  // sidebar, cleared when they save or cancel.
+  const [pendingCustomInsert, setPendingCustomInsert] = useState<{
+    kind: CustomComponentKind
+    statementIndex: number
+    componentKey: string         // the `component` arg from the event (sidebar key)
+    componentName: string
+    componentId?: number
+    schemas: ParameterSchema[]
+    rawComponentData: any
+  } | null>(null)
+
+  // Commit a pending custom-component insertion with the values the user
+  // picked in the properties dialog. Builds the correct runtime shape for
+  // indicators (CUSTOM_I + input_params inside inp1/inp2), behaviors
+  // (CUSTOM_B operator + params), and trade management (equity rule +
+  // CUSTOM_TM + params), and tags each with `custom_component_id` so the
+  // backend can look the schema back up.
+  const commitCustomInsert = (
+    pending: NonNullable<typeof pendingCustomInsert>,
+    result: { values: Record<string, ParamRuntimeValue>; timeframe?: string; input?: string }
+  ) => {
+    const { kind, statementIndex, componentName, componentId, rawComponentData } = pending
+    const params = result.values
+
+    if (kind === "indicator") {
+      setStatements(prev => {
+        const next = [...prev]
+        const stmt = next[statementIndex]
+        if (!stmt || stmt.strategy.length === 0) return prev
+        const lastCondition = { ...stmt.strategy[stmt.strategy.length - 1] }
+        const timeframe = result.timeframe || lastCondition.timeframe || selectedTimeframe || "3h"
+
+        const input: any = {
+          type: "CUSTOM_I",
+          name: componentName,
+          ...(componentId !== undefined ? { custom_component_id: componentId } : {}),
+          timeframe,
+          input_params: params,
+        }
+        if (result.input) input.input = result.input
+
+        if (lastCondition.inp1 && lastCondition.operator_name) {
+          lastCondition.inp2 = input
+        } else {
+          lastCondition.inp1 = input
+        }
+        delete lastCondition.timeframe
+
+        const strategy = [...stmt.strategy]
+        strategy[strategy.length - 1] = lastCondition
+        next[statementIndex] = { ...stmt, strategy }
+        return next
+      })
+    } else if (kind === "behavior") {
+      setStatements(prev => {
+        const next = [...prev]
+        const stmt = { ...next[statementIndex] }
+        const strategy = [...stmt.strategy]
+        if (strategy.length === 0) return prev
+        const last = { ...strategy[strategy.length - 1] }
+        if (!last.inp1) {
+          console.warn("Please add an indicator first before adding a behavior")
+          return prev
+        }
+        last.operator_name = `CUSTOM_B:${componentName}`
+        last.operator_display = componentName
+        ;(last as any).Operator = {
+          type: "CUSTOM_B",
+          name: componentName,
+          ...(componentId !== undefined ? { custom_component_id: componentId } : {}),
+          params,
+        }
+        strategy[strategy.length - 1] = last
+        stmt.strategy = strategy
+        next[statementIndex] = stmt
+        return next
+      })
+    } else if (kind === "trade_management") {
+      setStatements(prev => {
+        const next = [...prev]
+        const stmt = { ...next[statementIndex] }
+        if (!stmt.Equity) stmt.Equity = []
+        const equityRule: any = {
+          trade_management: {
+            type: "CUSTOM_TM",
+            name: componentName,
+            ...(componentId !== undefined ? { custom_component_id: componentId } : {}),
+            params,
+          },
+        }
+        stmt.Equity = [...stmt.Equity, equityRule]
+        next[statementIndex] = stmt
+        return next
+      })
+    }
+
+    setTimeout(() => {
+      searchInputRefs.current[statementIndex]?.focus()
+    }, 100)
+  }
+
   // Listen for component selection events from the sidebar
   useEffect(() => {
     const handleComponentSelected = (e: CustomEvent) => {
@@ -502,136 +615,30 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       // Set the active statement index first
       setActiveStatementIndex(statementIndex)
 
-      // If this is a custom component (has customComponentData), handle it based on type
+      // If this is a custom component (has customComponentData), open the
+      // properties dialog first; we only commit the insertion once the user
+      // saves the dialog.
       if (customComponentData) {
-        const componentType = customComponentData.type
+        const componentType = customComponentData.type as CustomComponentKind
 
-        // Handle custom indicators
+        // Track in the appropriate registry up front so later lookups work.
         if (componentType === "indicator") {
-          // Store in registry for future reference
-          setCustomIndicatorRegistry(prev => ({
-            ...prev,
-            [component]: customComponentData
-          }))
-
-          // Directly add the custom indicator to the strategy
-          const newStatements = [...statements]
-          const currentStatement = newStatements[statementIndex]
-
-          if (currentStatement && currentStatement.strategy.length > 0) {
-            const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-            const timeframe = lastCondition.timeframe || selectedTimeframe || "3h"
-
-            // Create the custom indicator input
-            const customIndicatorInput = {
-              type: "CUSTOM_I",
-              name: customComponentData.name,
-              timeframe: timeframe,
-              input_params: customComponentData.parameters || {},
-            }
-
-            // Check if we already have inp1 and an operator - if so, we're adding to inp2
-            if (lastCondition.inp1 && lastCondition.operator_name) {
-              lastCondition.inp2 = customIndicatorInput
-            } else {
-              // We're adding to inp1
-              lastCondition.inp1 = customIndicatorInput
-            }
-
-            // Move timeframe to inp1/inp2 and remove from condition
-            delete lastCondition.timeframe
-
-            setStatements(newStatements)
-          }
-        }
-        // Handle custom behaviors
-        else if (componentType === "behavior") {
-          // Store in registry for future reference
-          setCustomBehaviorRegistry(prev => ({
-            ...prev,
-            [component]: customComponentData
-          }))
-
-          // Add the custom behavior as an operator
-          setStatements(prevStatements => {
-            const newStatements = [...prevStatements]
-            const currentStatement = { ...newStatements[statementIndex] }
-            const strategy = [...currentStatement.strategy]
-
-            if (strategy.length > 0) {
-              const lastConditionIndex = strategy.length - 1
-              const lastCondition = { ...strategy[lastConditionIndex] }
-
-              // Only add operator if inp1 exists (indicator must be added first)
-              if (lastCondition.inp1) {
-                // Preserve inp1 by creating a copy
-                const preservedInp1 = lastCondition.inp1
-
-                // Add the custom behavior as operator
-                lastCondition.operator_name = `CUSTOM_B:${customComponentData.name}`
-                lastCondition.operator_display = customComponentData.name
-
-                // Store the behavior parameters
-                lastCondition.Operator = {
-                  type: "CUSTOM_B",
-                  name: customComponentData.name,
-                  params: customComponentData.parameters || {}
-                }
-
-                // Ensure inp1 is preserved
-                lastCondition.inp1 = preservedInp1
-
-                // Update the condition in the strategy array
-                strategy[lastConditionIndex] = lastCondition
-                currentStatement.strategy = strategy
-                newStatements[statementIndex] = currentStatement
-              } else {
-                console.warn("Please add an indicator first before adding a behavior")
-              }
-            }
-
-            return newStatements
-          })
-        }
-        // Handle custom trade management
-        else if (componentType === "trade_management") {
-          // Store in registry for future reference
-          setCustomTradeManagementRegistry(prev => ({
-            ...prev,
-            [component]: customComponentData
-          }))
-
-          // Add the custom trade management to Equity
-          setStatements(prevStatements => {
-            const newStatements = [...prevStatements]
-            const currentStatement = { ...newStatements[statementIndex] }
-
-            // Ensure Equity array exists
-            if (!currentStatement.Equity) {
-              currentStatement.Equity = []
-            }
-
-            // Create the equity rule with custom trade management (without statement field)
-            const equityRule: any = {
-              trade_management: {
-                type: "CUSTOM_TM",
-                name: customComponentData.name,
-                params: customComponentData.parameters || {}
-              }
-            }
-
-            // Add the equity rule
-            currentStatement.Equity.push(equityRule)
-            newStatements[statementIndex] = currentStatement
-
-            return newStatements
-          })
+          setCustomIndicatorRegistry(prev => ({ ...prev, [component]: customComponentData }))
+        } else if (componentType === "behavior") {
+          setCustomBehaviorRegistry(prev => ({ ...prev, [component]: customComponentData }))
+        } else if (componentType === "trade_management") {
+          setCustomTradeManagementRegistry(prev => ({ ...prev, [component]: customComponentData }))
         }
 
-        // Focus the search input after adding
-        setTimeout(() => {
-          searchInputRefs.current[statementIndex]?.focus()
-        }, 100)
+        setPendingCustomInsert({
+          kind: componentType,
+          statementIndex,
+          componentKey: component,
+          componentName: customComponentData.name,
+          componentId: customComponentData.id,
+          schemas: normalizeStoredParameters(customComponentData.parameters),
+          rawComponentData: customComponentData,
+        })
       } else {
         // For regular components, call handleAddComponent
         handleAddComponent(statementIndex, component)
@@ -1942,34 +1949,21 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           return
         }
 
-        // Handle custom indicators - they follow the same flow as normal indicators
+        // Handle custom indicators — defer insertion until the user confirms
+        // parameters in the properties dialog.
         if (customIndicatorData) {
-          const timeframe = lastCondition.timeframe || selectedTimeframe
-
-          // Create the custom indicator input
-          const customIndicatorInput = {
-            type: "CUSTOM_I",
-            name: customIndicatorData.name,
-            timeframe: timeframe,
-            input_params: customIndicatorData.parameters || {},
-          }
-
-          // Check if we already have inp1 and an operator - if so, we're adding to inp2
-          if (lastCondition.inp1 && lastCondition.operator_name) {
-            lastCondition.inp2 = customIndicatorInput
-          } else {
-            // We're adding to inp1
-            lastCondition.inp1 = customIndicatorInput
-          }
-
-          // Move timeframe to inp1/inp2 and remove from condition
-          delete lastCondition.timeframe
-
-          setStatements(newStatements)
+          setPendingCustomInsert({
+            kind: "indicator",
+            statementIndex,
+            componentKey: component,
+            componentName: customIndicatorData.name,
+            componentId: customIndicatorData.id,
+            schemas: normalizeStoredParameters(customIndicatorData.parameters),
+            rawComponentData: customIndicatorData,
+          })
           setActiveStatementIndex(statementIndex)
           setSearchTerm("")
           setSearchResults([])
-          searchInputRefs.current[statementIndex]?.focus()
           return
         }
 
@@ -2457,57 +2451,35 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         }
       }
     } else if (customBehaviorRegistry[component]) {
-      // Adding a custom behavior
-      if (currentStatement.strategy.length > 0) {
-        const lastConditionIndex = currentStatement.strategy.length - 1
-        const lastCondition = { ...currentStatement.strategy[lastConditionIndex] }
-        const customBehaviorData = customBehaviorRegistry[component]
-
-        // Only add operator if inp1 exists (indicator must be added first)
-        if (lastCondition.inp1) {
-          // Preserve inp1 by creating a reference
-          const preservedInp1 = lastCondition.inp1
-
-          // Add the custom behavior as operator
-          lastCondition.operator_name = `CUSTOM_B:${customBehaviorData.name}`
-          lastCondition.operator_display = customBehaviorData.name
-
-          // Store the behavior parameters
-          lastCondition.Operator = {
-            type: "CUSTOM_B",
-            name: customBehaviorData.name,
-            params: customBehaviorData.parameters || {}
-          }
-
-          // Ensure inp1 is preserved
-          lastCondition.inp1 = preservedInp1
-
-          // Update the condition in the strategy array
-          currentStatement.strategy[lastConditionIndex] = lastCondition
-        } else {
-          console.warn("Please add an indicator first before adding a behavior")
-        }
+      // Defer insertion until the user confirms parameters in the dialog.
+      const customBehaviorData = customBehaviorRegistry[component]
+      if (currentStatement.strategy.length > 0 &&
+          currentStatement.strategy[currentStatement.strategy.length - 1].inp1) {
+        setPendingCustomInsert({
+          kind: "behavior",
+          statementIndex,
+          componentKey: component,
+          componentName: customBehaviorData.name,
+          componentId: customBehaviorData.id,
+          schemas: normalizeStoredParameters(customBehaviorData.parameters),
+          rawComponentData: customBehaviorData,
+        })
+      } else {
+        console.warn("Please add an indicator first before adding a behavior")
       }
+      return
     } else if (customTradeManagementRegistry[component]) {
-      // Adding a custom trade management
-      const customTradeManagementData = customTradeManagementRegistry[component]
-
-      // Ensure Equity array exists
-      if (!currentStatement.Equity) {
-        currentStatement.Equity = []
-      }
-
-      // Create the equity rule with custom trade management (without statement field)
-      const equityRule: any = {
-        trade_management: {
-          type: "CUSTOM_TM",
-          name: customTradeManagementData.name,
-          params: customTradeManagementData.parameters || {}
-        }
-      }
-
-      // Add the equity rule
-      currentStatement.Equity.push(equityRule)
+      const customTMData = customTradeManagementRegistry[component]
+      setPendingCustomInsert({
+        kind: "trade_management",
+        statementIndex,
+        componentKey: component,
+        componentName: customTMData.name,
+        componentId: customTMData.id,
+        schemas: normalizeStoredParameters(customTMData.parameters),
+        rawComponentData: customTMData,
+      })
+      return
     } else if (
       // Important: treat "Accumulator" via the dedicated accumulator handler below,
       // not as a generic behaviour. Otherwise the accumulator modal won't open
@@ -2620,6 +2592,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       setShowPartialTPModal(true)
     } else if (component.toLowerCase() === "manage exit" || component.toLowerCase() === "manage-exit") {
       setShowManageExitModal(true)
+    } else if (
+      component.toLowerCase() === "trade execution timing" ||
+      component.toLowerCase() === "trade-execution-timing" ||
+      component.toLowerCase() === "trade timing"
+    ) {
+      setShowTradeTimingModal(true)
     } else if (component.toLowerCase() === "trading session" || component.toLowerCase() === "trading-session") {
       // Open Trading Session modal
       setShowTradingSessionModal(true)
@@ -3187,6 +3165,16 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
   const handleSaveDraft = async (name: string) => {
     try {
+      if (tradeTiming.trade_at === "tick" && !tradeTiming.exit_timeframe?.trim()) {
+        toast({
+          variant: "destructive",
+          title: "Exit timeframe required",
+          description:
+            "Trade execution timing is set to Tick level — please configure the Exit timeframe before saving.",
+        })
+        return
+      }
+
       setIsSavingDraft(true)
 
       // Save all statements, not just the active one
@@ -3226,6 +3214,21 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       // Update localStorage with the first statement ID for subsequent edits
       if (firstStatementId) {
         localStorage.setItem("strategy_id", firstStatementId)
+
+        // Persist trade-timing fallback keyed by this strategy id (backend may drop these fields)
+        try {
+          if (tradeTiming.trade_at === "tick" && tradeTiming.exit_timeframe) {
+            localStorage.setItem(
+              `trade_timing_${firstStatementId}`,
+              JSON.stringify({ trade_at: "tick", exit_timeframe: tradeTiming.exit_timeframe })
+            )
+          } else {
+            localStorage.setItem(
+              `trade_timing_${firstStatementId}`,
+              JSON.stringify({ trade_at: "bar close" })
+            )
+          }
+        } catch { }
 
         // Refresh strategy data to ensure UI is in sync
         try {
@@ -3270,7 +3273,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     componentName?: string
     strategyName?: string
     componentType?: "indicator" | "behavior" | "trade_management"
-    parameters?: { name: string; defaultValue: string; type: "number" | "string" | "boolean" }[]
+    parameters?: ParameterSchema[]
     componentId?: number  // For editing existing components
   }
 
@@ -3287,6 +3290,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     errors?: CompileError[]
     warnings?: string[]
     strategyId?: number
+    parameterErrors?: Record<number, string[]>
   }
 
   // State to track the current component being edited
@@ -3407,32 +3411,35 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         }
       }
 
-      // Convert parameters to simple format: {"name": value}
-      const parametersObj: Record<string, any> = {}
-      if (data.parameters) {
-        data.parameters.forEach((param) => {
-          if (param.name) {
-            parametersObj[param.name] =
-              param.type === "number"
-                ? Number(param.defaultValue) || 0
-                : param.type === "boolean"
-                  ? param.defaultValue === "true"
-                  : param.defaultValue
-          }
-        })
-      }
+      // Send the full schema: { parameters: { parameters: [ParameterSchema, ...] } }
+      const parametersPayload = { parameters: (data.parameters as ParameterSchema[] | undefined) ?? [] }
 
       // If we have a component ID (from editing or from state), update and validate the existing component
       const componentId = data.componentId || currentComponentId
       if (componentId) {
         // First, update the component with new data (name, type, language, parameters, code)
-        await updateCustomComponent(componentId, {
-          name: data.componentName || "Custom Component",
-          type: data.componentType || "indicator",
-          language: data.language,
-          code: data.code,
-          parameters: parametersObj,
-        })
+        try {
+          await updateCustomComponent(componentId, {
+            name: data.componentName || "Custom Component",
+            type: data.componentType || "indicator",
+            language: data.language,
+            code: data.code,
+            parameters: parametersPayload,
+          })
+        } catch (apiErr: any) {
+          const { rowErrors, globalErrors } = parseDrfParameterErrors(apiErr?.response)
+          const errMessages: CompileError[] = [
+            ...Object.values(rowErrors).flat().map((m) => ({ message: m, type: "error" as const })),
+            ...globalErrors.map((m) => ({ message: m, type: "error" as const })),
+          ]
+          if (errMessages.length === 0) errMessages.push({ message: apiErr?.message || "Update failed", type: "error" })
+          return {
+            success: false,
+            message: "Failed to save parameter schema — fix the errors below.",
+            errors: errMessages,
+            parameterErrors: rowErrors,
+          }
+        }
 
         // Then validate the code
         const validationResult = await validateCustomComponentCode({
@@ -3509,14 +3516,29 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         }
       } else {
         // Create a new component
-        console.log("Creating custom component with parameters:", parametersObj)
-        const createResult = await createCustomComponent({
-          name: data.componentName || "Custom Component",
-          type: data.componentType || "indicator",
-          language: data.language,
-          code: data.code,
-          parameters: parametersObj,
-        })
+        let createResult: any
+        try {
+          createResult = await createCustomComponent({
+            name: data.componentName || "Custom Component",
+            type: data.componentType || "indicator",
+            language: data.language,
+            code: data.code,
+            parameters: parametersPayload,
+          })
+        } catch (apiErr: any) {
+          const { rowErrors, globalErrors } = parseDrfParameterErrors(apiErr?.response)
+          const errMessages: CompileError[] = [
+            ...Object.values(rowErrors).flat().map((m) => ({ message: m, type: "error" as const })),
+            ...globalErrors.map((m) => ({ message: m, type: "error" as const })),
+          ]
+          if (errMessages.length === 0) errMessages.push({ message: apiErr?.message || "Create failed", type: "error" })
+          return {
+            success: false,
+            message: "Failed to save parameter schema — fix the errors below.",
+            errors: errMessages,
+            parameterErrors: rowErrors,
+          }
+        }
 
         // Store the component ID for future updates
         setCurrentComponentId(createResult.id)
@@ -3630,56 +3652,56 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         return
       }
 
-      // Handle Component save
-      // Convert parameters to simple format: {"name": value}
-      const parametersObj: Record<string, any> = {}
-      if (data.parameters) {
-        data.parameters.forEach((param) => {
-          if (param.name) {
-            parametersObj[param.name] =
-              param.type === "number"
-                ? Number(param.defaultValue) || 0
-                : param.type === "boolean"
-                  ? param.defaultValue === "true"
-                  : param.defaultValue
-          }
-        })
-      }
+      // Handle Component save — send the full schema.
+      const parametersPayload = { parameters: (data.parameters as ParameterSchema[] | undefined) ?? [] }
 
       const componentId = data.componentId || currentComponentId
       if (componentId) {
-        // Update existing component with all fields
         await updateCustomComponent(componentId, {
           name: data.componentName || "Custom Component",
           type: data.componentType || "indicator",
           language: data.language,
           code: data.code,
-          parameters: parametersObj,
+          parameters: parametersPayload,
         })
       } else {
-        // Create a new component as draft
-        console.log("Saving custom component with parameters:", parametersObj)
         const createResult = await createCustomComponent({
           name: data.componentName || "Custom Component",
           type: data.componentType || "indicator",
           language: data.language,
           code: data.code,
-          parameters: parametersObj,
+          parameters: parametersPayload,
         })
-
-        // Store the component ID for future updates
         setCurrentComponentId(createResult.id)
       }
-
-      console.log("Saved developer mode code:", data)
     } catch (error: any) {
-      console.error("Developer Mode save error:", error)
+      // Try to surface DRF parameter errors so the editor can highlight rows.
+      const { rowErrors, globalErrors } = parseDrfParameterErrors(error?.response)
+      if (Object.keys(rowErrors).length || globalErrors.length) {
+        const msg = [
+          ...Object.values(rowErrors).flat(),
+          ...globalErrors,
+        ].join("; ")
+        const wrapped = new Error(msg || error.message || "Failed to save")
+        ;(wrapped as any).response = error?.response
+        throw wrapped
+      }
       throw new Error(error.message || "Failed to save")
     }
   }
 
   const handleProceedToTesting = async (name: string) => {
     try {
+      if (tradeTiming.trade_at === "tick" && !tradeTiming.exit_timeframe?.trim()) {
+        toast({
+          variant: "destructive",
+          title: "Exit timeframe required",
+          description:
+            "Trade execution timing is set to Tick level — please configure the Exit timeframe before proceeding.",
+        })
+        return
+      }
+
       setIsProceeding(true)
 
       // Build the unified multi-statement Strategy payload
@@ -3717,6 +3739,21 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       // Update localStorage with the first statement ID
       if (firstStatementId) {
         localStorage.setItem("strategy_id", firstStatementId)
+
+        // Persist trade-timing fallback keyed by this strategy id
+        try {
+          if (tradeTiming.trade_at === "tick" && tradeTiming.exit_timeframe) {
+            localStorage.setItem(
+              `trade_timing_${firstStatementId}`,
+              JSON.stringify({ trade_at: "tick", exit_timeframe: tradeTiming.exit_timeframe })
+            )
+          } else {
+            localStorage.setItem(
+              `trade_timing_${firstStatementId}`,
+              JSON.stringify({ trade_at: "bar close" })
+            )
+          }
+        } catch { }
 
         // Refresh strategy data to ensure UI is in sync
         try {
@@ -5221,6 +5258,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       side: signalStatements.length > 0 ? signalStatements[0].side : (allStatementsRaw[0]?.side || "B"),
       TradingType: globalTradingType,
       ...(strategyData?.df_pickle_path && { df_pickle_path: strategyData.df_pickle_path }),
+      trade_at: tradeTiming.trade_at,
+      ...(tradeTiming.trade_at === "tick" && tradeTiming.exit_timeframe
+        ? { exit_timeframe: tradeTiming.exit_timeframe }
+        : {}),
     }
 
     if (isSingleStatement) {
@@ -5313,6 +5354,42 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           Equity: strategyData.Equity || []
         }]
         setStatements(cleanedStatements)
+      }
+
+      // Rehydrate trade-execution-timing fields from saved strategy.
+      // Backend may strip unknown fields, so fall back to a per-strategy localStorage entry.
+      let resolvedTiming: TradeTimingSettings | null = null
+      if (strategyData.trade_at === "tick") {
+        resolvedTiming = {
+          trade_at: "tick",
+          exit_timeframe: strategyData.exit_timeframe || "",
+        }
+      } else if (strategyData.trade_at === "bar close") {
+        resolvedTiming = { trade_at: "bar close" }
+      } else {
+        try {
+          const sid =
+            (typeof strategyId === "string" && strategyId) ||
+            (typeof window !== "undefined" ? localStorage.getItem("strategy_id") : "") ||
+            ""
+          if (sid && typeof window !== "undefined") {
+            const raw = localStorage.getItem(`trade_timing_${sid}`)
+            if (raw) {
+              const parsed = JSON.parse(raw)
+              if (parsed?.trade_at === "tick") {
+                resolvedTiming = {
+                  trade_at: "tick",
+                  exit_timeframe: parsed.exit_timeframe || "",
+                }
+              } else if (parsed?.trade_at === "bar close") {
+                resolvedTiming = { trade_at: "bar close" }
+              }
+            }
+          }
+        } catch { }
+      }
+      if (resolvedTiming) {
+        setTradeTiming(resolvedTiming)
       }
     }
   }, [strategyData])
@@ -5472,6 +5549,35 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               </div>
             ))}
           </div>
+
+          {/* Global Trade Execution Timing chip */}
+          {tradeTiming.trade_at === "tick" && (
+            <div className="flex flex-wrap items-center gap-2 mt-4 px-1">
+              <div className="mr-2 mb-2 relative group">
+                <div className="text-xs text-gray-400 mb-1">Trade Execution Timing</div>
+                <div
+                  className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[180px] cursor-pointer transition-all duration-200 hover:bg-[#252728]"
+                  onClick={() => setShowTradeTimingModal(true)}
+                  title={`Tick-level exits using ${tradeTiming.exit_timeframe || "—"} finer timeframe`}
+                >
+                  <span className="text-gray-300">
+                    Tick ({tradeTiming.exit_timeframe || "—"})
+                  </span>
+                  <ChevronDown className="ml-2 w-4 h-4" />
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setTradeTiming({ trade_at: "bar close" })
+                  }}
+                  className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                  title="Reset to Bar close"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Add statement button */}
           <div className="flex justify-center mt-6">
@@ -8177,6 +8283,50 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             }}
           />
         )}
+        {/* Trade Execution Timing Modal */}
+        {showTradeTimingModal && (
+          <TradeTimingModal
+            onClose={() => setShowTradeTimingModal(false)}
+            initialSettings={tradeTiming}
+            onSave={(settings) => {
+              setTradeTiming(settings)
+              setShowTradeTimingModal(false)
+
+              // Reflect change in strategy JSON immediately (savedStrategy in localStorage)
+              try {
+                const existingRaw = localStorage.getItem("savedStrategy")
+                const existing = existingRaw ? JSON.parse(existingRaw) : {}
+                const next: any = {
+                  ...existing,
+                  trade_at: settings.trade_at,
+                }
+                if (settings.trade_at === "tick" && settings.exit_timeframe) {
+                  next.exit_timeframe = settings.exit_timeframe
+                } else {
+                  delete next.exit_timeframe
+                }
+                localStorage.setItem("savedStrategy", JSON.stringify(next))
+
+                // Persist as a per-strategy fallback in case backend strips these fields
+                const sid =
+                  (typeof strategyId === "string" && strategyId) ||
+                  localStorage.getItem("strategy_id") ||
+                  ""
+                if (sid) {
+                  const fallback: any = { trade_at: settings.trade_at }
+                  if (settings.trade_at === "tick" && settings.exit_timeframe) {
+                    fallback.exit_timeframe = settings.exit_timeframe
+                  }
+                  localStorage.setItem(`trade_timing_${sid}`, JSON.stringify(fallback))
+                }
+
+                console.log("🔍 DEBUG: Strategy JSON updated with trade_at:", next)
+              } catch (err) {
+                console.error("Failed to sync trade_at to savedStrategy:", err)
+              }
+            }}
+          />
+        )}
         {/* Save Strategy Modal */}
         {showSaveStrategyModal && (
           <SaveStrategyModal
@@ -8566,6 +8716,22 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               editingComponent={editingCustomComponent}
             />
           </div>
+        )}
+
+        {pendingCustomInsert && (
+          <CustomComponentPropertiesDialog
+            open={true}
+            componentName={pendingCustomInsert.componentName}
+            componentType={pendingCustomInsert.kind}
+            parameterSchemas={pendingCustomInsert.schemas}
+            componentId={pendingCustomInsert.componentId}
+            initialTimeframe={selectedTimeframe || "1h"}
+            onClose={() => setPendingCustomInsert(null)}
+            onSave={(result) => {
+              commitCustomInsert(pendingCustomInsert, result)
+              setPendingCustomInsert(null)
+            }}
+          />
         )}
       </div>
     </TooltipProvider>

@@ -206,6 +206,7 @@ export function TradesSummary({
               <tr className="bg-[#141721] text-gray-400">
                 <th className="px-3 py-2 text-left">Entry Time</th>
                 <th className="px-3 py-2 text-left">Exit Time</th>
+                <th className="px-3 py-2 text-left">Exit Time (Tick)</th>
                 <th className="px-3 py-2 text-right">Size</th>
                 <th className="px-3 py-2 text-right">Entry Price</th>
                 <th className="px-3 py-2 text-right">Exit Price</th>
@@ -218,6 +219,7 @@ export function TradesSummary({
                 <tr key={index} className="border-b border-[#2b2e38] hover:bg-[#141721]">
                   <td className="px-3 py-2 text-gray-300">{trade.EntryTime}</td>
                   <td className="px-3 py-2 text-gray-300">{trade.ExitTime}</td>
+                  <td className="px-3 py-2 text-gray-300">{trade.ExitTimeTick ? trade.ExitTimeTick : "—"}</td>
                   <td className="px-3 py-2 text-right text-gray-300">{trade.Size}</td>
                   <td className="px-3 py-2 text-right text-gray-300">{trade.EntryPrice}</td>
                   <td className="px-3 py-2 text-right text-gray-300">{trade.ExitPrice}</td>
