@@ -893,7 +893,7 @@ function OptimizationResultsContent() {
                       {optimisationResult.results_output_listing.map((file: string, idx: number) => {
                         // Extract filename from path
                         const filename = file.split('/').pop() || file;
-                        const downloadUrl = `http://127.0.0.1:8000/api/download-optimization-file/?path=${encodeURIComponent(file)}`;
+                        const downloadUrl = `https://anyquant.co.uk/api/download-optimization-file/?path=${encodeURIComponent(file)}`;
                         
                         return (
                           <li key={idx} className="bg-[#0e1018] rounded-lg p-3 flex items-center justify-between">
