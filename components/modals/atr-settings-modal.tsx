@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { X } from "lucide-react"
+import { DraggableModal } from "./draggable-modal"
 
 interface AtrSettingsModalProps {
   onClose: () => void
@@ -16,30 +17,7 @@ export function AtrSettingsModal({ onClose, onSave, initialSettings }: AtrSettin
   const [length, setLength] = useState(initialSettings?.atr_length || "14")
   const [smoothing, setSmoothing] = useState(initialSettings?.atr_smoothing || "RMA")
   const [showSmoothingDropdown, setShowSmoothingDropdown] = useState(false)
-  const modalRef = useRef<HTMLDivElement>(null)
   const smoothingDropdownRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
-        onClose()
-      }
-    }
-
-    function handleEscKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose()
-      }
-    }
-
-    document.addEventListener("mousedown", handleClickOutside)
-    document.addEventListener("keydown", handleEscKey)
-
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside)
-      document.removeEventListener("keydown", handleEscKey)
-    }
-  }, [onClose])
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -65,8 +43,8 @@ export function AtrSettingsModal({ onClose, onSave, initialSettings }: AtrSettin
   const smoothingOptions = ["RMA", "SMA", "EMA", "WMA", "VWMA"]
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div ref={modalRef} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md">
+    <DraggableModal onClose={onClose} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md">
+      <div>
         <div className="flex justify-between items-center p-6">
           <h2 className="text-2xl font-bold text-black">ATR Settings</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
@@ -130,6 +108,6 @@ export function AtrSettingsModal({ onClose, onSave, initialSettings }: AtrSettin
           </div>
         </div>
       </div>
-    </div>
+    </DraggableModal>
   )
 }

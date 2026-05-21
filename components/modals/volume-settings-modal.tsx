@@ -1,7 +1,8 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useEffect } from "react"
 import { X } from "lucide-react"
+import { DraggableModal } from "./draggable-modal"
 
 interface VolumeSettingsModalProps {
   onClose: () => void
@@ -12,7 +13,6 @@ interface VolumeSettingsModalProps {
 export function VolumeSettingsModal({ onClose, onSave, initialIndicatorType }: VolumeSettingsModalProps) {
   const [indicatorType, setIndicatorType] = useState<"volume" | "volume-ma">(initialIndicatorType || "volume")
   const [maLength, setMaLength] = useState("20")
-  const modalRef = useRef<HTMLDivElement>(null)
 
   // Load saved Volume settings from localStorage on component mount
   useEffect(() => {
@@ -39,28 +39,6 @@ export function VolumeSettingsModal({ onClose, onSave, initialIndicatorType }: V
     }
   }, [initialIndicatorType]);
 
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
-        onClose()
-      }
-    }
-
-    function handleEscKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose()
-      }
-    }
-
-    document.addEventListener("mousedown", handleClickOutside)
-    document.addEventListener("keydown", handleEscKey)
-
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside)
-      document.removeEventListener("keydown", handleEscKey)
-    }
-  }, [onClose])
-
   const handleSave = () => {
     // Save Volume settings to localStorage
     const volumeSettings = {
@@ -82,8 +60,8 @@ export function VolumeSettingsModal({ onClose, onSave, initialIndicatorType }: V
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div ref={modalRef} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md">
+    <DraggableModal onClose={onClose} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md">
+      <div>
         <div className="flex justify-between items-center p-6">
           <h2 className="text-2xl font-bold text-black">Volume Settings</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
@@ -145,6 +123,6 @@ export function VolumeSettingsModal({ onClose, onSave, initialIndicatorType }: V
           </div>
         </div>
       </div>
-    </div>
+    </DraggableModal>
   )
 }

@@ -1,10 +1,11 @@
 "use client"
 
 import type React from "react"
-import { useRef, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import { X } from "lucide-react"
 import type { Algorithm } from "@/lib/types"
 import { useRouter } from "next/navigation"
+import { DraggableModal } from "./modals/draggable-modal"
 
 interface EditStrategyModalProps {
   strategy: Algorithm
@@ -15,35 +16,12 @@ interface EditStrategyModalProps {
 
 export function EditStrategyModal({ strategy, onClose, onSave, isEdit = false }: EditStrategyModalProps) {
   const [strategyName, setStrategyName] = useState(strategy.name)
-  const modalRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
 
   // Update strategy name when prop changes
   useEffect(() => {
     setStrategyName(strategy.name)
   }, [strategy.name])
-
-  // Handle click outside modal
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
-        onClose()
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside)
-    return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [onClose])
-
-  // Close modal on ESC key
-  useEffect(() => {
-    function handleEscKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose()
-      }
-    }
-    document.addEventListener("keydown", handleEscKey)
-    return () => document.removeEventListener("keydown", handleEscKey)
-  }, [onClose])
 
   const handleSaveClick = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -60,8 +38,7 @@ export function EditStrategyModal({ strategy, onClose, onSave, isEdit = false }:
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={(e) => e.stopPropagation()}>
-      <div ref={modalRef} className="bg-[#f5f5f5] rounded-xl shadow-lg w-full max-w-md relative" onClick={(e) => e.stopPropagation()}>
+    <DraggableModal onClose={onClose} className="bg-[#f5f5f5] rounded-xl shadow-lg w-full max-w-md relative">
         <div className="flex justify-between items-center p-6 pb-4">
           <h2 className="text-[#1e1e1e] text-2xl font-bold">Strategy Summary</h2>
           <button onClick={(e) => { e.stopPropagation(); onClose() }} className="text-[#1e1e1e] hover:bg-gray-200 rounded-full p-1">
@@ -111,7 +88,6 @@ export function EditStrategyModal({ strategy, onClose, onSave, isEdit = false }:
             )}
           </div>
         </div>
-      </div>
-    </div>
+    </DraggableModal>
   )
 }

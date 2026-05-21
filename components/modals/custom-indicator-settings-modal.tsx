@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { X } from "lucide-react"
+import { DraggableModal } from "./draggable-modal"
 
 interface CustomIndicatorSettingsModalProps {
   onClose: () => void
@@ -66,8 +67,7 @@ export function CustomIndicatorSettingsModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-[#1A1D24] rounded-lg w-[450px] max-h-[80vh] overflow-hidden">
+    <DraggableModal onClose={onClose} className="bg-[#1A1D24] rounded-lg w-[450px] max-h-[80vh] overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-[#2A2D42]">
           <div>
@@ -144,7 +144,6 @@ export function CustomIndicatorSettingsModal({
             Add to Strategy
           </button>
         </div>
-      </div>
-    </div>
+    </DraggableModal>
   )
 }

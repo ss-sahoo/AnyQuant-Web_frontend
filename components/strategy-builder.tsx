@@ -2,8 +2,9 @@
 
 import type React from "react"
 
-import { useState, useRef, useEffect } from "react"
-import { Edit, MoreVertical, Plus, ChevronDown, X, Code } from 'lucide-react'
+import { useState, useRef, useEffect, useMemo } from "react"
+import { Edit, MoreVertical, Plus, ChevronDown, X, Code, Undo2, Redo2 } from 'lucide-react'
+import { useHistory } from "@/hooks/use-history"
 import { StochasticSettingsModal } from "@/components/modals/stochastic-settings-modal"
 import { CrossingUpSettingsModal } from "@/components/modals/crossing-up-settings-modal"
 import { BollingerBandsSettingsModal } from "@/components/modals/bollinger-bands-settings-modal"
@@ -264,6 +265,37 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     },
   ])
 
+  // Undo/redo for the strategy state. Tracks history externally because the
+  // builder mutates statements in place before calling setStatements; the hook
+  // snapshots via JSON.stringify to insulate history from later mutations.
+  const { undo: undoStatements, redo: redoStatements, canUndo, canRedo, resetHistory: resetStatementsHistory, skipNextChange: skipNextHistoryChange } = useHistory(statements, setStatements)
+
+  // Detect partially-built conditions — typically created when the user deletes
+  // one half of a condition and hasn't refilled it yet. The Save / Continue
+  // flow already refuses these, so we surface a visible warning explaining why.
+  const strategyValidationIssues = useMemo(() => {
+    const issues: { statement: string; conditionIndex: number; missing: string[] }[] = []
+    statements.forEach((stmt, sIdx) => {
+      const stmtLabel = stmt.saveresult || `Statement ${sIdx + 1}`
+      stmt.strategy.forEach((cond, cIdx) => {
+        const hasInp1 = !!cond.inp1
+        const hasOp = !!cond.operator_name
+        const hasInp2 = !!cond.inp2
+        const hasAny = hasInp1 || hasOp || hasInp2
+        const hasAll = hasInp1 && hasOp && hasInp2
+        if (hasAny && !hasAll) {
+          const missing: string[] = []
+          if (!hasInp1) missing.push("first input")
+          if (!hasOp) missing.push("operator")
+          if (!hasInp2) missing.push("second input")
+          issues.push({ statement: stmtLabel, conditionIndex: cIdx, missing })
+        }
+      })
+    })
+    return issues
+  }, [statements])
+  const isStrategyValid = strategyValidationIssues.length === 0
+
   const [activeStatementIndex, setActiveStatementIndex] = useState(0)
   const [selectedTimeframe, setSelectedTimeframe] = useState("3h")
   const [showTimeframeDropdown, setShowTimeframeDropdown] = useState(false)
@@ -420,7 +452,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               ? strategyData.Equity
               : [];
 
-          if (topLevelEquity.length > 0) {
+          // Synthesize a "Global Exit Settings" pseudo-statement from the
+          // root-level Equity *only* when there is at most one real statement.
+          // With 2+ real statements the user owns equity per-statement, and
+          // adding a pseudo row leaks into the UI as if it were a third
+          // statement (and historically accumulated duplicates of per-statement
+          // rules across save round-trips). Save behavior is unchanged.
+          if (topLevelEquity.length > 0 && loadedStatements.length < 2) {
             loadedStatements.push({
               side: strategyData.side || "B",
               saveresult: "Global Exit Settings",
@@ -451,38 +489,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         }
 
         if (loadedStatements.length > 0) {
+          // Skip pushing this onto undo history — initial load from server is
+          // not a user action.
+          skipNextHistoryChange()
           setStatements(loadedStatements)
-
-          // Initialize waitStatus based on loaded strategy data
-          const newWaitStatus: Record<number, { inp1: boolean; inp2: boolean }> = {}
-          loadedStatements.forEach((statement, statementIndex) => {
-            newWaitStatus[statementIndex] = { inp1: false, inp2: false }
-
-            // Check each condition in the strategy for wait parameters
-            statement.strategy.forEach((condition: StrategyCondition) => {
-              // Check inp1 for wait parameter
-              if (
-                condition.inp1 &&
-                typeof condition.inp1 === "object" &&
-                "wait" in condition.inp1 &&
-                condition.inp1.wait === "yes"
-              ) {
-                newWaitStatus[statementIndex].inp1 = true
-              }
-
-              // Check inp2 for wait parameter
-              if (
-                condition.inp2 &&
-                typeof condition.inp2 === "object" &&
-                "wait" in condition.inp2 &&
-                condition.inp2.wait === "yes"
-              ) {
-                newWaitStatus[statementIndex].inp2 = true
-              }
-            })
-          })
-
-          setWaitStatus(newWaitStatus)
         }
 
         // Set strategy name if available
@@ -529,13 +539,19 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   ) => {
     const { kind, statementIndex, componentName, componentId, rawComponentData } = pending
     const params = result.values
+    // Capture cursor position at commit time so insertion lands at the user's
+    // cursor rather than always at the end of the strategy.
+    const cursorPosAtCommit = getCursorPosition(statementIndex)
+    const resolveTargetIdx = (stmt: StrategyStatement) =>
+      resolveInsertionTargetIdx(stmt, cursorPosAtCommit)
 
     if (kind === "indicator") {
       setStatements(prev => {
         const next = [...prev]
         const stmt = next[statementIndex]
         if (!stmt || stmt.strategy.length === 0) return prev
-        const lastCondition = { ...stmt.strategy[stmt.strategy.length - 1] }
+        const targetIdx = resolveTargetIdx(stmt)
+        const lastCondition = { ...stmt.strategy[targetIdx] }
         const timeframe = result.timeframe || lastCondition.timeframe || selectedTimeframe || "3h"
 
         const input: any = {
@@ -555,7 +571,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         delete lastCondition.timeframe
 
         const strategy = [...stmt.strategy]
-        strategy[strategy.length - 1] = lastCondition
+        strategy[targetIdx] = lastCondition
         next[statementIndex] = { ...stmt, strategy }
         return next
       })
@@ -565,7 +581,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         const stmt = { ...next[statementIndex] }
         const strategy = [...stmt.strategy]
         if (strategy.length === 0) return prev
-        const last = { ...strategy[strategy.length - 1] }
+        const targetIdx = resolveTargetIdx(stmt)
+        const last = { ...strategy[targetIdx] }
         if (!last.inp1) {
           console.warn("Please add an indicator first before adding a behavior")
           return prev
@@ -578,7 +595,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           ...(componentId !== undefined ? { custom_component_id: componentId } : {}),
           params,
         }
-        strategy[strategy.length - 1] = last
+        strategy[targetIdx] = last
         stmt.strategy = strategy
         next[statementIndex] = stmt
         return next
@@ -600,6 +617,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         next[statementIndex] = stmt
         return next
       })
+    }
+
+    if (cursorPosAtCommit !== -1) {
+      setCursorPosition(prev => ({ ...prev, [statementIndex]: -1 }))
     }
 
     setTimeout(() => {
@@ -656,6 +677,28 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       document.removeEventListener("component-selected", handleComponentSelected as EventListener)
     }
   }, [statements, selectedTimeframe]) // Re-add event listener when statements or timeframe change
+
+  // Ctrl/Cmd+Z to undo, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z to redo. Skip when
+  // focus is in a text field so the browser's native input undo still works.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tgt = e.target as HTMLElement | null
+      if (tgt) {
+        const tag = tgt.tagName
+        if (tag === "INPUT" || tag === "TEXTAREA" || tgt.isContentEditable) return
+      }
+      if (!(e.ctrlKey || e.metaKey)) return
+      if (e.key === "z" && !e.shiftKey) {
+        e.preventDefault()
+        undoStatements()
+      } else if ((e.key === "z" && e.shiftKey) || e.key === "y") {
+        e.preventDefault()
+        redoStatements()
+      }
+    }
+    document.addEventListener("keydown", handler)
+    return () => document.removeEventListener("keydown", handler)
+  }, [undoStatements, redoStatements])
 
   // State for editing custom component in developer mode
   const [editingCustomComponent, setEditingCustomComponent] = useState<any>(null)
@@ -1338,7 +1381,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   // Update the handleSLTPSettings function to handle all the different equity formats
   const handleSLTPSettings = (settings: SLTPSettings) => {
     const newStatements = [...statements]
-    const currentStatement = newStatements[activeStatementIndex]
+    // When editing an existing rule, route the write to the rule's owner row
+    // (set by handleEquityRuleClick). Without this, edits on a non-active
+    // statement's SL/TP get written into whatever statement was last focused.
+    const targetStatementIndex = editingEquityRule ? editingEquityRule.statementIndex : activeStatementIndex
+    const currentStatement = newStatements[targetStatementIndex]
 
     // Make sure Equity array exists
     if (!currentStatement.Equity) {
@@ -1761,6 +1808,33 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     return null
   }
 
+  // Resolve which condition a newly added component should land in given the
+  // cursor's position. The user's intent is "fill the slot the cursor sits
+  // in/before" — e.g. they deleted an inp2 and want the next indicator to
+  // refill that same slot. So we scan BACKWARD from the cursor's condition
+  // first (catches "fill before cursor"), then forward as fallback for the
+  // case where the cursor is parked at the start of an incomplete trailing
+  // condition. Falls back to the last condition.
+  const resolveInsertionTargetIdx = (stmt: StrategyStatement, cursorPos: number): number => {
+    if (!stmt.strategy.length) return -1
+    let scanFrom = stmt.strategy.length - 1
+    if (cursorPos !== -1) {
+      const compAt = getComponentAtPosition(stmt, cursorPos)
+      if (compAt && compAt.conditionIndex >= 0) {
+        scanFrom = compAt.conditionIndex
+      }
+    }
+    for (let i = scanFrom; i >= 0; i--) {
+      const c = stmt.strategy[i]
+      if (!c.inp1 || !c.operator_name || !c.inp2) return i
+    }
+    for (let i = scanFrom + 1; i < stmt.strategy.length; i++) {
+      const c = stmt.strategy[i]
+      if (!c.inp1 || !c.operator_name || !c.inp2) return i
+    }
+    return stmt.strategy.length - 1
+  }
+
   // Reset cursor position when adding a new component
   useEffect(() => {
     // Reset cursor to end when statements change
@@ -1819,6 +1893,29 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     const currentStatement = newStatements[statementIndex]
     let lastAddedStochasticTarget: { target: "inp1" | "inp2"; timeframe?: string } | null = null
 
+    // Cursor-aware insertion: if the user has positioned the cursor mid-statement,
+    // splice trailing conditions out so the existing "last condition" insertion
+    // logic operates on the cursor's target. Trailing is restored in the
+    // finally block — within a single synchronous handler React doesn't render
+    // between setStatements and finally, so the mutation lands before commit.
+    // We resolve the target via resolveInsertionTargetIdx, which scans forward
+    // from the cursor's condition for the first incomplete one — handling the
+    // common case where the user just deleted slots in a later condition and
+    // the cursor drifted back into an earlier full one.
+    const cursorPosForInsert = getCursorPosition(statementIndex)
+    let trailingConditions: StrategyCondition[] = []
+    let cursorWasMidStatement = false
+    if (cursorPosForInsert !== -1 && currentStatement.strategy.length > 0) {
+      const targetIdx = resolveInsertionTargetIdx(currentStatement, cursorPosForInsert)
+      if (targetIdx >= 0 && targetIdx < currentStatement.strategy.length - 1) {
+        cursorWasMidStatement = true
+        trailingConditions = currentStatement.strategy.splice(targetIdx + 1)
+      } else if (targetIdx >= 0) {
+        cursorWasMidStatement = true
+      }
+    }
+
+    try {
     // If the component is a price option, add as inp1 or inp2 with correct structure
     if (["Price Open", "Price Close", "Price Low", "Price High"].includes(component)) {
       const priceType = component.split(" ")[1].toLowerCase()
@@ -2610,6 +2707,21 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     setSearchTerm("")
     setSearchResults([])
     searchInputRefs.current[statementIndex]?.focus()
+    } finally {
+      // Restore trailing conditions in-place. Within a single synchronous
+      // event handler React batches updates and doesn't render until the
+      // handler returns, so mutating the strategy array here lands before
+      // React reads it for the upcoming commit. If the body exited without
+      // calling setStatements (e.g. it only opened a modal), this simply
+      // un-rotates the array back to its original shape — no state change.
+      if (trailingConditions.length > 0) {
+        currentStatement.strategy.push(...trailingConditions)
+        trailingConditions = []
+      }
+      if (cursorWasMidStatement) {
+        setCursorPosition(prev => ({ ...prev, [statementIndex]: -1 }))
+      }
+    }
   }
 
   // Add this function after the existing helper functions
@@ -3262,6 +3374,18 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
   // Replace the handleContinue function with this updated version
   const handleContinue = () => {
+    if (!isStrategyValid) {
+      const first = strategyValidationIssues[0]
+      const more = strategyValidationIssues.length - 1
+      const detail = `${first.statement}, condition ${first.conditionIndex + 1} is missing ${first.missing.join(", ")}` +
+        (more > 0 ? ` (and ${more} more incomplete ${more === 1 ? "condition" : "conditions"}).` : ".")
+      toast({
+        variant: "destructive",
+        title: "Strategy is incomplete",
+        description: `${detail} Complete every condition before saving or proceeding to testing.`,
+      })
+      return
+    }
     setShowSaveStrategyModal(true)
   }
 
@@ -3843,47 +3967,20 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     const currentStatement = newStatements[statementIndex]
     const condition = currentStatement.strategy[conditionIndex]
 
-    // Initialize waitStatus for this statement if it doesn't exist
-    if (!waitStatus[statementIndex]) {
-      waitStatus[statementIndex] = { inp1: false, inp2: false }
-    }
-
     if (inputType === "inp1" && condition.inp1) {
-      // Add or toggle wait parameter for inp1
       if ("wait" in condition.inp1) {
-        // Toggle if it already exists
         condition.inp1.wait = condition.inp1.wait === "yes" ? undefined : "yes"
-      } else {
-        // Add it if it doesn't exist
-        if (typeof condition.inp1 === "object") {
-          condition.inp1.wait = "yes"
-        }
+      } else if (typeof condition.inp1 === "object") {
+        condition.inp1.wait = "yes"
       }
     } else if (inputType === "inp2" && condition.inp2 && typeof condition.inp2 !== "string" && "type" in condition.inp2) {
-      // Add or toggle wait for inp2
       if ("wait" in condition.inp2) {
-        // Toggle if it already exists
         condition.inp2.wait = condition.inp2.wait === "yes" ? undefined : "yes"
       } else {
-        // Add it if it doesn't exist
         condition.inp2.wait = "yes"
       }
     }
 
-    // Update the waitStatus state to reflect the change
-    const newWaitStatus = { ...waitStatus }
-    if (!newWaitStatus[statementIndex]) {
-      newWaitStatus[statementIndex] = { inp1: false, inp2: false }
-    }
-
-    // Update the specific input wait status
-    if (inputType === "inp1") {
-      newWaitStatus[statementIndex].inp1 = condition.inp1 && "wait" in condition.inp1 && condition.inp1.wait === "yes"
-    } else if (inputType === "inp2") {
-      newWaitStatus[statementIndex].inp2 = condition.inp2 && typeof condition.inp2 === "object" && "wait" in condition.inp2 && condition.inp2.wait === "yes"
-    }
-
-    setWaitStatus(newWaitStatus)
     setStatements(newStatements)
   }
 
@@ -4212,6 +4309,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   // Update the renderStrategyConditions function to properly display At Candle components
   // Replace the existing At Candle rendering code with this:
   const renderStrategyConditions = (statement: StrategyStatement, statementIndex: number) => {
+    // Every handler below was originally written against the outer
+    // `activeStatementIndex` state, which routes mutations to the focused
+    // statement instead of the row being rendered — so clicking a delete on
+    // statement #2 would mutate statement #1. Shadowing the name with the
+    // per-row index fixes all those handlers in one shot.
+    const activeStatementIndex = statementIndex
     const components: JSX.Element[] = []
 
     // Render Buy/Sell component FIRST, based on statement.side
@@ -4916,16 +5019,20 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         )
       }
       
-      // Add clickable gap before component to position cursor
+      // Add clickable gap before component to position cursor.
+      // Wider hit area + a thin blue bar on hover so users can discover that
+      // they can click between components to reposition the caret.
       acc.push(
         <div
           key={`gap-${idx}`}
-          className="w-1 h-full cursor-text hover:bg-[#85e1fe]/10"
+          className="group flex items-center justify-center w-2 self-stretch cursor-text"
           onClick={() => {
             setCursorPosition(prev => ({ ...prev, [statementIndex]: idx }))
             searchInputRefs.current[statementIndex]?.focus()
           }}
-        />
+        >
+          <div className="w-0.5 h-5 rounded-full bg-transparent group-hover:bg-[#85e1fe]/70 transition-colors" />
+        </div>
       )
       
       // Add the actual component
@@ -5092,7 +5199,37 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const [pendingCustomIndicator, setPendingCustomIndicator] = useState<any>(null)
 
   // Track wait status for each input (inp1 and inp2) separately
-  const [waitStatus, setWaitStatus] = useState<Record<number, { inp1: boolean; inp2: boolean }>>({})
+  // Derive the per-statement Wait inp1 / Wait inp2 badge state directly from
+  // `statements` so undo/redo updates the badges automatically. Previously this
+  // was parallel state, which the history hook didn't track — so undoing the
+  // toggle left the badge stuck on screen.
+  const waitStatus = useMemo<Record<number, { inp1: boolean; inp2: boolean }>>(() => {
+    const result: Record<number, { inp1: boolean; inp2: boolean }> = {}
+    statements.forEach((statement, statementIndex) => {
+      let inp1 = false
+      let inp2 = false
+      statement.strategy.forEach(condition => {
+        if (
+          condition.inp1 &&
+          typeof condition.inp1 === "object" &&
+          "wait" in condition.inp1 &&
+          (condition.inp1 as any).wait === "yes"
+        ) {
+          inp1 = true
+        }
+        if (
+          condition.inp2 &&
+          typeof condition.inp2 === "object" &&
+          "wait" in condition.inp2 &&
+          (condition.inp2 as any).wait === "yes"
+        ) {
+          inp2 = true
+        }
+      })
+      result[statementIndex] = { inp1, inp2 }
+    })
+    return result
+  }, [statements])
 
   // Add state to store the latest RSI MA settings
   const [rsiMaSettings, setRsiMaSettings] = useState({
@@ -5297,6 +5434,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       return {
         ...basePayload,
         strategy: [], // Explicitly clear root strategy
+        // Explicitly clear root Equity. editStrategy uses PATCH, so fields we
+        // omit are preserved server-side. Strategies saved before per-statement
+        // equity was introduced have stale root Equity rules that fail current
+        // validation (e.g. "Root Equity entry 0: Entries in inp1 not as
+        // expected") if we don't overwrite them with [].
+        Equity: [],
         statements: signalStatements.map(s => ({
           name: s.name,
           side: s.side,
@@ -5322,9 +5465,16 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           Equity: s.Equity || []
         }))
 
-        // IF we have root-level Equity, it means we have a "Global Exit Block" (Format 3)
-        // Add it as a virtual statement if it's not empty and NOT already in statements
-        if (strategyData.Equity && strategyData.Equity.length > 0) {
+        // Synthesize a "Global Exit Block" virtual statement from root-level
+        // Equity only when there's at most one real statement. With 2+ real
+        // statements the user owns equity per-statement; adding a virtual row
+        // here surfaces as a stray third statement (and historically picked up
+        // duplicates accumulated by older save bugs).
+        if (
+          strategyData.Equity &&
+          strategyData.Equity.length > 0 &&
+          cleanedStatements.length < 2
+        ) {
           // Check if this equity is already represented in any statement
           const isAlreadyRepresented = cleanedStatements.some((ps: any) =>
             JSON.stringify(ps.Equity) === JSON.stringify(strategyData.Equity) && (ps.strategy || []).length === 0
@@ -5441,6 +5591,22 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               >
                 <Code className="w-4 h-4" />
                 Developer Mode
+              </button>
+              <button
+                onClick={undoStatements}
+                disabled={!canUndo}
+                title="Undo (Ctrl+Z)"
+                className="px-3 py-2 bg-[#151718] rounded-full text-white hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center"
+              >
+                <Undo2 className="w-4 h-4" />
+              </button>
+              <button
+                onClick={redoStatements}
+                disabled={!canRedo}
+                title="Redo (Ctrl+Y or Ctrl+Shift+Z)"
+                className="px-3 py-2 bg-[#151718] rounded-full text-white hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center"
+              >
+                <Redo2 className="w-4 h-4" />
               </button>
               <button className="px-4 py-2 bg-[#151718] rounded-full text-white hover:bg-gray-700">Add Setup</button>
               <button className="px-4 py-2 bg-[#151718] rounded-full text-white hover:bg-gray-700" onClick={addStatement}>
@@ -7736,11 +7902,14 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               setEditingComponent(null)
             }}
             initialSettings={(() => {
+              const isMaIndicator = (ind: any) =>
+                ind && "name" in ind && (ind.name === "MA" || ind.name === "SMA" || ind.name === "EMA" || ind.name === "HMA") && "input_params" in ind
+
               if (editingComponent) {
                 const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
                 const indicator = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
 
-                if (indicator && "name" in indicator && (indicator.name === "MA" || indicator.name === "SMA" || indicator.name === "EMA" || indicator.name === "HMA") && "input_params" in indicator) {
+                if (isMaIndicator(indicator)) {
                   return {
                     maType: indicator.input_params?.ma_type || indicator.input_params?.maType || "SMA",
                     maLength: indicator.input_params?.ma_length || indicator.input_params?.maLength || 20,
@@ -7748,13 +7917,20 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 }
               } else {
                 const currentStatement = statements[activeStatementIndex]
-                const lastCondition = currentStatement?.strategy[currentStatement.strategy.length - 1]
-                const indicator = lastCondition?.inp1
-
-                if (indicator && "name" in indicator && (indicator.name === "MA" || indicator.name === "SMA" || indicator.name === "EMA" || indicator.name === "HMA") && "input_params" in indicator) {
-                  return {
-                    maType: indicator.input_params?.ma_type || indicator.input_params?.maType || "SMA",
-                    maLength: indicator.input_params?.ma_length || indicator.input_params?.maLength || 20,
+                if (currentStatement) {
+                  for (const cond of currentStatement.strategy) {
+                    if (isMaIndicator(cond.inp1)) {
+                      return {
+                        maType: (cond.inp1 as any).input_params?.ma_type || (cond.inp1 as any).input_params?.maType || "SMA",
+                        maLength: (cond.inp1 as any).input_params?.ma_length || (cond.inp1 as any).input_params?.maLength || 20,
+                      }
+                    }
+                    if (isMaIndicator(cond.inp2)) {
+                      return {
+                        maType: (cond.inp2 as any).input_params?.ma_type || (cond.inp2 as any).input_params?.maType || "SMA",
+                        maLength: (cond.inp2 as any).input_params?.ma_length || (cond.inp2 as any).input_params?.maLength || 20,
+                      }
+                    }
                   }
                 }
               }
@@ -7811,22 +7987,27 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                   }
                 }
               } else {
-                const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-
-                if (lastCondition.inp1 && "name" in lastCondition.inp1 && (lastCondition.inp1.name === "MA" || lastCondition.inp1.name === "SMA" || lastCondition.inp1.name === "EMA" || lastCondition.inp1.name === "HMA")) {
-                  lastCondition.inp1.input_params = {
-                    ma_type: settings.maType,
-                    ma_length: settings.maLength,
-                  }
-                  // Update name based on MA type
-                  if (settings.maType === "SMA") {
-                    lastCondition.inp1.name = "SMA"
-                  } else if (settings.maType === "EMA") {
-                    lastCondition.inp1.name = "EMA"
-                  } else if (settings.maType === "HMA") {
-                    lastCondition.inp1.name = "HMA"
-                  } else {
-                    lastCondition.inp1.name = "MA"
+                // Find the MA placeholder that handleAddComponent just inserted.
+                // Scan every condition's inp1 / inp2 — earlier code only looked at
+                // the last condition's inp1, which silently dropped MA inserts
+                // landing in any other slot (e.g. inp2 of an earlier condition
+                // when the cursor was mid-statement).
+                const isMaPlaceholder = (ind: any) =>
+                  ind && "name" in ind && (ind.name === "MA" || ind.name === "SMA" || ind.name === "EMA" || ind.name === "HMA")
+                const maName = settings.maType === "SMA" ? "SMA" : settings.maType === "EMA" ? "EMA" : settings.maType === "HMA" ? "HMA" : "MA"
+                const applyTo = (ind: any) => {
+                  ind.name = maName
+                  ind.input_params = { ma_type: settings.maType, ma_length: settings.maLength }
+                }
+                let applied = false
+                for (const cond of currentStatement.strategy) {
+                  if (isMaPlaceholder(cond.inp1)) { applyTo(cond.inp1); applied = true; break }
+                  if (isMaPlaceholder(cond.inp2)) { applyTo(cond.inp2); applied = true; break }
+                }
+                if (!applied) {
+                  const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+                  if (lastCondition && isMaPlaceholder(lastCondition.inp1)) {
+                    applyTo(lastCondition.inp1)
                   }
                 }
               }

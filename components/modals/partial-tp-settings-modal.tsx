@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { X, Plus, Trash2 } from "lucide-react"
+import { DraggableModal } from "./draggable-modal"
 
 interface PartialTPLevel {
   Price: string
@@ -73,8 +74,8 @@ export function PartialTPSettingsModal({ onClose, onSave, initialLevels }: Parti
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white text-black rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+    <DraggableModal onClose={onClose} className="bg-white text-black rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+      <div>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-medium">Partial TP Settings</h2>
           <button onClick={onClose} className="p-1 hover:bg-gray-200 rounded-full">
@@ -139,7 +140,7 @@ export function PartialTPSettingsModal({ onClose, onSave, initialLevels }: Parti
           </div>
         </div>
       </div>
-    </div>
+    </DraggableModal>
   )
 }
 

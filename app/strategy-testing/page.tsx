@@ -223,6 +223,32 @@ export default function StrategyTestingPage() {
   const [iframeLoadedResult, setIframeLoadedResult] = useState(false)
   const [isPlotExpandedResult, setIsPlotExpandedResult] = useState(false)
 
+  // Resizable upper results panel — drag handle between results and config
+  const [topPaneHeight, setTopPaneHeight] = useState<number>(670)
+  const [isResizingPane, setIsResizingPane] = useState(false)
+  useEffect(() => {
+    if (!isResizingPane) return
+    const onMove = (e: MouseEvent) => {
+      const min = 160
+      const max = Math.max(min, window.innerHeight - 220)
+      const next = Math.min(Math.max(e.clientY, min), max)
+      setTopPaneHeight(next)
+    }
+    const onUp = () => setIsResizingPane(false)
+    window.addEventListener("mousemove", onMove)
+    window.addEventListener("mouseup", onUp)
+    const prevUserSelect = document.body.style.userSelect
+    const prevCursor = document.body.style.cursor
+    document.body.style.userSelect = "none"
+    document.body.style.cursor = "row-resize"
+    return () => {
+      window.removeEventListener("mousemove", onMove)
+      window.removeEventListener("mouseup", onUp)
+      document.body.style.userSelect = prevUserSelect
+      document.body.style.cursor = prevCursor
+    }
+  }, [isResizingPane])
+
   // Normalize raw API response to handle different field naming conventions
   const normalizeBacktestResult = (raw: any): any => {
     const pick = (...keys: string[]) => {
@@ -3091,8 +3117,11 @@ export default function StrategyTestingPage() {
                   ))}
                 </div>
               </div>
-              {/* Result Content Area - Reduced height further to keep settings tabs visible */}
-              <div className="h-[670px] overflow-y-auto bg-[#000000] border-b border-gray-800/10">
+              {/* Result Content Area - Resizable via drag handle below */}
+              <div
+                className="overflow-y-auto bg-[#000000] border-b border-gray-800/10"
+                style={{ height: topPaneHeight }}
+              >
                 {activeTab === 'optimisation' ? (
                   <div className="w-full min-h-full flex flex-col">
                     {(() => {
@@ -3534,6 +3563,20 @@ export default function StrategyTestingPage() {
                 )}
               </div>
 
+
+              {/* Drag handle to resize upper results panel */}
+              <div
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="Resize results panel"
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  setIsResizingPane(true)
+                }}
+                className={`group relative h-2 w-full cursor-row-resize bg-[#0a0b12] hover:bg-[#161927] transition-colors ${isResizingPane ? "bg-[#161927]" : ""}`}
+              >
+                <div className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-1 w-16 rounded-full transition-colors ${isResizingPane ? "bg-[#85e1fe]" : "bg-gray-700 group-hover:bg-[#85e1fe]"}`} />
+              </div>
 
               {/* Bottom Navigation Tabs - Sticky above footer */}
               <div className="flex bg-[#0a0b12] border-y border-gray-800 sticky bottom-[90px] z-40 w-full overflow-hidden">

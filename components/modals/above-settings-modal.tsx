@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { DraggableModal } from "./draggable-modal"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -620,10 +620,10 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave, onNext }: Abo
   }
 
   return (
-    <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px] max-h-[90vh] bg-white p-0 border border-gray-200 shadow-lg rounded-lg overflow-hidden flex flex-col">
+    <>
+      <DraggableModal onClose={onClose} className="sm:max-w-[425px] w-full max-h-[90vh] bg-white p-0 border border-gray-200 shadow-lg rounded-lg overflow-hidden flex flex-col">
         <div className="flex justify-between items-center p-4 border-b border-gray-200">
-          <DialogTitle className="text-lg font-medium text-black">Above Settings</DialogTitle>
+          <h2 className="text-lg font-medium text-black">Above Settings</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
             <X className="h-4 w-4" />
           </button>
@@ -815,7 +815,7 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave, onNext }: Abo
             </>
           )}
         </div>
-      </DialogContent>
+      </DraggableModal>
 
       {showIndicatorModal && pendingOtherIndicator === "rsi" && (
         <RsiSettingsModal
@@ -853,6 +853,6 @@ export function AboveSettingsModal({ onClose, currentInp1, onSave, onNext }: Abo
           }}
         />
       )}
-    </Dialog>
+    </>
   )
 }

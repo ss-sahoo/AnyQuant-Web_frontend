@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { X } from "lucide-react"
+import { DraggableModal } from "./draggable-modal"
 
 interface AtCandleModalProps {
   onClose: () => void
@@ -28,8 +29,8 @@ export function AtCandleModal({ onClose, onSave, initialValue = 1 }: AtCandleMod
   }
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
-      <div className="bg-[#f1f1f1] rounded-lg p-6 w-full max-w-md">
+    <DraggableModal onClose={onClose} className="bg-[#f1f1f1] rounded-lg p-6 w-full max-w-md">
+      <div>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl text-black font-bold">At Candle</h2>
           <button onClick={onClose} className="text-black">
@@ -70,6 +71,6 @@ export function AtCandleModal({ onClose, onSave, initialValue = 1 }: AtCandleMod
           </button>
         </div>
       </div>
-    </div>
+    </DraggableModal>
   )
 }

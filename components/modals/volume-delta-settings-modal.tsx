@@ -1,11 +1,11 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useEffect } from "react"
 import { X } from "lucide-react"
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { DraggableModal } from "./draggable-modal"
 
 interface VolumeDeltaSettingsModalProps {
   onClose: () => void
@@ -27,7 +27,6 @@ export function VolumeDeltaSettingsModal({ onClose, onSave, initialSettings }: V
   )
   const [lowerTimeframe, setLowerTimeframe] = useState(initialSettings?.lowerTimeframe || "1min")
   const [resetPeriod, setResetPeriod] = useState(initialSettings?.resetPeriod || "D")
-  const modalRef = useRef<HTMLDivElement>(null)
 
   // Load saved settings from localStorage on component mount
   useEffect(() => {
@@ -50,28 +49,6 @@ export function VolumeDeltaSettingsModal({ onClose, onSave, initialSettings }: V
       console.log('Error reading saved Volume Delta settings:', error)
     }
   }, [initialSettings])
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
-        onClose()
-      }
-    }
-
-    function handleEscKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose()
-      }
-    }
-
-    document.addEventListener("mousedown", handleClickOutside)
-    document.addEventListener("keydown", handleEscKey)
-
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside)
-      document.removeEventListener("keydown", handleEscKey)
-    }
-  }, [onClose])
 
   const handleSave = () => {
     const settings = {
@@ -110,10 +87,9 @@ export function VolumeDeltaSettingsModal({ onClose, onSave, initialSettings }: V
   ]
 
   return (
-    <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px] max-h-[90vh] bg-white p-0 border border-gray-200 shadow-lg rounded-lg overflow-hidden flex flex-col">
+    <DraggableModal onClose={onClose} className="sm:max-w-[425px] w-full max-h-[90vh] bg-white p-0 border border-gray-200 shadow-lg rounded-lg overflow-hidden flex flex-col">
         <div className="flex justify-between items-center p-4 border-b border-gray-200">
-          <DialogTitle className="text-lg font-medium text-black">Volume Delta Settings</DialogTitle>
+          <h2 className="text-lg font-medium text-black">Volume Delta Settings</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
             <X className="h-4 w-4" />
           </button>
@@ -210,7 +186,6 @@ export function VolumeDeltaSettingsModal({ onClose, onSave, initialSettings }: V
             Save
           </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+    </DraggableModal>
   )
 }

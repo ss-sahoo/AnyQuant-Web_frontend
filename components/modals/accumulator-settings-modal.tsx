@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { X } from "lucide-react"
+import { DraggableModal } from "./draggable-modal"
 
 interface AccumulatorSettings {
   type: "exactly" | "at least" | "up to"
@@ -30,8 +31,8 @@ export function AccumulatorSettingsModal({ onClose, onSave, initialSettings }: A
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-96 max-w-[90vw]">
+    <DraggableModal onClose={onClose} className="bg-white rounded-lg p-6 w-96 max-w-[90vw]">
+      <div>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-semibold text-black">Accumulator Settings</h2>
           <button onClick={onClose} className="text-gray-600 hover:text-black transition-colors">
@@ -83,6 +84,6 @@ export function AccumulatorSettingsModal({ onClose, onSave, initialSettings }: A
           </button>
         </div>
       </div>
-    </div>
+    </DraggableModal>
   )
 }

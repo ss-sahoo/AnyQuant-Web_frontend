@@ -1,7 +1,8 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState } from "react"
 import { X } from "lucide-react"
+import { DraggableModal } from "./draggable-modal"
 
 interface SuperTrendSettingsModalProps {
   onClose: () => void
@@ -19,28 +20,6 @@ export function SuperTrendSettingsModal({ onClose, onSave, initialSettings }: Su
   const [multiplier, setMultiplier] = useState(String(initialSettings?.multiplier || 3.0))
   const [changeAtrMethod, setChangeAtrMethod] = useState(initialSettings?.change_atr_method ?? true)
   const [output, setOutput] = useState<"BuySignal" | "SellSignal" | "trend" | "up" | "dn" | "atr">(initialSettings?.output || "SellSignal")
-  
-  const modalRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    function handleEscKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose()
-      }
-    }
-
-    document.addEventListener("keydown", handleEscKey)
-
-    return () => {
-      document.removeEventListener("keydown", handleEscKey)
-    }
-  }, [onClose])
-
-  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.target === e.currentTarget) {
-      onClose()
-    }
-  }
 
   const handleSave = () => {
     onSave({
@@ -52,11 +31,8 @@ export function SuperTrendSettingsModal({ onClose, onSave, initialSettings }: Su
   }
 
   return (
-    <div 
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-      onClick={handleBackdropClick}
-    >
-      <div ref={modalRef} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md">
+    <DraggableModal onClose={onClose} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md">
+      <div>
         <div className="flex justify-between items-center p-6">
           <h2 className="text-2xl font-bold text-black">SuperTrend Settings</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
@@ -136,6 +112,6 @@ export function SuperTrendSettingsModal({ onClose, onSave, initialSettings }: Su
           </div>
         </div>
       </div>
-    </div>
+    </DraggableModal>
   )
 }

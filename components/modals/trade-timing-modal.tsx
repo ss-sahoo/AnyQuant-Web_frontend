@@ -1,12 +1,12 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useState } from "react"
 import { Info, X } from "lucide-react"
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { DraggableModal } from "./draggable-modal"
 
 export type TradeAt = "bar close" | "tick"
 
@@ -29,15 +29,6 @@ export function TradeTimingModal({ onClose, onSave, initialSettings }: TradeTimi
   const [exitTimeframe, setExitTimeframe] = useState<string>(initialSettings?.exit_timeframe ?? "")
   const [error, setError] = useState<string | null>(null)
   const [showHelp, setShowHelp] = useState(false)
-  const modalRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    function handleEsc(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose()
-    }
-    document.addEventListener("keydown", handleEsc)
-    return () => document.removeEventListener("keydown", handleEsc)
-  }, [onClose])
 
   const handleSave = () => {
     if (tradeAt === "tick") {
@@ -53,10 +44,9 @@ export function TradeTimingModal({ onClose, onSave, initialSettings }: TradeTimi
   }
 
   return (
-    <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[460px] max-h-[90vh] bg-white p-0 border border-gray-200 shadow-lg rounded-lg overflow-hidden flex flex-col">
+    <DraggableModal onClose={onClose} className="sm:max-w-[460px] w-full max-h-[90vh] bg-white p-0 border border-gray-200 shadow-lg rounded-lg overflow-hidden flex flex-col">
         <div className="flex justify-between items-center p-4 border-b border-gray-200">
-          <DialogTitle className="text-lg font-medium text-black flex items-center gap-2">
+          <h2 className="text-lg font-medium text-black flex items-center gap-2">
             Trade Execution Timing
             <button
               type="button"
@@ -67,13 +57,13 @@ export function TradeTimingModal({ onClose, onSave, initialSettings }: TradeTimi
             >
               <Info className="h-4 w-4" />
             </button>
-          </DialogTitle>
+          </h2>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700" aria-label="Close">
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div ref={modalRef} className="p-4 overflow-y-auto flex-1 space-y-4">
+        <div className="p-4 overflow-y-auto flex-1 space-y-4">
           {showHelp && (
             <div className="bg-blue-50 border border-blue-200 text-blue-900 text-xs rounded p-3">
               {HELP_TEXT}
@@ -150,7 +140,6 @@ export function TradeTimingModal({ onClose, onSave, initialSettings }: TradeTimi
             Save
           </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+    </DraggableModal>
   )
 }

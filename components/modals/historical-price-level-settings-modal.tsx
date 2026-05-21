@@ -1,11 +1,11 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useEffect } from "react"
 import { X } from "lucide-react"
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { DraggableModal } from "./draggable-modal"
 
 interface HistoricalPriceLevelSettingsModalProps {
   onClose: () => void
@@ -22,7 +22,6 @@ interface HistoricalPriceLevelSettingsModalProps {
 export function HistoricalPriceLevelSettingsModal({ onClose, onSave, initialSettings }: HistoricalPriceLevelSettingsModalProps) {
   const [period, setPeriod] = useState(initialSettings?.period || "W")
   const [level, setLevel] = useState(initialSettings?.level || "High")
-  const modalRef = useRef<HTMLDivElement>(null)
 
   // Load saved settings from localStorage on component mount
   useEffect(() => {
@@ -42,28 +41,6 @@ export function HistoricalPriceLevelSettingsModal({ onClose, onSave, initialSett
       console.log('Error reading saved Historical Price Level settings:', error)
     }
   }, [initialSettings])
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
-        onClose()
-      }
-    }
-
-    function handleEscKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose()
-      }
-    }
-
-    document.addEventListener("mousedown", handleClickOutside)
-    document.addEventListener("keydown", handleEscKey)
-
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside)
-      document.removeEventListener("keydown", handleEscKey)
-    }
-  }, [onClose])
 
   const handleSave = () => {
     const settings = {
@@ -98,10 +75,9 @@ export function HistoricalPriceLevelSettingsModal({ onClose, onSave, initialSett
   ]
 
   return (
-    <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px] max-h-[90vh] bg-white p-0 border border-gray-200 shadow-lg rounded-lg overflow-hidden flex flex-col">
+    <DraggableModal onClose={onClose} className="sm:max-w-[425px] w-full max-h-[90vh] bg-white p-0 border border-gray-200 shadow-lg rounded-lg overflow-hidden flex flex-col">
         <div className="flex justify-between items-center p-4 border-b border-gray-200">
-          <DialogTitle className="text-lg font-medium text-black">Historical Price Level Settings</DialogTitle>
+          <h2 className="text-lg font-medium text-black">Historical Price Level Settings</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
             <X className="h-4 w-4" />
           </button>
@@ -172,7 +148,6 @@ export function HistoricalPriceLevelSettingsModal({ onClose, onSave, initialSett
             Save
           </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+    </DraggableModal>
   )
 }

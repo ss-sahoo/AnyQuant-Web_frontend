@@ -12,6 +12,7 @@ import {
 } from "@/lib/custom-component-schema"
 import { getCustomComponent } from "@/app/AllApiCalls"
 import { normalizeStoredParameters } from "@/lib/custom-component-schema"
+import { DraggableModal } from "./draggable-modal"
 
 export type CustomComponentKind = "indicator" | "behavior" | "trade_management"
 
@@ -259,8 +260,7 @@ export function CustomComponentPropertiesDialog({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-[#1A1D24] rounded-lg w-[520px] max-h-[85vh] overflow-hidden flex flex-col">
+    <DraggableModal onClose={onClose} className="bg-[#1A1D24] rounded-lg w-[520px] max-h-[85vh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between p-4 border-b border-[#2A2D42]">
           <div>
             <h2 className="text-lg font-semibold text-white">
@@ -351,7 +351,6 @@ export function CustomComponentPropertiesDialog({
             Add to Strategy
           </button>
         </div>
-      </div>
-    </div>
+    </DraggableModal>
   )
 }

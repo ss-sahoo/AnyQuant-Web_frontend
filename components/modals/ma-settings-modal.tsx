@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { X } from "lucide-react"
+import { DraggableModal } from "./draggable-modal"
 
 interface MaSettingsModalProps {
   onClose: () => void
@@ -17,30 +18,7 @@ export function MaSettingsModal({ onClose, onSave, initialSettings }: MaSettings
   const [maLength, setMaLength] = useState(String(initialSettings?.maLength || 20))
   const [showMaTypeDropdown, setShowMaTypeDropdown] = useState(false)
 
-  const modalRef = useRef<HTMLDivElement>(null)
   const maTypeDropdownRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
-        onClose()
-      }
-    }
-
-    function handleEscKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose()
-      }
-    }
-
-    document.addEventListener("mousedown", handleClickOutside)
-    document.addEventListener("keydown", handleEscKey)
-
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside)
-      document.removeEventListener("keydown", handleEscKey)
-    }
-  }, [onClose])
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -66,8 +44,8 @@ export function MaSettingsModal({ onClose, onSave, initialSettings }: MaSettings
   const maTypes = ["SMA", "EMA", "HMA"]
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div ref={modalRef} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md">
+    <DraggableModal onClose={onClose} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md">
+      <div>
         <div className="flex justify-between items-center p-6">
           <h2 className="text-2xl font-bold text-black">MA Settings</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
@@ -134,7 +112,7 @@ export function MaSettingsModal({ onClose, onSave, initialSettings }: MaSettings
           </div>
         </div>
       </div>
-    </div>
+    </DraggableModal>
   )
 }
 

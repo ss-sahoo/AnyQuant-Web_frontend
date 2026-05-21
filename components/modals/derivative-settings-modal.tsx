@@ -1,7 +1,8 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState } from "react"
 import { X } from "lucide-react"
+import { DraggableModal } from "./draggable-modal"
 
 interface DerivativeSettingsModalProps {
   onClose: () => void
@@ -12,30 +13,6 @@ interface DerivativeSettingsModalProps {
 export function DerivativeSettingsModal({ onClose, onSave, currentIndicator }: DerivativeSettingsModalProps) {
   const [order, setOrder] = useState("1")
 
-  const modalRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
-        onClose()
-      }
-    }
-
-    function handleEscKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose()
-      }
-    }
-
-    document.addEventListener("mousedown", handleClickOutside)
-    document.addEventListener("keydown", handleEscKey)
-
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside)
-      document.removeEventListener("keydown", handleEscKey)
-    }
-  }, [onClose])
-
   const handleSave = () => {
     const settings: any = {
       order: Number.parseInt(order),
@@ -45,8 +22,8 @@ export function DerivativeSettingsModal({ onClose, onSave, currentIndicator }: D
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div ref={modalRef} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md max-h-[90vh] overflow-y-auto">
+    <DraggableModal onClose={onClose} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md max-h-[90vh] overflow-y-auto">
+      <div>
         <div className="flex justify-between items-center p-6">
           <h2 className="text-2xl font-bold text-black">Derivative Settings</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
@@ -80,6 +57,6 @@ export function DerivativeSettingsModal({ onClose, onSave, currentIndicator }: D
           </div>
         </div>
       </div>
-    </div>
+    </DraggableModal>
   )
 }

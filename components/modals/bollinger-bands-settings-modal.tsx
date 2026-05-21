@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { X } from "lucide-react"
+import { DraggableModal } from "./draggable-modal"
 
 interface BollingerBandsSettingsModalProps {
   onClose: () => void
@@ -18,23 +19,8 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
   const [showMaTypeDropdown, setShowMaTypeDropdown] = useState(false)
   const [showSourceDropdown, setShowSourceDropdown] = useState(false)
 
-  const modalRef = useRef<HTMLDivElement>(null)
   const maTypeDropdownRef = useRef<HTMLDivElement>(null)
   const sourceDropdownRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    function handleEscKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose()
-      }
-    }
-
-    document.addEventListener("keydown", handleEscKey)
-
-    return () => {
-      document.removeEventListener("keydown", handleEscKey)
-    }
-  }, [onClose])
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -98,15 +84,8 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
   const sources = ["close", "open", "high", "low", "hl2", "hlc3", "ohlc4"]
 
   return (
-    <div 
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          onClose()
-        }
-      }}
-    >
-      <div ref={modalRef} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md max-h-[90vh] flex flex-col">
+    <DraggableModal onClose={onClose} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md max-h-[90vh] flex flex-col">
+      <div className="flex flex-col h-full">
         {/* Fixed Header */}
         <div className="flex justify-between items-center p-6 border-b border-gray-200 flex-shrink-0">
           <h2 className="text-2xl font-bold text-black">Bollinger Bands Settings</h2>
@@ -271,6 +250,6 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
           </button>
         </div>
       </div>
-    </div>
+    </DraggableModal>
   )
 }

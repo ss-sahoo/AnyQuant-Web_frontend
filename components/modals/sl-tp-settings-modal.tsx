@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { X, Plus, Trash2 } from "lucide-react"
+import { DraggableModal } from "./draggable-modal"
 
 interface SLTPSettingsModalProps {
   type: "SL" | "TP"
@@ -127,8 +128,8 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white text-black rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+    <DraggableModal onClose={onClose} className="bg-white text-black rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+      <div>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-medium">
             {type === "SL" ? "Stop Loss" : type === "TP" ? "Take Profit" : "Partial Take Profit"} Settings
@@ -774,6 +775,6 @@ export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SL
           </div>
         </div>
       </div>
-    </div>
+    </DraggableModal>
   )
 }
