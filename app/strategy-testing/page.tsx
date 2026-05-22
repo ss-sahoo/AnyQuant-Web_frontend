@@ -223,6 +223,16 @@ export default function StrategyTestingPage() {
   const [iframeLoadedResult, setIframeLoadedResult] = useState(false)
   const [isPlotExpandedResult, setIsPlotExpandedResult] = useState(false)
 
+  // Pagination state for chart data and trades tables
+  const CHART_DATA_PAGE_SIZE = 100
+  const TRADES_PAGE_SIZE = 100
+  const [chartDataPage, setChartDataPage] = useState(1)
+  const [tradesPage, setTradesPage] = useState(1)
+  useEffect(() => {
+    setChartDataPage(1)
+    setTradesPage(1)
+  }, [backtestDetail])
+
   // Resizable upper results panel — drag handle between results and config
   const [topPaneHeight, setTopPaneHeight] = useState<number>(670)
   const [isResizingPane, setIsResizingPane] = useState(false)
@@ -3408,32 +3418,70 @@ export default function StrategyTestingPage() {
                     {backtestResultTab === 'chart_data' && (
                       <div className="p-6">
                         {backtestDetail.chart_data && backtestDetail.chart_data.length > 0 ? (
-                          <div className="bg-[#080A10] rounded-lg overflow-hidden border border-gray-800">
-                            <div className="overflow-x-auto max-h-[600px]">
-                              <table className="min-w-full text-[10px]">
-                                <thead className="bg-[#000000] text-gray-400 sticky top-0 uppercase tracking-widest font-black">
-                                  <tr>
-                                    <th className="px-4 py-3 text-left">#</th>
-                                    {Object.keys(backtestDetail.chart_data[0]).map((col) => (
-                                      <th key={col} className="px-4 py-3 text-left whitespace-nowrap">{col}</th>
-                                    ))}
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {backtestDetail.chart_data.slice(0, 100).map((row: any, i: number) => (
-                                    <tr key={i} className="border-t border-gray-900 hover:bg-[#121420]">
-                                      <td className="px-4 py-2 text-gray-500">{i + 1}</td>
-                                      {Object.values(row).map((val: any, j: number) => (
-                                        <td key={j} className="px-4 py-2 text-white whitespace-nowrap">
-                                          {typeof val === 'number' ? val.toFixed(2) : String(val)}
-                                        </td>
-                                      ))}
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
+                          (() => {
+                            const totalRows = backtestDetail.chart_data.length
+                            const totalPages = Math.max(1, Math.ceil(totalRows / CHART_DATA_PAGE_SIZE))
+                            const currentPage = Math.min(chartDataPage, totalPages)
+                            const startIdx = (currentPage - 1) * CHART_DATA_PAGE_SIZE
+                            const endIdx = Math.min(startIdx + CHART_DATA_PAGE_SIZE, totalRows)
+                            const pageRows = backtestDetail.chart_data.slice(startIdx, endIdx)
+                            return (
+                              <>
+                                <div className="bg-[#080A10] rounded-lg overflow-hidden border border-gray-800">
+                                  <div className="overflow-x-auto max-h-[600px]">
+                                    <table className="min-w-full text-[10px]">
+                                      <thead className="bg-[#000000] text-gray-400 sticky top-0 uppercase tracking-widest font-black">
+                                        <tr>
+                                          <th className="px-4 py-3 text-left">#</th>
+                                          {Object.keys(backtestDetail.chart_data[0]).map((col) => (
+                                            <th key={col} className="px-4 py-3 text-left whitespace-nowrap">{col}</th>
+                                          ))}
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {pageRows.map((row: any, i: number) => (
+                                          <tr key={startIdx + i} className="border-t border-gray-900 hover:bg-[#121420]">
+                                            <td className="px-4 py-2 text-gray-500">{startIdx + i + 1}</td>
+                                            {Object.values(row).map((val: any, j: number) => (
+                                              <td key={j} className="px-4 py-2 text-white whitespace-nowrap">
+                                                {typeof val === 'number' ? val.toFixed(2) : String(val)}
+                                              </td>
+                                            ))}
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                                <div className="flex items-center justify-between mt-3 text-[10px] font-black uppercase tracking-widest">
+                                  <span className="text-gray-500">
+                                    Showing {startIdx + 1}–{endIdx} of {totalRows}
+                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => setChartDataPage((p) => Math.max(1, p - 1))}
+                                      disabled={currentPage === 1}
+                                      className="px-3 py-1.5 rounded-full bg-[#141721] hover:bg-[#1f2335] border border-gray-700 text-gray-300 tracking-widest transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                    >
+                                      Prev
+                                    </button>
+                                    <span className="text-gray-400">
+                                      Page {currentPage} of {totalPages}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setChartDataPage((p) => Math.min(totalPages, p + 1))}
+                                      disabled={currentPage === totalPages}
+                                      className="px-3 py-1.5 rounded-full bg-[#141721] hover:bg-[#1f2335] border border-gray-700 text-gray-300 tracking-widest transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                    >
+                                      Next
+                                    </button>
+                                  </div>
+                                </div>
+                              </>
+                            )
+                          })()
                         ) : (
                           <div className="text-center text-gray-500 py-20 font-bold uppercase tracking-widest text-xs">No chart data available</div>
                         )}
@@ -3457,38 +3505,76 @@ export default function StrategyTestingPage() {
                         <div>
                           <h3 className="text-xs font-black text-gray-500 mb-6 uppercase tracking-[0.4em]">Current Trades</h3>
                           {backtestDetail.trades_data && backtestDetail.trades_data.length > 0 ? (
-                            <div className="bg-[#080A10] rounded-lg overflow-hidden border border-gray-800">
-                              <div className="overflow-x-auto max-h-[500px]">
-                                <table className="min-w-full text-[10px]">
-                                  <thead className="bg-[#000000] text-gray-400 sticky top-0 uppercase tracking-widest font-black">
-                                    <tr>
-                                      <th className="px-4 py-3 text-left">#</th>
-                                      <th className="px-4 py-3 text-left">Time</th>
-                                      <th className="px-4 py-3 text-left">Type</th>
-                                      <th className="px-4 py-3 text-left">Size</th>
-                                      <th className="px-4 py-3 text-left">Price</th>
-                                      <th className="px-4 py-3 text-left">Profit</th>
-                                      <th className="px-4 py-3 text-left">Balance</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {backtestDetail.trades_data.map((trade: any, index: number) => (
-                                      <tr key={index} className="border-t border-gray-900 hover:bg-[#121420]">
-                                        <td className="px-4 py-3 text-white">{index + 1}</td>
-                                        <td className="px-4 py-3 text-white">{trade.EntryTime || trade.Time || 'N/A'}</td>
-                                        <td className="px-4 py-3 text-white">{trade.Type || 'N/A'}</td>
-                                        <td className="px-4 py-3 text-white">{trade.Size ?? 'N/A'}</td>
-                                        <td className="px-4 py-3 text-white">{trade.EntryPrice != null ? trade.EntryPrice.toFixed(5) : trade.Price != null ? trade.Price.toFixed(5) : 'N/A'}</td>
-                                        <td className={`px-4 py-3 font-semibold ${(trade.PnL || trade.Profit || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                          {trade.PnL != null ? `$${trade.PnL.toFixed(2)}` : trade.Profit != null ? `$${trade.Profit.toFixed(2)}` : 'N/A'}
-                                        </td>
-                                        <td className="px-4 py-3 text-white">{trade.Balance != null ? `$${trade.Balance.toFixed(2)}` : 'N/A'}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
+                            (() => {
+                              const totalTrades = backtestDetail.trades_data.length
+                              const totalPages = Math.max(1, Math.ceil(totalTrades / TRADES_PAGE_SIZE))
+                              const currentPage = Math.min(tradesPage, totalPages)
+                              const startIdx = (currentPage - 1) * TRADES_PAGE_SIZE
+                              const endIdx = Math.min(startIdx + TRADES_PAGE_SIZE, totalTrades)
+                              const pageTrades = backtestDetail.trades_data.slice(startIdx, endIdx)
+                              return (
+                                <>
+                                  <div className="bg-[#080A10] rounded-lg overflow-hidden border border-gray-800">
+                                    <div className="overflow-x-auto max-h-[500px]">
+                                      <table className="min-w-full text-[10px]">
+                                        <thead className="bg-[#000000] text-gray-400 sticky top-0 uppercase tracking-widest font-black">
+                                          <tr>
+                                            <th className="px-4 py-3 text-left">#</th>
+                                            <th className="px-4 py-3 text-left">Time</th>
+                                            <th className="px-4 py-3 text-left">Type</th>
+                                            <th className="px-4 py-3 text-left">Size</th>
+                                            <th className="px-4 py-3 text-left">Price</th>
+                                            <th className="px-4 py-3 text-left">Profit</th>
+                                            <th className="px-4 py-3 text-left">Balance</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {pageTrades.map((trade: any, index: number) => (
+                                            <tr key={startIdx + index} className="border-t border-gray-900 hover:bg-[#121420]">
+                                              <td className="px-4 py-3 text-white">{startIdx + index + 1}</td>
+                                              <td className="px-4 py-3 text-white">{trade.EntryTime || trade.Time || 'N/A'}</td>
+                                              <td className="px-4 py-3 text-white">{trade.Type || 'N/A'}</td>
+                                              <td className="px-4 py-3 text-white">{trade.Size ?? 'N/A'}</td>
+                                              <td className="px-4 py-3 text-white">{trade.EntryPrice != null ? trade.EntryPrice.toFixed(5) : trade.Price != null ? trade.Price.toFixed(5) : 'N/A'}</td>
+                                              <td className={`px-4 py-3 font-semibold ${(trade.PnL || trade.Profit || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                                {trade.PnL != null ? `$${trade.PnL.toFixed(2)}` : trade.Profit != null ? `$${trade.Profit.toFixed(2)}` : 'N/A'}
+                                              </td>
+                                              <td className="px-4 py-3 text-white">{trade.Balance != null ? `$${trade.Balance.toFixed(2)}` : 'N/A'}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center justify-between mt-3 text-[10px] font-black uppercase tracking-widest">
+                                    <span className="text-gray-500">
+                                      Showing {startIdx + 1}–{endIdx} of {totalTrades}
+                                    </span>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => setTradesPage((p) => Math.max(1, p - 1))}
+                                        disabled={currentPage === 1}
+                                        className="px-3 py-1.5 rounded-full bg-[#141721] hover:bg-[#1f2335] border border-gray-700 text-gray-300 tracking-widest transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                      >
+                                        Prev
+                                      </button>
+                                      <span className="text-gray-400">
+                                        Page {currentPage} of {totalPages}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setTradesPage((p) => Math.min(totalPages, p + 1))}
+                                        disabled={currentPage === totalPages}
+                                        className="px-3 py-1.5 rounded-full bg-[#141721] hover:bg-[#1f2335] border border-gray-700 text-gray-300 tracking-widest transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                      >
+                                        Next
+                                      </button>
+                                    </div>
+                                  </div>
+                                </>
+                              )
+                            })()
                           ) : (
                             <div className="text-center text-gray-500 py-20 font-bold uppercase tracking-widest text-xs">No trades data available</div>
                           )}

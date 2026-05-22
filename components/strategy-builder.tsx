@@ -5061,6 +5061,21 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     })
   }
 
+  // A partial_tp Equity rule is a Manage Exit (UI-wise) when every entry is a
+  // price-level full exit: only `Price` + `Close: "100%"`, with no `name`,
+  // `operator`, or `Action`. Backend stores both features under partial_tp; the
+  // frontend uses shape to route to the right modal/label.
+  const isManageExitPartialTpShape = (rule: any): boolean => {
+    if (!rule?.inp1 || rule.inp1.name !== "partial_tp") return false
+    const list = rule.inp1.partial_tp_list
+    if (!Array.isArray(list) || list.length === 0) return false
+    return list.every((it: any) =>
+      it && typeof it.Price === "string" &&
+      !it.name && !it.operator && !it.Action &&
+      /^(100%|1(\.0+)?)$/.test(String(it.Close ?? ""))
+    )
+  }
+
   const renderEquityRules = (statement: StrategyStatement, statementIndex: number) => {
     if (!statement.Equity || statement.Equity.length === 0) {
       return null
@@ -5070,8 +5085,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       <div className="mt-4">
         <div className="flex flex-wrap gap-2">
           {statement.Equity.map((rule, index) => {
-            const isPartialTP = !!(rule.inp1 && rule.inp1.name === "partial_tp" && rule.inp1.partial_tp_list)
-            const isManageExit = !!(rule.inp1 && rule.inp1.name === "manage_exit" && (rule.inp1 as any).manage_exit_list)
+            // Manage Exit is serialized into the partial_tp schema (backend has
+            // no separate field). Distinguish by shape: every entry is a
+            // price-level full exit (Close === "100%", no Action/name).
+            const isManageExitNew = isManageExitPartialTpShape(rule)
+            const isPartialTP = !!(rule.inp1 && rule.inp1.name === "partial_tp" && rule.inp1.partial_tp_list) && !isManageExitNew
+            const isManageExitLegacy = !!(rule.inp1 && rule.inp1.name === "manage_exit" && (rule.inp1 as any).manage_exit_list)
+            const isManageExit = isManageExitNew || isManageExitLegacy
 
             // Filter out SL and TP as they are now rendered inline
             const operator = rule.operator || ""
@@ -5080,10 +5100,14 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
             if (isSL || isTP) return null
 
+            const manageExitCount = isManageExitNew
+              ? (rule.inp1?.partial_tp_list?.length || 0)
+              : ((rule.inp1 as any)?.manage_exit_list?.length || 0)
+
             const label = isPartialTP
               ? `Partial TP (${rule.inp1?.partial_tp_list?.length || 0})`
               : isManageExit
-                ? `Manage Exit (${(rule.inp1 as any).manage_exit_list?.length || 0})`
+                ? `Manage Exit (${manageExitCount})`
                 : pipsToPointsDisplay(rule.operator || "Equity Rule")
 
             return (
@@ -5111,11 +5135,15 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
                     if (isPartialTP && rule.inp1?.partial_tp_list) {
                       rule.inp1.partial_tp_list.forEach((lvl, i) => {
-                        details[`Level ${i + 1}`] = `${pipsToPointsDisplay(lvl.Price)} | Close: ${lvl.Close}${lvl.Action ? ` | Action: ${pipsToPointsDisplay(lvl.Action)}` : ""}`
+                        details[`Level ${i + 1}`] = `${pipsToPointsDisplay(lvl.Price || "")} | Close: ${lvl.Close}${lvl.Action ? ` | Action: ${pipsToPointsDisplay(lvl.Action)}` : ""}`
                       })
                     }
 
-                    if (isManageExit && (rule.inp1 as any).manage_exit_list) {
+                    if (isManageExitNew && rule.inp1?.partial_tp_list) {
+                      rule.inp1.partial_tp_list.forEach((lvl, i) => {
+                        details[`Rule ${i + 1}`] = `${pipsToPointsDisplay(lvl.Price || "")} | Closes 100%`
+                      })
+                    } else if (isManageExitLegacy && (rule.inp1 as any).manage_exit_list) {
                       const list = (rule.inp1 as any).manage_exit_list as Array<{ Price: string; Action: string }>
                       list.forEach((it, i) => {
                         details[`Rule ${i + 1}`] = `${pipsToPointsDisplay(it.Price)} | ${pipsToPointsDisplay(it.Action)}`
@@ -5434,11 +5462,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       return {
         ...basePayload,
         strategy: [], // Explicitly clear root strategy
-        // Explicitly clear root Equity. editStrategy uses PATCH, so fields we
-        // omit are preserved server-side. Strategies saved before per-statement
-        // equity was introduced have stale root Equity rules that fail current
-        // validation (e.g. "Root Equity entry 0: Entries in inp1 not as
-        // expected") if we don't overwrite them with [].
+        // editStrategy uses PATCH, so omitted fields persist server-side.
+        // FORMAT 2 owns equity per-statement; force the root Equity to [] so
+        // any stale rules from earlier single-statement saves are cleared.
         Equity: [],
         statements: signalStatements.map(s => ({
           name: s.name,
@@ -8399,6 +8425,23 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               const currentStatement = newStatements[targetStatementIndex]
               if (!currentStatement.Equity) currentStatement.Equity = []
 
+              // Backend allows only ONE partial_tp block per Equity array
+              // (StrategyHelper.py:918). Manage Exit also serializes as
+              // partial_tp, so adding a Partial TP alongside a Manage Exit
+              // would create a second block and fail validation.
+              const conflictIndex = currentStatement.Equity.findIndex((r, i) =>
+                i !== editingEquityRule?.equityIndex &&
+                (r as any)?.inp1?.name === "partial_tp"
+              )
+              if (conflictIndex !== -1) {
+                toast({
+                  variant: "destructive",
+                  title: "Only one Partial TP / Manage Exit per statement",
+                  description: "Remove the existing Partial TP or Manage Exit rule first, or edit it instead.",
+                })
+                return
+              }
+
               const newRule: EquityRule = {
                 statement: "and",
                 inp1: {
@@ -8427,12 +8470,17 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           <ManageExitSettingsModal
             onClose={() => setShowManageExitModal(false)}
             initialItems={(() => {
-              if (editingEquityRule) {
-                const rule = statements[editingEquityRule.statementIndex]?.Equity[editingEquityRule.equityIndex]
-                const list = (rule?.inp1 as any)?.manage_exit_list
-                if (list && Array.isArray(list)) {
-                  return list.map((it: any) => ({ Price: it.Price, Action: it.Action }))
-                }
+              if (!editingEquityRule) return undefined
+              const rule = statements[editingEquityRule.statementIndex]?.Equity[editingEquityRule.equityIndex]
+              // New shape: stored as partial_tp with Close === "100%".
+              const ptList = (rule?.inp1 as any)?.partial_tp_list
+              if (Array.isArray(ptList) && isManageExitPartialTpShape(rule)) {
+                return ptList.map((it: any) => ({ Price: it.Price }))
+              }
+              // Legacy shape: manage_exit_list with Price + Action. Drop Action.
+              const legacy = (rule?.inp1 as any)?.manage_exit_list
+              if (Array.isArray(legacy)) {
+                return legacy.map((it: any) => ({ Price: it.Price }))
               }
               return undefined
             })()}
@@ -8442,13 +8490,30 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               const currentStatement = newStatements[targetStatementIndex]
               if (!currentStatement.Equity) currentStatement.Equity = []
 
+              // Backend allows only ONE partial_tp block per Equity array
+              // (StrategyHelper.py:918 assertion). Manage Exit now serializes
+              // as partial_tp, so block adding/editing a Manage Exit if another
+              // partial_tp rule already exists on the same statement.
+              const conflictIndex = currentStatement.Equity.findIndex((r, i) =>
+                i !== editingEquityRule?.equityIndex &&
+                (r as any)?.inp1?.name === "partial_tp"
+              )
+              if (conflictIndex !== -1) {
+                toast({
+                  variant: "destructive",
+                  title: "Only one Partial TP / Manage Exit per statement",
+                  description: "Remove the existing Partial TP or Manage Exit rule first, or edit it instead.",
+                })
+                return
+              }
+
               const newRule: EquityRule = {
                 statement: "and",
                 inp1: {
-                  name: "manage_exit",
-                  manage_exit_list: settings.items.map((it) => ({
+                  name: "partial_tp",
+                  partial_tp_list: settings.items.map((it) => ({
                     Price: it.Price,
-                    Action: it.Action,
+                    Close: "100%",
                   })),
                 },
               }

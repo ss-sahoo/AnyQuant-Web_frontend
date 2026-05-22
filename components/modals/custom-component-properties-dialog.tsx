@@ -5,7 +5,6 @@ import { X } from "lucide-react"
 import {
   ParameterSchema,
   ParamRuntimeValue,
-  OptimizableValue,
   isOptimizableValue,
   OHLCV_SOURCES,
   schemaToDefaults,
@@ -45,22 +44,6 @@ const TIMEFRAME_OPTIONS = [
   { value: "1w", label: "1 Week" },
 ]
 
-const DEFAULT_RANGE = { start: 0, step: 1, stop: 100 }
-
-function toOptimizable(current: ParamRuntimeValue, p: ParameterSchema): OptimizableValue {
-  if (isOptimizableValue(current)) return current
-  const num = Number(current)
-  const value = Number.isFinite(num) ? num : Number(p.default) || 0
-  const min = p.min ?? DEFAULT_RANGE.start
-  const max = p.max ?? Math.max(min + 1, value * 2 || DEFAULT_RANGE.stop)
-  const step = p.step ?? DEFAULT_RANGE.step
-  return { start: min, step, stop: max, value }
-}
-
-function fromOptimizable(v: OptimizableValue): number {
-  return v.value
-}
-
 export function CustomComponentPropertiesDialog({
   open,
   componentName,
@@ -80,7 +63,6 @@ export function CustomComponentPropertiesDialog({
   const [values, setValues] = useState<Record<string, ParamRuntimeValue>>({})
   const [timeframe, setTimeframe] = useState<string>(initialTimeframe || "1h")
   const [source, setSource] = useState<string>(initialInput || "Close")
-  const [optRangeOn, setOptRangeOn] = useState<Record<string, boolean>>({})
 
   // Fetch schema if only componentId was passed.
   useEffect(() => {
@@ -103,18 +85,13 @@ export function CustomComponentPropertiesDialog({
     }
   }, [open, componentId, parameterSchemas])
 
-  // Seed values + optRange flags once we have schemas.
+  // Seed values once we have schemas. Optimisation ranges are configured
+  // later in the Properties tab on the strategy-testing page, not here.
   useEffect(() => {
     if (!open) return
     const defaults = schemaToDefaults(schemas)
     const merged: Record<string, ParamRuntimeValue> = { ...defaults, ...(initialValues || {}) }
     setValues(merged)
-
-    const rangeFlags: Record<string, boolean> = {}
-    for (const p of schemas) {
-      rangeFlags[p.name] = isOptimizableValue(merged[p.name])
-    }
-    setOptRangeOn(rangeFlags)
   }, [schemas, initialValues, open])
 
   const canSave = useMemo(() => !loadingSchemas && !schemaError, [loadingSchemas, schemaError])
@@ -125,16 +102,16 @@ export function CustomComponentPropertiesDialog({
     setValues((prev) => ({ ...prev, [name]: v }))
   }
 
-  const toggleRange = (p: ParameterSchema) => {
-    const on = !optRangeOn[p.name]
-    setOptRangeOn((prev) => ({ ...prev, [p.name]: on }))
+  // When the existing value is an optimisable range (set later in Properties),
+  // updating the single-value input should update only `.value` and preserve
+  // the rest of the range so the user doesn't lose their configuration.
+  const setNumericParam = (name: string, n: number) => {
     setValues((prev) => {
-      if (on) {
-        return { ...prev, [p.name]: toOptimizable(prev[p.name], p) }
-      } else {
-        const cur = prev[p.name]
-        return { ...prev, [p.name]: isOptimizableValue(cur) ? fromOptimizable(cur) : cur }
+      const cur = prev[name]
+      if (isOptimizableValue(cur)) {
+        return { ...prev, [name]: { ...cur, value: n } }
       }
+      return { ...prev, [name]: n }
     })
   }
 
@@ -156,34 +133,13 @@ export function CustomComponentPropertiesDialog({
 
   const renderValueControl = (p: ParameterSchema) => {
     const v = values[p.name]
-    const rangeOn = !!optRangeOn[p.name]
-
-    if (rangeOn && (p.type === "int" || p.type === "float")) {
-      const ov = isOptimizableValue(v) ? v : toOptimizable(v, p)
-      const step = p.type === "int" ? (p.step ?? 1) : (p.step ?? 0.1)
-      return (
-        <div className="grid grid-cols-4 gap-2">
-          {(["start", "step", "stop", "value"] as const).map((k) => (
-            <div key={k}>
-              <label className="block text-[10px] uppercase text-gray-500 mb-1">{k}</label>
-              <input
-                type="number"
-                value={ov[k]}
-                step={step}
-                onChange={(e) => {
-                  const n = parseFloat(e.target.value)
-                  setParam(p.name, { ...ov, [k]: Number.isFinite(n) ? n : 0 })
-                }}
-                className="w-full px-2 py-1 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-sm focus:outline-none focus:border-[#85e1fe]"
-              />
-            </div>
-          ))}
-        </div>
-      )
-    }
 
     if (p.type === "int" || p.type === "float") {
-      const num = typeof v === "number" ? v : Number(v) || 0
+      const num = isOptimizableValue(v)
+        ? v.value
+        : typeof v === "number"
+          ? v
+          : Number(v) || 0
       return (
         <input
           type="number"
@@ -193,9 +149,9 @@ export function CustomComponentPropertiesDialog({
           step={p.step ?? (p.type === "int" ? 1 : 0.1)}
           onChange={(e) => {
             const raw = e.target.value
-            if (raw === "") return setParam(p.name, 0)
+            if (raw === "") return setNumericParam(p.name, 0)
             const n = p.type === "int" ? parseInt(raw, 10) : parseFloat(raw)
-            setParam(p.name, Number.isFinite(n) ? n : 0)
+            setNumericParam(p.name, Number.isFinite(n) ? n : 0)
           }}
           className="w-full px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded-lg text-white focus:outline-none focus:border-[#85e1fe]"
         />
@@ -306,30 +262,14 @@ export function CustomComponentPropertiesDialog({
 
           {!loadingSchemas && !schemaError && schemas.map((p) => {
             const label = p.display_name || p.name
-            const showRangeToggle = !!p.optimizable && (p.type === "int" || p.type === "float")
             return (
               <div key={p.name} className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-sm text-gray-300">
-                    {label}
-                    {p.name !== label && (
-                      <span className="ml-2 text-xs text-gray-500">({p.name})</span>
-                    )}
-                  </label>
-                  {showRangeToggle && (
-                    <button
-                      type="button"
-                      onClick={() => toggleRange(p)}
-                      className={`text-xs px-2 py-0.5 rounded border transition-colors ${
-                        optRangeOn[p.name]
-                          ? "bg-[#85e1fe]/10 border-[#85e1fe] text-[#85e1fe]"
-                          : "bg-transparent border-[#2A2D42] text-gray-400 hover:text-white"
-                      }`}
-                    >
-                      {optRangeOn[p.name] ? "Range mode" : "Optimize range"}
-                    </button>
+                <label className="text-sm text-gray-300">
+                  {label}
+                  {p.name !== label && (
+                    <span className="ml-2 text-xs text-gray-500">({p.name})</span>
                   )}
-                </div>
+                </label>
                 {renderValueControl(p)}
                 {p.description && (
                   <p className="text-xs text-gray-500">{p.description}</p>

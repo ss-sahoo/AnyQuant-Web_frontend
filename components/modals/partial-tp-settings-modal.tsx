@@ -21,35 +21,24 @@ interface PartialTPSettingsModalProps {
   initialLevels?: PartialTPLevel[]
 }
 
-// Convert pips to points (1 pip = 0.1 points for display)
-const pipsToPoints = (text: string): string => {
-  return text.replace(/(\d+)pips/g, (match, num) => {
-    const points = parseInt(num) * 0.1
-    return `${points}points`
-  })
-}
-
-// Convert points back to pips (1 point = 10 pips for backend)
-const pointsToPips = (text: string): string => {
-  return text.replace(/(\d+(?:\.\d+)?)points/g, (match, num) => {
-    const pips = Math.round(parseFloat(num) * 10)
-    return `${pips}pips`
-  })
-}
+// Values flow through this modal verbatim. The previous 1:10 pips↔points
+// auto-conversion silently multiplied typed values by 10 (e.g. typing
+// "100points" produced "1000pips" in the saved JSON), so we now store exactly
+// what the user types.
 
 export function PartialTPSettingsModal({ onClose, onSave, initialLevels }: PartialTPSettingsModalProps) {
   const [levels, setLevels] = useState<PartialTPLevel[]>(
     initialLevels && initialLevels.length > 0
       ? initialLevels.map(level => ({
-          Price: pipsToPoints(level.Price),
+          Price: level.Price,
           Close: level.Close,
-          Action: level.Action ? pipsToPoints(level.Action) : undefined,
+          Action: level.Action,
         }))
-      : [{ Price: "Entry_Price + 20points", Close: "50%" }],
+      : [{ Price: "Entry_Price + 200pips", Close: "50%" }],
   )
 
   const addLevel = () => {
-    setLevels((prev) => [...prev, { Price: "Entry_Price + 20points", Close: "50%" }])
+    setLevels((prev) => [...prev, { Price: "Entry_Price + 200pips", Close: "50%" }])
   }
 
   const updateLevel = (index: number, field: keyof PartialTPLevel, value: string) => {
@@ -64,12 +53,7 @@ export function PartialTPSettingsModal({ onClose, onSave, initialLevels }: Parti
   }
 
   const handleSave = () => {
-    const levelsWithPips = levels.map(level => ({
-      Price: pointsToPips(level.Price),
-      Close: level.Close,
-      Action: level.Action ? pointsToPips(level.Action) : undefined,
-    }))
-    onSave({ type: "partial_tp", partialTpList: levelsWithPips })
+    onSave({ type: "partial_tp", partialTpList: levels })
     onClose()
   }
 
@@ -102,7 +86,7 @@ export function PartialTPSettingsModal({ onClose, onSave, initialLevels }: Parti
                     value={level.Price}
                     onChange={(e) => updateLevel(index, "Price", e.target.value)}
                     className="w-full bg-white border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
-                    placeholder="Entry_Price + 20points"
+                    placeholder="Entry_Price + 200pips"
                   />
                 </div>
 

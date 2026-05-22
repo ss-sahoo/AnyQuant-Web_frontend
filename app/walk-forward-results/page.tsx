@@ -88,7 +88,7 @@ function WalkForwardResultsContent() {
     loadPlotsForResult();
   }, [result]);
 
-  const baseUrl = "https://anyquant.co.uk"
+  const baseUrl = "http://127.0.0.1:8000"
 
   // Function to load individual plot image via API
   const loadPlotImageViaAPI = async (optimizationId: number, plotType: string) => {

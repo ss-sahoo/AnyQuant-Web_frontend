@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { X } from 'lucide-react'
+import { X, Plus, Minus, ChevronLeft, ChevronRight } from 'lucide-react'
 import { getStrategyBacktestResults, deleteBacktestResult } from '../app/AllApiCalls'
+import { DraggableModal } from './modals/draggable-modal'
 
 interface BacktestResult {
   id: number
@@ -34,6 +35,16 @@ export function BacktestHistoryList({ strategyId, onClose, onSelect, isInline }:
   const [backtestResults, setBacktestResults] = useState<BacktestResult[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [page, setPage] = useState(1)
+  const PAGE_SIZE = 10
+
+  useEffect(() => {
+    if (!expanded) setPage(1)
+  }, [expanded])
 
   useEffect(() => {
     loadBacktestResults()
@@ -56,17 +67,19 @@ export function BacktestHistoryList({ strategyId, onClose, onSelect, isInline }:
     }
   }
 
-  const handleDelete = async (backtestId: number) => {
-    if (!confirm('Are you sure you want to delete this backtest result?')) {
-      return
-    }
-
+  const confirmDelete = async () => {
+    if (pendingDeleteId == null) return
+    setIsDeleting(true)
     try {
-      await deleteBacktestResult(backtestId.toString())
+      await deleteBacktestResult(pendingDeleteId.toString())
+      setPendingDeleteId(null)
       await loadBacktestResults()
     } catch (err: any) {
       console.error('Error deleting backtest result:', err)
-      alert('Failed to delete backtest result: ' + (err.message || 'Unknown error'))
+      setPendingDeleteId(null)
+      setDeleteError(err?.message || 'Unknown error')
+    } finally {
+      setIsDeleting(false)
     }
   }
 
@@ -130,7 +143,13 @@ export function BacktestHistoryList({ strategyId, onClose, onSelect, isInline }:
                 </tr>
               </thead>
               <tbody>
-                {backtestResults.map((result) => (
+                {(() => {
+                  if (!expanded) return backtestResults.slice(0, 2)
+                  const totalPages = Math.max(1, Math.ceil(backtestResults.length / PAGE_SIZE))
+                  const currentPage = Math.min(page, totalPages)
+                  const start = (currentPage - 1) * PAGE_SIZE
+                  return backtestResults.slice(start, start + PAGE_SIZE)
+                })().map((result) => (
                   <tr
                     key={result.id}
                     className="bg-[#080A10] text-[#85e1fe] cursor-pointer hover:bg-[#121420] border-t border-gray-900 transition-all font-medium"
@@ -169,7 +188,7 @@ export function BacktestHistoryList({ strategyId, onClose, onSelect, isInline }:
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
-                          handleDelete(result.id)
+                          setPendingDeleteId(result.id)
                         }}
                         className="text-red-500 hover:text-red-400 font-black uppercase text-[9px] tracking-widest"
                       >
@@ -180,19 +199,134 @@ export function BacktestHistoryList({ strategyId, onClose, onSelect, isInline }:
                 ))}
               </tbody>
             </table>
+            {backtestResults.length > 2 && (
+              <div className="flex flex-col items-center gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={() => setExpanded((v) => !v)}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#141721] hover:bg-[#1f2335] border border-gray-700 text-gray-300 text-[9px] font-black uppercase tracking-widest transition-colors"
+                  aria-expanded={expanded}
+                  aria-label={expanded ? 'Show fewer backtests' : `Show all ${backtestResults.length} backtests`}
+                >
+                  {expanded ? <Minus className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+                  {expanded ? `Show less` : `Show all (${backtestResults.length})`}
+                </button>
+                {expanded && backtestResults.length > PAGE_SIZE && (() => {
+                  const totalPages = Math.max(1, Math.ceil(backtestResults.length / PAGE_SIZE))
+                  const currentPage = Math.min(page, totalPages)
+                  const start = (currentPage - 1) * PAGE_SIZE
+                  const end = Math.min(start + PAGE_SIZE, backtestResults.length)
+                  return (
+                    <div className="flex items-center gap-3 text-[9px] font-black uppercase tracking-widest">
+                      <span className="text-gray-500">
+                        {start + 1}–{end} of {backtestResults.length}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                        className="flex items-center gap-1 px-2 py-1 rounded-full bg-[#141721] hover:bg-[#1f2335] border border-gray-700 text-gray-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        aria-label="Previous page"
+                      >
+                        <ChevronLeft className="w-3 h-3" />
+                        Prev
+                      </button>
+                      <span className="text-gray-400">
+                        Page {currentPage} / {totalPages}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                        className="flex items-center gap-1 px-2 py-1 rounded-full bg-[#141721] hover:bg-[#1f2335] border border-gray-700 text-gray-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        aria-label="Next page"
+                      >
+                        Next
+                        <ChevronRight className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )
+                })()}
+              </div>
+            )}
           </div>
         )}
       </div>
     </div>
   )
 
+  const dialogs = (
+    <>
+      {pendingDeleteId != null && (
+        <DraggableModal
+          onClose={() => !isDeleting && setPendingDeleteId(null)}
+          closeOnBackdrop={!isDeleting}
+          className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-md border border-gray-700"
+        >
+          <div className="p-6">
+            <h3 className="text-lg font-bold text-white mb-2">Delete backtest?</h3>
+            <p className="text-sm text-gray-400 mb-6">
+              This will permanently delete this backtest result. This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingDeleteId(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-full border border-gray-600 text-gray-200 hover:bg-gray-800 text-xs font-black uppercase tracking-widest disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-full bg-red-600 hover:bg-red-500 text-white text-xs font-black uppercase tracking-widest disabled:opacity-50"
+              >
+                {isDeleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </DraggableModal>
+      )}
+      {deleteError && (
+        <DraggableModal
+          onClose={() => setDeleteError(null)}
+          className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-md border border-red-500/50"
+        >
+          <div className="p-6">
+            <h3 className="text-lg font-bold text-red-400 mb-2">Failed to delete backtest</h3>
+            <p className="text-sm text-gray-300 mb-6 break-words">{deleteError}</p>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setDeleteError(null)}
+                className="px-4 py-2 rounded-full bg-[#85e1fe] text-black text-xs font-black uppercase tracking-widest hover:bg-[#6bc8e3]"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </DraggableModal>
+      )}
+    </>
+  )
+
   if (isInline) {
-    return listContent
+    return (
+      <>
+        {listContent}
+        {dialogs}
+      </>
+    )
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
-      {listContent}
-    </div>
+    <>
+      <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+        {listContent}
+      </div>
+      {dialogs}
+    </>
   )
 }

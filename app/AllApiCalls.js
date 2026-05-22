@@ -470,7 +470,7 @@ export const cancelBacktest = async (runId) => {
   const headers = new Headers()
   if (authToken) headers.append("Authorization", `Bearer ${authToken}`)
   console.log("📡 cancel-backtest →", runId)
-  const response = await fetch("https://anyquant.co.uk/api/cancel-backtest/", { method: "POST", headers, body: formData })
+  const response = await fetch("http://127.0.0.1:8000/api/cancel-backtest/", { method: "POST", headers, body: formData })
   console.log("📡 cancel-backtest status:", response.status)
   return response.json().catch(() => ({}))
 }
@@ -482,7 +482,7 @@ export const cancelOptimisationRun = async (runId) => {
   const headers = new Headers()
   if (authToken) headers.append("Authorization", `Bearer ${authToken}`)
   console.log("📡 cancel-optimisation →", runId)
-  const response = await fetch("https://anyquant.co.uk/api/cancel-optimisation/", { method: "POST", headers, body: formData })
+  const response = await fetch("http://127.0.0.1:8000/api/cancel-optimisation/", { method: "POST", headers, body: formData })
   console.log("📡 cancel-optimisation status:", response.status)
   return response.json().catch(() => ({}))
 }
@@ -1525,12 +1525,14 @@ export const deleteBacktestResult = async (backtestId) => {
     },
   });
 
+  const text = await response.text();
+  const data = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.error || "Failed to delete backtest result");
+    throw new Error((data && data.error) || "Failed to delete backtest result");
   }
 
-  return response.json();
+  return data;
 };
 
 // Shortlist API Functions
