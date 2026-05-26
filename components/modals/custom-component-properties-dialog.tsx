@@ -63,6 +63,8 @@ export function CustomComponentPropertiesDialog({
   const [values, setValues] = useState<Record<string, ParamRuntimeValue>>({})
   const [timeframe, setTimeframe] = useState<string>(initialTimeframe || "1h")
   const [source, setSource] = useState<string>(initialInput || "Close")
+  const isPresetTimeframe = TIMEFRAME_OPTIONS.some((o) => o.value === timeframe)
+  const [useCustomTimeframe, setUseCustomTimeframe] = useState<boolean>(!!initialTimeframe && !isPresetTimeframe)
 
   // Fetch schema if only componentId was passed.
   useEffect(() => {
@@ -242,15 +244,47 @@ export function CustomComponentPropertiesDialog({
           {!loadingSchemas && !schemaError && componentType === "indicator" && (
             <div>
               <label className="block text-sm text-gray-400 mb-2">Timeframe</label>
-              <select
-                value={timeframe}
-                onChange={(e) => setTimeframe(e.target.value)}
-                className="w-full px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded-lg text-white focus:outline-none focus:border-[#85e1fe]"
-              >
-                {TIMEFRAME_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
+              {useCustomTimeframe ? (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={timeframe}
+                    onChange={(e) => setTimeframe(e.target.value)}
+                    placeholder="e.g. 3m, 45m, 2h, 12h"
+                    className="flex-1 min-w-0 px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUseCustomTimeframe(false)
+                      if (!TIMEFRAME_OPTIONS.some((o) => o.value === timeframe)) {
+                        setTimeframe("1h")
+                      }
+                    }}
+                    className="shrink-0 px-3 py-2 text-xs text-gray-400 hover:text-white border border-[#2A2D42] rounded-lg transition-colors"
+                  >
+                    Use preset
+                  </button>
+                </div>
+              ) : (
+                <select
+                  value={timeframe}
+                  onChange={(e) => {
+                    if (e.target.value === "__custom__") {
+                      setUseCustomTimeframe(true)
+                      setTimeframe("")
+                    } else {
+                      setTimeframe(e.target.value)
+                    }
+                  }}
+                  className="w-full px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded-lg text-white focus:outline-none focus:border-[#85e1fe]"
+                >
+                  {TIMEFRAME_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                  <option value="__custom__">Add custom…</option>
+                </select>
+              )}
             </div>
           )}
 
@@ -261,14 +295,10 @@ export function CustomComponentPropertiesDialog({
           )}
 
           {!loadingSchemas && !schemaError && schemas.map((p) => {
-            const label = p.display_name || p.name
             return (
               <div key={p.name} className="space-y-2">
                 <label className="text-sm text-gray-300">
-                  {label}
-                  {p.name !== label && (
-                    <span className="ml-2 text-xs text-gray-500">({p.name})</span>
-                  )}
+                  {p.name}
                 </label>
                 {renderValueControl(p)}
                 {p.description && (

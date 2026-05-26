@@ -8,7 +8,6 @@ export type ParameterType = "int" | "float" | "bool" | "string" | "select" | "so
 
 export interface ParameterSchema {
   name: string
-  display_name?: string
   type: ParameterType
   default: number | string | boolean
   min?: number
@@ -313,7 +312,7 @@ export function schemaToOptimisationRow(
   return {
     id: encoding,
     encoding,
-    name: schema.display_name || schema.name,
+    name: schema.name,
     indicator: indicatorLabel,
     default: defaultValue,
     type: rowType,

@@ -58,7 +58,18 @@ export function BacktestHistoryList({ strategyId, onClose, onSelect, isInline }:
         page: 1,
         page_size: 50
       })
-      setBacktestResults(response.results || [])
+      // The backend creates a "running" placeholder row when a job starts and
+      // a separate completed/failed row when it finishes. The running one is
+      // an empty duplicate from the user's POV, so delete it on the backend
+      // and never show it.
+      const rows: BacktestResult[] = response.results || []
+      const running = rows.filter(r => (r.status || '').toLowerCase() === 'running')
+      if (running.length > 0) {
+        await Promise.allSettled(
+          running.map(r => deleteBacktestResult(r.id.toString()))
+        )
+      }
+      setBacktestResults(rows.filter(r => (r.status || '').toLowerCase() !== 'running'))
     } catch (err: any) {
       setError(err.message || 'Failed to load backtest results')
       console.error('Error loading backtest results:', err)

@@ -49,6 +49,7 @@ import {
 import { X, ArrowLeft, Layout, Maximize2 } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
 import { extractErrorMessage, formatErrorForDisplay } from "@/lib/error-utils"
+import { matchesTimeframe as matchesTimeframeShared } from "@/lib/timeframe-match"
 import { StrategyTab } from "@/components/strategy-tab"
 import { BacktestTab } from "@/components/backtest-tab"
 import { OptimisationTab } from "@/components/optimisation-tab"
@@ -74,6 +75,23 @@ import { BacktestHistoryList } from "@/components/BacktestHistoryList"
 import { MetaAPIDebugModal } from "@/components/metaapi-debug-modal"
 // Custom strategy backtest results
 import { CustomStrategyBacktestResults } from "@/components/custom-strategy-backtest-results"
+
+// Reusable "Coming Soon" placeholder for tabs that don't yet have content.
+function ComingSoonPanel({ title, subtitle }: { title: string; subtitle?: string }) {
+  return (
+    <div className="w-full min-h-[400px] flex flex-col items-center justify-center px-6 py-16">
+      <div className="px-5 py-2 rounded-full border border-[#85e1fe]/40 bg-[#85e1fe]/10 text-[#85e1fe] text-[10px] font-black uppercase tracking-[0.5em]">
+        Coming Soon
+      </div>
+      <div className="mt-6 text-gray-300 text-sm font-black uppercase tracking-[0.4em]">{title}</div>
+      {subtitle && (
+        <div className="mt-3 max-w-md text-center text-gray-600 text-[11px] font-medium tracking-wide">
+          {subtitle}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function StrategyTestingPage() {
   const router = useRouter()
@@ -173,7 +191,7 @@ export default function StrategyTestingPage() {
   const [statusPollingInterval, setStatusPollingInterval] = useState<NodeJS.Timeout | null>(null)
 
   // Add state for top-level optimisation tab and selected result
-  const [optimisationTab, setOptimisationTab] = useState<'results' | 'graph' | 'report' | 'trades'>('results');
+  const [optimisationTab, setOptimisationTab] = useState<'chart' | 'chart_data' | 'trades' | 'summary' | 'results' | 'graph'>('results');
   const [selectedOptimisationRow, setSelectedOptimisationRow] = useState<any>(null);
 
   const [showPreviousOptimisationView, setShowPreviousOptimisationView] = useState(false);
@@ -219,7 +237,7 @@ export default function StrategyTestingPage() {
 
   // Add backtest detail state for showing results in the same page
   const [backtestDetail, setBacktestDetail] = useState<any>(null)
-  const [backtestResultTab, setBacktestResultTab] = useState<'graph' | 'chart_data' | 'summary' | 'trades' | 'results' | 'report'>('graph')
+  const [backtestResultTab, setBacktestResultTab] = useState<'chart' | 'chart_data' | 'trades' | 'summary' | 'results' | 'graph'>('chart')
   const [iframeLoadedResult, setIframeLoadedResult] = useState(false)
   const [isPlotExpandedResult, setIsPlotExpandedResult] = useState(false)
 
@@ -233,29 +251,38 @@ export default function StrategyTestingPage() {
     setTradesPage(1)
   }, [backtestDetail])
 
-  // Resizable upper results panel — drag handle between results and config
+  // Resizable upper results panel — drag handle between results and config.
+  // While dragging we render a full-viewport overlay so the iframe-based chart
+  // can't swallow mousemove/mouseup events (which would otherwise leave the
+  // resize stuck on after the user releases the mouse over the chart).
   const [topPaneHeight, setTopPaneHeight] = useState<number>(670)
   const [isResizingPane, setIsResizingPane] = useState(false)
   useEffect(() => {
     if (!isResizingPane) return
-    const onMove = (e: MouseEvent) => {
+    let rafId = 0
+    let pendingY: number | null = null
+    const apply = () => {
+      rafId = 0
+      if (pendingY == null) return
       const min = 160
       const max = Math.max(min, window.innerHeight - 220)
-      const next = Math.min(Math.max(e.clientY, min), max)
-      setTopPaneHeight(next)
+      setTopPaneHeight(Math.min(Math.max(pendingY, min), max))
+      pendingY = null
+    }
+    const onMove = (e: MouseEvent) => {
+      pendingY = e.clientY
+      if (!rafId) rafId = window.requestAnimationFrame(apply)
     }
     const onUp = () => setIsResizingPane(false)
     window.addEventListener("mousemove", onMove)
     window.addEventListener("mouseup", onUp)
     const prevUserSelect = document.body.style.userSelect
-    const prevCursor = document.body.style.cursor
     document.body.style.userSelect = "none"
-    document.body.style.cursor = "row-resize"
     return () => {
+      if (rafId) window.cancelAnimationFrame(rafId)
       window.removeEventListener("mousemove", onMove)
       window.removeEventListener("mouseup", onUp)
       document.body.style.userSelect = prevUserSelect
-      document.body.style.cursor = prevCursor
     }
   }, [isResizingPane])
 
@@ -321,7 +348,7 @@ export default function StrategyTestingPage() {
       const raw = await getBacktestResultDetail(backtestId)
       const normalized = normalizeBacktestResult(raw)
       setBacktestDetail(normalized)
-      setBacktestResultTab('graph')
+      setBacktestResultTab('chart')
       if (normalized.plot_html) {
         setPlotHtml(normalized.plot_html)
       }
@@ -411,7 +438,7 @@ export default function StrategyTestingPage() {
       setWalkForwardOptimizationResults([])
       setWalkForwardDetailResult(null)
       setShowWalkForwardOptimizationResults(false)
-      setBacktestResultTab('graph')
+      setBacktestResultTab('chart')
       setOptimisationTab('results')
       setOptimisationStdout("")
       setOptimisationStderr("")
@@ -673,20 +700,23 @@ export default function StrategyTestingPage() {
               // Fetch regular strategy
               strategyData = await fetchStatementDetail(id)
 
-              // Backend may strip trade_at/exit_timeframe; rehydrate from per-strategy fallback.
+              // Backend may strip entry_at/exit_at/execution_timeframe; rehydrate from per-strategy fallback.
               try {
                 const sid = String(id)
                 const raw = localStorage.getItem(`trade_timing_${sid}`)
-                if (raw && strategyData && strategyData.trade_at == null) {
+                if (raw && strategyData && strategyData.entry_at == null && strategyData.exit_at == null) {
                   const parsed = JSON.parse(raw)
-                  if (parsed?.trade_at === "tick") {
+                  const e = parsed?.entry_at
+                  const x = parsed?.exit_at
+                  if ((e === "bar close" || e === "tick") && (x === "bar close" || x === "tick")) {
                     strategyData = {
                       ...strategyData,
-                      trade_at: "tick",
-                      ...(parsed.exit_timeframe ? { exit_timeframe: parsed.exit_timeframe } : {}),
+                      entry_at: e,
+                      exit_at: x,
+                      ...((e === "tick" || x === "tick") && parsed.execution_timeframe
+                        ? { execution_timeframe: parsed.execution_timeframe }
+                        : {}),
                     }
-                  } else if (parsed?.trade_at === "bar close") {
-                    strategyData = { ...strategyData, trade_at: "bar close" }
                   }
                 }
               } catch { }
@@ -1091,102 +1121,21 @@ export default function StrategyTestingPage() {
 
   useEffect(() => {
     const tf: string[] = JSON.parse(localStorage.getItem("timeframes_required") || "[]")
-    // If strategy requests tick-level exit timing, also require its exit_timeframe file
-    const exitTf =
-      parsedStatement?.trade_at === "tick" && typeof parsedStatement?.exit_timeframe === "string"
-        ? parsedStatement.exit_timeframe.trim()
+    // Tick-level entry or exit needs a finer-timeframe dataset (execution_timeframe).
+    const usesTick =
+      parsedStatement?.entry_at === "tick" || parsedStatement?.exit_at === "tick"
+    const execTf =
+      usesTick && typeof parsedStatement?.execution_timeframe === "string"
+        ? parsedStatement.execution_timeframe.trim()
         : ""
-    const merged = exitTf && !tf.includes(exitTf) ? [...tf, exitTf] : tf
+    const merged = execTf && !tf.includes(execTf) ? [...tf, execTf] : tf
     setRequiredTimeframes(merged)
   }, [parsedStatement])
 
-  // Helper function to match timeframes with filenames
-  function matchesTimeframe(filename: string, timeframe: string) {
-    // Convert filename to lowercase for case-insensitive matching
-    const lowerFilename = filename.toLowerCase()
-    const lowerTimeframe = timeframe.toLowerCase()
-
-    console.log("🔍 Checking timeframe match:", { filename, timeframe, lowerFilename, lowerTimeframe })
-
-    // Direct matching (e.g., "3h" in filename)
-    if (lowerFilename.includes(lowerTimeframe)) {
-      console.log("✅ Direct match found for", timeframe)
-      return true
-    }
-
-    // Handle numeric equivalents
-    // Map common timeframes to their minute equivalents
-    const timeframeToMinutes: { [key: string]: number } = {
-      "1min": 1,
-      "5min": 5,
-      "15min": 15,
-      "20min": 20,
-      "30min": 30,
-      "36min": 36,
-      "1h": 60,
-      "2h": 120,
-      "3h": 180,
-      "4h": 240,
-      "6h": 360,
-      "8h": 480,
-      "12h": 720,
-      "1d": 1440,
-      "1 day": 1440,
-      "1w": 10080,
-      "1 week": 10080,
-    }
-
-    // Extract the minute value for the timeframe
-    const minutes = timeframeToMinutes[lowerTimeframe]
-
-    if (minutes) {
-      // Check if the filename contains the minute value
-      const minutesStr = minutes.toString()
-
-      // Use word boundary regex to avoid partial matches
-      // For example, "20" in "120" should not match "20m"
-      const regex = new RegExp(`\\b${minutesStr}\\b`)
-      const isStandaloneNumber = regex.test(lowerFilename)
-
-      console.log("🔍 Minute check:", {
-        timeframe,
-        minutes,
-        minutesStr,
-        lowerFilename,
-        isStandaloneNumber,
-        regex: regex.toString()
-      })
-
-      if (isStandaloneNumber) {
-        console.log("✅ Minute match found for", timeframe, "(" + minutes + " minutes)")
-        return true
-      }
-    }
-
-    // Additional check: Look for common timeframe patterns in filename
-    const timeframePatterns = {
-      "3h": ["3h", "180", "3 hour", "three hour"],
-      "1h": ["1h", "60", "1 hour", "one hour"],
-      "36min": ["36min", "36", "36 minute", "thirty six"],
-      "30min": ["30min", "30", "30 minute", "thirty"],
-      "15min": ["15min", "15", "15 minute", "fifteen"],
-      "5min": ["5min", "5", "5 minute", "five"],
-      "1min": ["1min", "1", "1 minute", "one minute"]
-    }
-
-    const patterns = timeframePatterns[lowerTimeframe as keyof typeof timeframePatterns]
-    if (patterns) {
-      for (const pattern of patterns) {
-        if (lowerFilename.includes(pattern.toLowerCase())) {
-          console.log("✅ Pattern match found for", timeframe, "using pattern:", pattern)
-          return true
-        }
-      }
-    }
-
-    console.log("❌ No match found for", timeframe, "in", filename)
-    return false
-  }
+  // Helper function to match timeframes with filenames. Delegates to the
+  // shared canonical-minute matcher so finer timeframes (e.g. "6min" vs
+  // "EURUSD_M6.csv") match across naming conventions.
+  const matchesTimeframe = matchesTimeframeShared
 
   // Updated handleRunBacktest function to support both MetaAPI and file upload
   const handleRunBacktest = async () => {
@@ -2288,9 +2237,11 @@ export default function StrategyTestingPage() {
         // Preserve TradingSession if it exists
         ...(parsedStatement.TradingSession && { TradingSession: parsedStatement.TradingSession }),
         // Preserve trade execution timing (backend may ignore these fields; included for forward-compat)
-        ...(parsedStatement.trade_at ? { trade_at: parsedStatement.trade_at } : {}),
-        ...(parsedStatement.trade_at === "tick" && parsedStatement.exit_timeframe
-          ? { exit_timeframe: parsedStatement.exit_timeframe }
+        ...(parsedStatement.entry_at ? { entry_at: parsedStatement.entry_at } : {}),
+        ...(parsedStatement.exit_at ? { exit_at: parsedStatement.exit_at } : {}),
+        ...((parsedStatement.entry_at === "tick" || parsedStatement.exit_at === "tick") &&
+          parsedStatement.execution_timeframe
+          ? { execution_timeframe: parsedStatement.execution_timeframe }
           : {}),
       }
 
@@ -2301,19 +2252,17 @@ export default function StrategyTestingPage() {
 
       // Update the local strategy object with the response from the API
       if (result) {
-        // Preserve fields the API doesn't round-trip (TradingSession, trade_at, exit_timeframe)
+        // Preserve fields the API doesn't round-trip (TradingSession + execution-timing fields)
         const finalResult: any = {
           ...result,
           TradingSession: updatedStrategyData.TradingSession,
         }
-        if (updatedStrategyData.trade_at) {
-          finalResult.trade_at = updatedStrategyData.trade_at
-        }
-        if (
-          updatedStrategyData.trade_at === "tick" &&
-          (updatedStrategyData as any).exit_timeframe
-        ) {
-          finalResult.exit_timeframe = (updatedStrategyData as any).exit_timeframe
+        if (updatedStrategyData.entry_at) finalResult.entry_at = updatedStrategyData.entry_at
+        if (updatedStrategyData.exit_at) finalResult.exit_at = updatedStrategyData.exit_at
+        const usesTick =
+          updatedStrategyData.entry_at === "tick" || updatedStrategyData.exit_at === "tick"
+        if (usesTick && (updatedStrategyData as any).execution_timeframe) {
+          finalResult.execution_timeframe = (updatedStrategyData as any).execution_timeframe
         }
 
         setParsedStatement(finalResult)
@@ -2322,23 +2271,18 @@ export default function StrategyTestingPage() {
         // Persist the per-strategy fallback so reload paths can rehydrate even if backend strips it
         try {
           const sid = result.id ? String(result.id) : String(strategy_id)
-          if (sid) {
-            if (finalResult.trade_at === "tick") {
-              localStorage.setItem(
-                `trade_timing_${sid}`,
-                JSON.stringify({
-                  trade_at: "tick",
-                  ...(finalResult.exit_timeframe
-                    ? { exit_timeframe: finalResult.exit_timeframe }
-                    : {}),
-                })
-              )
-            } else if (finalResult.trade_at === "bar close") {
-              localStorage.setItem(
-                `trade_timing_${sid}`,
-                JSON.stringify({ trade_at: "bar close" })
-              )
+          if (sid && finalResult.entry_at && finalResult.exit_at) {
+            const fallback: any = {
+              entry_at: finalResult.entry_at,
+              exit_at: finalResult.exit_at,
             }
+            if (
+              (finalResult.entry_at === "tick" || finalResult.exit_at === "tick") &&
+              finalResult.execution_timeframe
+            ) {
+              fallback.execution_timeframe = finalResult.execution_timeframe
+            }
+            localStorage.setItem(`trade_timing_${sid}`, JSON.stringify(fallback))
           }
         } catch { }
 
@@ -3084,9 +3028,121 @@ export default function StrategyTestingPage() {
     }
   }
 
+  // Optimisation preview rows (lifted so the same table can render under both
+  // the Optimisation and Backtest "Results" tabs).
+  const previewRows: any[] = (() => {
+    if (!optimisationResult) return []
+    return (
+      optimisationResult.optimisation_preview ||
+      optimisationResult.full_optimization_results ||
+      optimisationResult.table ||
+      optimisationResult.results ||
+      optimisationResult.data ||
+      optimisationResult.result?.table ||
+      optimisationResult.result?.results ||
+      optimisationResult.result?.optimisation_preview ||
+      []
+    )
+  })()
+
+  const renderResultsTable = (rows: any[]) => {
+    if (!rows || rows.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[300px] py-10">
+          <div className="text-gray-600 text-[10px] font-black uppercase tracking-[0.5em]">No optimisation results</div>
+          <div className="text-gray-800 text-[8px] font-bold mt-4 uppercase tracking-[0.3em]">Run an optimisation to populate this table</div>
+        </div>
+      )
+    }
+    const fmt = (v: any) => (v === undefined || v === null || v === '' ? '-' : v)
+    return (
+      <table className="min-w-full text-[10px] border-separate border-spacing-y-2">
+        <thead>
+          <tr className="bg-[#000] text-gray-500 font-black uppercase tracking-widest">
+            <th className="px-4 py-3 text-left">Pass</th>
+            <th className="px-4 py-3 text-left">Start</th>
+            <th className="px-4 py-3 text-left">End</th>
+            <th className="px-4 py-3 text-left">Duration</th>
+            <th className="px-4 py-3 text-left">Equity Final [$]</th>
+            <th className="px-4 py-3 text-left">Equity Peak [$]</th>
+            <th className="px-4 py-3 text-left">Return [%]</th>
+            <th className="px-4 py-3 text-left">Profit Factor</th>
+            <th className="px-4 py-3 text-left">Drawdown %</th>
+            <th className="px-4 py-3 text-left">Sharpe</th>
+            <th className="px-4 py-3 text-left">Sortino</th>
+            <th className="px-4 py-3 text-left">SQN</th>
+            <th className="px-4 py-3 text-left">Win Rate [%]</th>
+            <th className="px-4 py-3 text-left">Best Trade [%]</th>
+            <th className="px-4 py-3 text-left">Worst Trade [%]</th>
+            <th className="px-4 py-3 text-left">Avg. Trade [%]</th>
+            <th className="px-4 py-3 text-left">Expectancy [%]</th>
+            <th className="px-4 py-3 text-left"># Trades</th>
+            <th className="px-4 py-3 text-left">Exposure [%]</th>
+            <th className="px-4 py-3 text-left">Generation</th>
+            <th className="px-4 py-3 text-left">Inputs</th>
+            <th className="px-4 py-3 text-left"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row: any, idx: number) => (
+            <tr
+              key={idx}
+              className={`bg-[#080A10] text-[#85e1fe] cursor-pointer hover:bg-[#121420] border-l-2 ${selectedOptimisationRow === row ? 'border-[#85e1fe] bg-[#121420]' : 'border-transparent'}`}
+              onClick={() => { setSelectedOptimisationRow(row); setOptimisationTab('summary'); }}
+            >
+              <td className="px-4 py-3 font-black">{idx + 1}</td>
+              <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{fmt(row['Start'])}</td>
+              <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{fmt(row['End'])}</td>
+              <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{fmt(row['Duration'])}</td>
+              <td className="px-4 py-3 font-mono text-white">${fmt(row['Equity Final [$]'])}</td>
+              <td className="px-4 py-3 font-mono text-white">${fmt(row['Equity Peak [$]'])}</td>
+              <td className="px-4 py-3 font-mono">{fmt(row['Return [%]'])}%</td>
+              <td className="px-4 py-3 font-mono">{fmt(row['Profit Factor'])}</td>
+              <td className="px-4 py-3 font-mono text-red-500">{fmt(row['Max. Drawdown [%]'])}%</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Sharpe Ratio'])}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Sortino Ratio'])}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['SQN'])}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Win Rate [%]'])}%</td>
+              <td className="px-4 py-3 font-mono text-green-400">{fmt(row['Best Trade [%]'])}%</td>
+              <td className="px-4 py-3 font-mono text-red-400">{fmt(row['Worst Trade [%]'])}%</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Avg. Trade [%]'])}%</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Expectancy [%]'])}%</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['# Trades'])}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Exposure Time [%]'])}%</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['generation'])}</td>
+              <td className="px-4 py-3 max-w-[250px] truncate text-gray-400" title={JSON.stringify(row)}>
+                {Object.entries(row)
+                  .filter(([k]) => k.startsWith('param_'))
+                  .map(([k, v]) => `${k}: ${v}`)
+                  .join(', ') || Object.keys(row)
+                    .filter(key => !['Return [%]', 'Equity Final [$]', '# Trades', 'Win Rate [%]', 'Profit Factor', 'Max. Drawdown [%]', 'Sharpe Ratio', 'Sortino Ratio', 'Calmar Ratio', 'Return (Ann.) [%]', 'Volatility (Ann.) [%]', 'Start', 'End', 'Duration', 'SQN', 'Exposure Time [%]', 'Equity Peak [$]', 'Avg. Trade [%]', 'Best Trade [%]', 'Worst Trade [%]', 'Avg. Drawdown [%]', 'Avg. Drawdown Duration', 'Max. Drawdown Duration', 'Avg. Trade Duration', 'Max. Trade Duration', 'Buy & Hold Return [%]', 'Expectancy [%]', 'Unnamed: 0', 'generation'].includes(key))
+                    .map(key => `${key}=${row[key]}`)
+                    .join(', ')}
+              </td>
+              <td className="px-4 py-3 text-right">
+                <button className="text-gray-500 hover:text-white transition-colors">
+                  <Maximize2 className="w-3 h-3" />
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )
+  }
+
 
   return (
     <AuthGuard>
+      {/* Transparent overlay during pane resize — keeps mousemove/mouseup
+          from being captured by the chart iframe so dragging stays smooth
+          and releases reliably. */}
+      {isResizingPane && (
+        <div
+          className="fixed inset-0 z-[9999]"
+          style={{ cursor: "row-resize" }}
+        />
+      )}
       <div className="flex min-h-screen bg-[#121420] text-white">
         <div className="hidden md:block">
           <Sidebar currentPage="home" />
@@ -3104,27 +3160,30 @@ export default function StrategyTestingPage() {
             />
           ) : (
             <>
-              {/* Top Result Tabs - Professional Workstation Design */}
+              {/* Top Result Tabs - Static layout, same six tabs regardless of lower mode */}
               <div className="flex bg-[#0a0b12] border-b border-gray-800/50 sticky top-0 z-30 w-full overflow-hidden">
-                <div className={`grid ${activeTab === 'optimisation' ? 'grid-cols-4' : 'grid-cols-6'} w-full`}>
-                  {(activeTab === 'optimisation' ? ['results', 'graph', 'report', 'trades'] : ['graph', 'chart_data', 'summary', 'trades', 'results', 'report']).map(tab => (
-                    <button
-                      key={tab}
-                      className={`py-4 text-center text-[9px] font-black uppercase tracking-[0.2em] transition-all border-b-2 ${(activeTab === 'optimisation' ? optimisationTab === tab : backtestResultTab === tab)
-                        ? 'text-[#85e1fe] bg-[#121420] border-[#85e1fe]'
-                        : 'text-gray-500 hover:text-white hover:bg-[#121420] border-transparent'
-                        }`}
-                      onClick={() => {
-                        if (activeTab === 'optimisation') {
-                          setOptimisationTab(tab as any);
-                        } else {
-                          setBacktestResultTab(tab as any);
-                        }
-                      }}
-                    >
-                      {tab === 'chart_data' ? 'Chart Data' : tab}
-                    </button>
-                  ))}
+                <div className="grid grid-cols-6 w-full">
+                  {(['chart', 'chart_data', 'trades', 'summary', 'results', 'graph'] as const).map(tab => {
+                    const active = activeTab === 'optimisation' ? optimisationTab === tab : backtestResultTab === tab
+                    return (
+                      <button
+                        key={tab}
+                        className={`py-4 text-center text-[9px] font-black uppercase tracking-[0.2em] transition-all border-b-2 ${active
+                          ? 'text-[#85e1fe] bg-[#121420] border-[#85e1fe]'
+                          : 'text-gray-500 hover:text-white hover:bg-[#121420] border-transparent'
+                          }`}
+                        onClick={() => {
+                          if (activeTab === 'optimisation') {
+                            setOptimisationTab(tab);
+                          } else {
+                            setBacktestResultTab(tab);
+                          }
+                        }}
+                      >
+                        {tab === 'chart_data' ? 'Data' : tab}
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
               {/* Result Content Area - Resizable via drag handle below */}
@@ -3135,22 +3194,6 @@ export default function StrategyTestingPage() {
                 {activeTab === 'optimisation' ? (
                   <div className="w-full min-h-full flex flex-col">
                     {(() => {
-                      // 1. Data extraction and normalization
-                      const previewRows = (() => {
-                        if (!optimisationResult) return [];
-                        return (
-                          optimisationResult.optimisation_preview ||
-                          optimisationResult.full_optimization_results ||
-                          optimisationResult.table ||
-                          optimisationResult.results ||
-                          optimisationResult.data ||
-                          optimisationResult.result?.table ||
-                          optimisationResult.result?.results ||
-                          optimisationResult.result?.optimisation_preview ||
-                          []
-                        );
-                      })();
-
                       if (!optimisationResult) {
                         return (
                           <div className="flex-1 bg-[#0a0b12] flex flex-col items-center justify-center min-h-[400px]">
@@ -3199,54 +3242,7 @@ export default function StrategyTestingPage() {
                           {optimisationTab === 'results' && (
                             <div className="space-y-8">
                               <div className="overflow-x-auto">
-                                <table className="min-w-full text-[10px] border-separate border-spacing-y-2">
-                                  <thead>
-                                    <tr className="bg-[#000] text-gray-500 font-black uppercase tracking-widest">
-                                      <th className="px-4 py-3 text-left">Pass</th>
-                                      <th className="px-4 py-3 text-left">Equity Final [$]</th>
-                                      <th className="px-4 py-3 text-left">Return [%]</th>
-                                      <th className="px-4 py-3 text-left">Profit Factor</th>
-                                      <th className="px-4 py-3 text-left">Drawdown %</th>
-                                      <th className="px-4 py-3 text-left">Win Rate [%]</th>
-                                      <th className="px-4 py-3 text-left"># Trades</th>
-                                      <th className="px-4 py-3 text-left">Generation</th>
-                                      <th className="px-4 py-3 text-left">Inputs</th>
-                                      <th className="px-4 py-3 text-left"></th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {previewRows.map((row: any, idx: number) => (
-                                      <tr
-                                        key={idx}
-                                        className={`bg-[#080A10] text-[#85e1fe] cursor-pointer hover:bg-[#121420] border-l-2 ${selectedOptimisationRow === row ? 'border-[#85e1fe] bg-[#121420]' : 'border-transparent'}`}
-                                        onClick={() => { setSelectedOptimisationRow(row); setOptimisationTab('report'); }}
-                                      >
-                                        <td className="px-4 py-3 font-black">{idx + 1}</td>
-                                        <td className="px-4 py-3 font-mono text-white">${row['Equity Final [$]'] ?? '-'}</td>
-                                        <td className="px-4 py-3 font-mono">{row['Return [%]'] ?? '-'}%</td>
-                                        <td className="px-4 py-3 font-mono">{row['Profit Factor'] ?? '-'}</td>
-                                        <td className="px-4 py-3 font-mono text-red-500">{row['Max. Drawdown [%]'] ?? '-'}%</td>
-                                        <td className="px-4 py-3 font-mono text-white">{row['Win Rate [%]'] ?? '-'}%</td>
-                                        <td className="px-4 py-3 font-mono text-white">{row['# Trades'] ?? '-'}</td>
-                                        <td className="px-4 py-3 font-mono text-white">{row['generation'] ?? '-'}</td>
-                                        <td className="px-4 py-3 max-w-[250px] truncate text-gray-400" title={JSON.stringify(row)}>
-                                          {Object.entries(row)
-                                            .filter(([k]) => k.startsWith('param_'))
-                                            .map(([k, v]) => `${k}: ${v}`)
-                                            .join(', ') || Object.keys(row)
-                                              .filter(key => !['Return [%]', 'Equity Final [$]', '# Trades', 'Win Rate [%]', 'Profit Factor', 'Max. Drawdown [%]', 'Sharpe Ratio', 'Sortino Ratio', 'Calmar Ratio', 'Return (Ann.) [%]', 'Volatility (Ann.) [%]', 'Start', 'End', 'Duration', 'SQN', 'Exposure Time [%]', 'Equity Peak [$]', 'Avg. Trade [%]', 'Best Trade [%]', 'Worst Trade [%]', 'Avg. Drawdown [%]', 'Avg. Drawdown Duration', 'Max. Drawdown Duration', 'Avg. Trade Duration', 'Max. Trade Duration', 'Buy & Hold Return [%]', 'Expectancy [%]', 'Unnamed: 0', 'generation'].includes(key))
-                                              .map(key => `${key}=${row[key]}`)
-                                              .join(', ')}
-                                        </td>
-                                        <td className="px-4 py-3 text-right">
-                                          <button className="text-gray-500 hover:text-white transition-colors">
-                                            <Maximize2 className="w-3 h-3" />
-                                          </button>
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
+                                {renderResultsTable(previewRows)}
                               </div>
                               {/* Scatter Plot Inline */}
                               {(optimisationResult?.heatmap_plot_html || optimisationResult?.plots_html?.['optimise_plot.html']) && (
@@ -3265,30 +3261,14 @@ export default function StrategyTestingPage() {
                             </div>
                           )}
 
-                          {optimisationTab === 'graph' && (
-                            <div className="space-y-12 pb-10">
-                              {[
-                                { title: 'Scatter Plot', html: optimisationResult?.heatmap_plot_html || optimisationResult?.plots_html?.['optimise_plot.html'] },
-                                { title: 'Trades Plot', html: optimisationResult?.trades_plot_html || optimisationResult?.plots_html?.['Plotly.html'] },
-                                { title: 'Convergence Plot', html: optimisationResult?.convergence_data?.length > 0 ? generateConvergencePlotHTML(optimisationResult.convergence_data) : null },
-                                { title: 'Optimization Heatmap', html: optimisationResult?.optimization_heatmap_data?.length > 0 ? generateHeatmapPlotHTML(optimisationResult.optimization_heatmap_data) : null }
-                              ].map((g, idx) => g.html ? (
-                                <div key={idx} className="space-y-4">
-                                  <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.4em]">{g.title}</h3>
-                                  <div className="w-full bg-[#000] border border-gray-900 rounded-lg overflow-hidden">
-                                    <iframe
-                                      title={g.title}
-                                      className="w-full h-[500px]"
-                                      style={{ border: 'none' }}
-                                      srcDoc={g.html}
-                                    />
-                                  </div>
-                                </div>
-                              ) : null)}
-                            </div>
+                          {(optimisationTab === 'chart' || optimisationTab === 'chart_data' || optimisationTab === 'graph') && (
+                            <ComingSoonPanel
+                              title={optimisationTab === 'graph' ? 'Optimisation Visuals' : optimisationTab === 'chart' ? 'Chart' : 'Data'}
+                              subtitle={optimisationTab === 'graph' ? 'Convergence, scatter, and heatmap visuals will live here' : undefined}
+                            />
                           )}
 
-                          {optimisationTab === 'report' && (() => {
+                          {optimisationTab === 'summary' && (() => {
                             const preview = selectedOptimisationRow || previewRows[0] || null;
                             if (preview) {
                               return (
@@ -3373,8 +3353,8 @@ export default function StrategyTestingPage() {
                   </div>
                 ) : backtestDetail ? (
                   <div className="w-full">
-                    {/* Graph Tab */}
-                    {backtestResultTab === 'graph' && (
+                    {/* Chart Tab — candle chart from backend (previously labeled "Graph") */}
+                    {backtestResultTab === 'chart' && (
                       <div className={`w-full relative group transition-all duration-500 ${isChartExpanded ? 'fixed inset-0 z-[200] bg-black p-10 overflow-auto' : ''}`}>
                         <div className={`bg-[#000000] ${isChartExpanded ? '' : 'p-6'}`}>
                           {plotHtml ? (
@@ -3582,8 +3562,8 @@ export default function StrategyTestingPage() {
                       </div>
                     )}
 
-                    {/* Summary / Report Tab */}
-                    {(backtestResultTab === 'summary' || backtestResultTab === 'report') && (
+                    {/* Summary Tab */}
+                    {backtestResultTab === 'summary' && (
                       <div className="p-6">
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                           {/* Column 1 */}
@@ -3641,10 +3621,27 @@ export default function StrategyTestingPage() {
                         </div>
                       </div>
                     )}
+
+                    {/* Results Tab — same optimisation results table as in optimisation mode */}
+                    {backtestResultTab === 'results' && (
+                      <div className="p-6 bg-[#000] text-white">
+                        <div className="overflow-x-auto">
+                          {renderResultsTable(previewRows)}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Graph Tab — optimisation visuals and other unique feedback land here */}
+                    {backtestResultTab === 'graph' && (
+                      <ComingSoonPanel
+                        title="Graph"
+                        subtitle="Optimisation visuals and other AnyQuant-only insights are on the way"
+                      />
+                    )}
                   </div>
                 ) : (
                   <div className="w-full h-[400px] bg-[#000000] flex items-center justify-center">
-                    <p className="text-gray-800 font-black uppercase tracking-[0.5em] text-[10px]">Run backtest to view results</p>
+                    <p className="text-gray-400 font-black uppercase tracking-[0.3em] text-[15px]">Run backtest from bottom panel to view results</p>
                   </div>
                 )}
               </div>
@@ -3832,25 +3829,39 @@ export default function StrategyTestingPage() {
                     onShowTradesSummary={() => setShowTradesSummary(true)}
                     initialTradingSession={parsedStatement?.TradingSession}
                     timezone={timezone}
-                    tradeTiming={
-                      parsedStatement?.trade_at === "tick"
-                        ? { trade_at: "tick", exit_timeframe: parsedStatement?.exit_timeframe || "" }
-                        : { trade_at: "bar close" }
-                    }
+                    tradeTiming={(() => {
+                      const e = parsedStatement?.entry_at
+                      const x = parsedStatement?.exit_at
+                      const valid = (v: any) => v === "bar close" || v === "tick"
+                      if (!valid(e) || !valid(x)) return { entry_at: "bar close", exit_at: "bar close" }
+                      const out: any = { entry_at: e, exit_at: x }
+                      if ((e === "tick" || x === "tick") && parsedStatement?.execution_timeframe) {
+                        out.execution_timeframe = parsedStatement.execution_timeframe
+                      }
+                      return out
+                    })()}
                     onTradeTimingSave={(settings) => {
                       try {
-                        const next: any = { ...(parsedStatement || {}), trade_at: settings.trade_at }
-                        if (settings.trade_at === "tick" && settings.exit_timeframe) {
-                          next.exit_timeframe = settings.exit_timeframe
+                        const usesTick = settings.entry_at === "tick" || settings.exit_at === "tick"
+                        const next: any = {
+                          ...(parsedStatement || {}),
+                          entry_at: settings.entry_at,
+                          exit_at: settings.exit_at,
+                        }
+                        if (usesTick && settings.execution_timeframe) {
+                          next.execution_timeframe = settings.execution_timeframe
                         } else {
-                          delete next.exit_timeframe
+                          delete next.execution_timeframe
                         }
                         setParsedStatement(next)
                         localStorage.setItem("savedStrategy", JSON.stringify(next))
                         if (strategy_id) {
-                          const fallback: any = { trade_at: settings.trade_at }
-                          if (settings.trade_at === "tick" && settings.exit_timeframe) {
-                            fallback.exit_timeframe = settings.exit_timeframe
+                          const fallback: any = {
+                            entry_at: settings.entry_at,
+                            exit_at: settings.exit_at,
+                          }
+                          if (usesTick && settings.execution_timeframe) {
+                            fallback.execution_timeframe = settings.execution_timeframe
                           }
                           localStorage.setItem(
                             `trade_timing_${strategy_id}`,
@@ -3863,7 +3874,7 @@ export default function StrategyTestingPage() {
                         document.body.appendChild(toast)
                         setTimeout(() => document.body.removeChild(toast), 2000)
                       } catch (e) {
-                        console.error('Failed to save trade_at:', e)
+                        console.error('Failed to save trade execution timing:', e)
                       }
                     }}
                     onTradingSessionSave={(session) => {

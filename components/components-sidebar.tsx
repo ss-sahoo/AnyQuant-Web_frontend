@@ -221,7 +221,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent, wi
     "TP",
     "Partial TP",
     "Manage Exit",
-    "Trade Execution Timing",
+    "Max Trade Duration",
     "Buy",
     "Sell",
     // "Hold",

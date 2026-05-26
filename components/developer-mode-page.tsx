@@ -1360,29 +1360,26 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
                           </select>
                         </div>
 
-                        <input
-                          type="text"
-                          value={param.display_name ?? ""}
-                          onChange={(e) => updateParameter(index, { display_name: e.target.value || undefined })}
-                          placeholder="Display name (optional)"
-                          className="w-full px-3 py-2 mb-2 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
-                        />
-
-                        {/* Default value */}
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="text-xs text-gray-500 w-16">Default</span>
+                        {/* Default value — stacked layout so number inputs can't
+                            overflow the narrow sidebar regardless of browser
+                            min-width quirks. */}
+                        <div className="mb-2">
+                          <span className="block text-xs text-gray-500 mb-1">Default</span>
                           {param.type === "bool" ? (
-                            <input
-                              type="checkbox"
-                              checked={!!param.default}
-                              onChange={(e) => updateParameter(index, { default: e.target.checked })}
-                              className="w-4 h-4 accent-[#85e1fe]"
-                            />
+                            <label className="inline-flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={!!param.default}
+                                onChange={(e) => updateParameter(index, { default: e.target.checked })}
+                                className="w-4 h-4 accent-[#85e1fe]"
+                              />
+                              <span className="text-xs text-gray-400">{param.default ? "true" : "false"}</span>
+                            </label>
                           ) : param.type === "select" ? (
                             <select
                               value={String(param.default ?? "")}
                               onChange={(e) => updateParameter(index, { default: e.target.value })}
-                              className="flex-1 px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-sm focus:outline-none focus:border-[#85e1fe]"
+                              className="w-full min-w-0 px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-sm focus:outline-none focus:border-[#85e1fe]"
                             >
                               {(param.options ?? []).map((opt, i) => (
                                 <option key={`${opt}-${i}`} value={opt}>{opt || "(empty)"}</option>
@@ -1392,7 +1389,7 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
                             <select
                               value={String(param.default ?? "Close")}
                               onChange={(e) => updateParameter(index, { default: e.target.value })}
-                              className="flex-1 px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-sm focus:outline-none focus:border-[#85e1fe]"
+                              className="w-full min-w-0 px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-sm focus:outline-none focus:border-[#85e1fe]"
                             >
                               {OHLCV_SOURCES.map((s) => (
                                 <option key={s} value={s}>{s}</option>
@@ -1406,12 +1403,12 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
                                 updateParameter(index, { default: coerceDefault(param.type, e.target.value) })
                               }
                               placeholder={param.type === "int" ? "14" : param.type === "float" ? "1.5" : "text"}
-                              className="flex-1 px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
+                              className="w-full min-w-0 px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
                             />
                           )}
                         </div>
 
-                        {/* Numeric bounds */}
+                        {/* Numeric bounds — all optional */}
                         {isNumeric && (
                           <div className="grid grid-cols-3 gap-2 mb-2">
                             <input
@@ -1421,8 +1418,8 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
                                 const v = e.target.value
                                 updateParameter(index, { min: v === "" ? undefined : Number(v) })
                               }}
-                              placeholder="min"
-                              className="px-2 py-1.5 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-xs placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
+                              placeholder="min (optional)"
+                              className="min-w-0 px-2 py-1.5 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-[10px] placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
                             />
                             <input
                               type="number"
@@ -1431,8 +1428,8 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
                                 const v = e.target.value
                                 updateParameter(index, { max: v === "" ? undefined : Number(v) })
                               }}
-                              placeholder="max"
-                              className="px-2 py-1.5 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-xs placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
+                              placeholder="max (optional)"
+                              className="min-w-0 px-2 py-1.5 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-[10px] placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
                             />
                             <input
                               type="number"
@@ -1441,8 +1438,8 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
                                 const v = e.target.value
                                 updateParameter(index, { step: v === "" ? undefined : Number(v) })
                               }}
-                              placeholder="step"
-                              className="px-2 py-1.5 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-xs placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
+                              placeholder="step (optional)"
+                              className="min-w-0 px-2 py-1.5 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-[10px] placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
                             />
                           </div>
                         )}

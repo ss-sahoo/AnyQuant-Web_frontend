@@ -4,6 +4,7 @@ import type React from "react"
 
 import { useState, useEffect, useRef } from "react"
 import { X, Upload, Check, AlertTriangle, Clock } from "lucide-react"
+import { matchesTimeframe as matchesTimeframeShared } from "@/lib/timeframe-match"
 
 interface TimeframeFile {
   timeframe: string
@@ -60,62 +61,8 @@ export function TimeframeUploadSection({
     }
   }, [])
 
-  // Helper function to match timeframes with filenames (same logic as main app)
-  const matchesTimeframe = (filename: string, timeframe: string) => {
-    const lowerFilename = filename.toLowerCase()
-    const lowerTimeframe = timeframe.toLowerCase()
-
-    // Direct matching (e.g., "3h" in filename)
-    if (lowerFilename.includes(lowerTimeframe)) {
-      return true
-    }
-
-    // Handle numeric equivalents
-    const timeframeToMinutes: { [key: string]: number } = {
-      "1min": 1,
-      "5min": 5,
-      "15min": 15,
-      "20min": 20,
-      "30min": 30,
-      "36min": 36,
-      "1h": 60,
-      "2h": 120,
-      "3h": 180,
-      "4h": 240,
-      "6h": 360,
-      "8h": 480,
-      "12h": 720,
-      "1d": 1440,
-      "1 day": 1440,
-      "1w": 10080,
-      "1 week": 10080,
-    }
-
-    const minutes = timeframeToMinutes[lowerTimeframe]
-    if (minutes) {
-      const minutesStr = minutes.toString()
-      const regex = new RegExp(`\\b${minutesStr}\\b`)
-      return regex.test(lowerFilename)
-    }
-
-    // Additional pattern matching
-    const timeframePatterns = {
-      "3h": ["3h", "180", "3 hour", "three hour"],
-      "1h": ["1h", "60", "1 hour", "one hour"],
-      "36min": ["36min", "36", "36 minute", "thirty six"],
-      "30min": ["30min", "30", "30 minute", "thirty"],
-      "15min": ["15min", "15", "15 minute", "fifteen"],
-      "5min": ["5min", "5", "5 minute", "five"],
-      "1min": ["1min", "1", "1 minute", "one minute"]
-    }
-
-    const patterns = timeframePatterns[lowerTimeframe as keyof typeof timeframePatterns]
-    if (patterns) {
-      return patterns.some(pattern => lowerFilename.includes(pattern.toLowerCase()))
-    }
-
-    return false
-  }
+  // Delegate to shared matcher (handles "6min" → "EURUSD_M6.csv" and similar).
+  const matchesTimeframe = matchesTimeframeShared
 
   // Update status when files are uploaded or deleted
   useEffect(() => {

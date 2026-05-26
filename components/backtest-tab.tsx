@@ -87,11 +87,14 @@ export function BacktestTab({
   const [showDateRangeModal, setShowDateRangeModal] = useState(false)
   const [showTradeTimingModal, setShowTradeTimingModal] = useState(false)
   const [tradingSessionSummary, setTradingSessionSummary] = useState<string>("")
-  const currentTiming: TradeTimingSettings = tradeTiming ?? { trade_at: "bar close" }
-  const tradeTimingSummary =
-    currentTiming.trade_at === "tick"
-      ? `Tick level (exit timeframe: ${currentTiming.exit_timeframe || "—"})`
-      : "Bar close"
+  const currentTiming: TradeTimingSettings =
+    tradeTiming ?? { entry_at: "bar close", exit_at: "bar close" }
+  const tradeTimingSummary = (() => {
+    const { entry_at, exit_at, execution_timeframe } = currentTiming
+    const label = `Entry: ${entry_at} | Exit: ${exit_at}`
+    const usesTick = entry_at === "tick" || exit_at === "tick"
+    return usesTick ? `${label} (execution timeframe: ${execution_timeframe || "—"})` : label
+  })()
 
   // Keep a small formatter for summary display
   const summarize = (session: any) => {

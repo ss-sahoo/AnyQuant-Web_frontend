@@ -34,7 +34,8 @@ import { AboveSettingsModal } from "./modals/above-settings-modal"
 import { MovingOperatorSettingsModal } from "@/components/modals/moving-operator-settings-modal"
 import { PartialTPSettingsModal, type PartialTPSettings } from "@/components/modals/partial-tp-settings-modal"
 import { ManageExitSettingsModal, type ManageExitSettings } from "@/components/modals/manage-exit-settings-modal"
-import { TradeTimingModal, type TradeTimingSettings } from "@/components/modals/trade-timing-modal"
+import type { TradeTimingSettings } from "@/components/modals/trade-timing-modal"
+import { MaxTradeDurationModal } from "@/components/modals/max-trade-duration-modal"
 import { VolumeDeltaSettingsModal } from "@/components/modals/volume-delta-settings-modal"
 import { HistoricalPriceLevelSettingsModal } from "@/components/modals/historical-price-level-settings-modal"
 import { CandleSizeSettingsModal } from "@/components/modals/candle-size-settings-modal"
@@ -226,8 +227,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   })
   const [showPartialTPModal, setShowPartialTPModal] = useState(false)
   const [showManageExitModal, setShowManageExitModal] = useState(false)
-  const [showTradeTimingModal, setShowTradeTimingModal] = useState(false)
-  const [tradeTiming, setTradeTiming] = useState<TradeTimingSettings>({ trade_at: "bar close" })
+  const [showMaxDurationModal, setShowMaxDurationModal] = useState(false)
+  // tradeTiming is no longer editable from the strategy-builder UI (only the
+  // strategy-testing page edits it). We still hold it so it round-trips through
+  // the JSON payload when a strategy is loaded then re-saved.
+  const [tradeTiming, setTradeTiming] = useState<TradeTimingSettings>({ entry_at: "bar close", exit_at: "bar close" })
   const [showVolumeDeltaModal, setShowVolumeDeltaModal] = useState(false)
   const [showHistoricalPriceLevelModal, setShowHistoricalPriceLevelModal] = useState(false)
   const [showCandleSizeModal, setShowCandleSizeModal] = useState(false)
@@ -527,6 +531,22 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     rawComponentData: any
   } | null>(null)
 
+  // Opened when the user clicks an existing CUSTOM_I / CUSTOM_B / CUSTOM_TM
+  // block to re-edit its parameters. Carries the exact coordinates of the
+  // block so the save handler can write back in place instead of inserting.
+  const [editingCustomBlock, setEditingCustomBlock] = useState<{
+    kind: CustomComponentKind
+    statementIndex: number
+    conditionIndex: number
+    slot: "inp1" | "inp2" | "operator" | "trade_management"
+    equityIndex?: number
+    componentName: string
+    componentId?: number
+    initialValues: Record<string, ParamRuntimeValue>
+    initialTimeframe?: string
+    initialInput?: string
+  } | null>(null)
+
   // Commit a pending custom-component insertion with the values the user
   // picked in the properties dialog. Builds the correct runtime shape for
   // indicators (CUSTOM_I + input_params inside inp1/inp2), behaviors
@@ -626,6 +646,83 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     setTimeout(() => {
       searchInputRefs.current[statementIndex]?.focus()
     }, 100)
+  }
+
+  // Write the dialog's edited values back into the existing CUSTOM_* block at
+  // the recorded coordinates. Preserves `custom_component_id`, type tag, and
+  // any other fields the original block carried.
+  const applyCustomBlockEdit = (
+    edit: NonNullable<typeof editingCustomBlock>,
+    result: { values: Record<string, ParamRuntimeValue>; timeframe?: string; input?: string }
+  ) => {
+    setStatements(prev => {
+      const next = [...prev]
+      const stmt = next[edit.statementIndex]
+      if (!stmt) return prev
+
+      if (edit.slot === "inp1" || edit.slot === "inp2") {
+        const strategy = [...stmt.strategy]
+        const cond = { ...strategy[edit.conditionIndex] }
+        const existing = (cond as any)[edit.slot]
+        if (!existing) return prev
+        const updated: any = {
+          ...existing,
+          input_params: result.values,
+          ...(result.timeframe ? { timeframe: result.timeframe } : {}),
+          ...(result.input !== undefined ? { input: result.input } : {}),
+        }
+        ;(cond as any)[edit.slot] = updated
+        strategy[edit.conditionIndex] = cond
+        next[edit.statementIndex] = { ...stmt, strategy }
+      } else if (edit.slot === "operator") {
+        const strategy = [...stmt.strategy]
+        const cond: any = { ...strategy[edit.conditionIndex] }
+        if (!cond.Operator) return prev
+        cond.Operator = { ...cond.Operator, params: result.values }
+        strategy[edit.conditionIndex] = cond
+        next[edit.statementIndex] = { ...stmt, strategy }
+      } else if (edit.slot === "trade_management" && edit.equityIndex !== undefined) {
+        const equity = [...(stmt.Equity || [])]
+        const rule: any = { ...equity[edit.equityIndex] }
+        if (!rule.trade_management) return prev
+        rule.trade_management = { ...rule.trade_management, params: result.values }
+        equity[edit.equityIndex] = rule
+        next[edit.statementIndex] = { ...stmt, Equity: equity }
+      }
+      return next
+    })
+  }
+
+  // Open the properties dialog in "edit existing block" mode. The dialog
+  // fetches the schema by componentId so we don't need to pre-load it.
+  const openCustomBlockEditor = (
+    statementIndex: number,
+    conditionIndex: number,
+    slot: "inp1" | "inp2" | "operator" | "trade_management",
+    block: any,
+    equityIndex?: number,
+  ) => {
+    if (!block) return
+    const kind: CustomComponentKind =
+      slot === "operator" ? "behavior"
+      : slot === "trade_management" ? "trade_management"
+      : "indicator"
+    const initialValues =
+      slot === "inp1" || slot === "inp2"
+        ? (block.input_params || {})
+        : (block.params || {})
+    setEditingCustomBlock({
+      kind,
+      statementIndex,
+      conditionIndex,
+      slot,
+      equityIndex,
+      componentName: block.name,
+      componentId: block.custom_component_id,
+      initialValues,
+      initialTimeframe: block.timeframe,
+      initialInput: block.input,
+    })
   }
 
   // Listen for component selection events from the sidebar
@@ -1242,6 +1339,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
     switch (componentType) {
       case "inp1":
+        if (condition.inp1 && (condition.inp1 as any).type === "CUSTOM_I") {
+          openCustomBlockEditor(statementIndex, conditionIndex, "inp1", condition.inp1)
+          break
+        }
         if (condition.inp1 && "name" in condition.inp1) {
           if (condition.inp1.name === "RSI" || condition.inp1.name === "RSI_MA") {
             setShowRsiModal(true)
@@ -1276,6 +1377,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         break
 
       case "inp2":
+        if (condition.inp2 && (condition.inp2 as any).type === "CUSTOM_I") {
+          openCustomBlockEditor(statementIndex, conditionIndex, "inp2", condition.inp2)
+          break
+        }
         if (condition.inp2 && "name" in condition.inp2) {
           if (condition.inp2.name === "RSI" || condition.inp2.name === "RSI_MA") {
             setShowRsiModal(true)
@@ -1314,6 +1419,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         break
 
       case "operator":
+        if (
+          condition.operator_name?.startsWith("CUSTOM_B:") &&
+          (condition as any).Operator
+        ) {
+          openCustomBlockEditor(statementIndex, conditionIndex, "operator", (condition as any).Operator)
+          break
+        }
         if (condition.operator_name === "crossabove" || condition.operator_name === "crossbelow") {
           if (condition.operator_name === "crossabove") {
             const initialSettings = extractInp2Settings(condition.inp2, condition.inp1)
@@ -2690,11 +2802,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     } else if (component.toLowerCase() === "manage exit" || component.toLowerCase() === "manage-exit") {
       setShowManageExitModal(true)
     } else if (
-      component.toLowerCase() === "trade execution timing" ||
-      component.toLowerCase() === "trade-execution-timing" ||
-      component.toLowerCase() === "trade timing"
+      component.toLowerCase() === "max trade duration" ||
+      component.toLowerCase() === "max-trade-duration"
     ) {
-      setShowTradeTimingModal(true)
+      setShowMaxDurationModal(true)
     } else if (component.toLowerCase() === "trading session" || component.toLowerCase() === "trading-session") {
       // Open Trading Session modal
       setShowTradingSessionModal(true)
@@ -2905,6 +3016,14 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
             },
           }
+        } else if ((inp1 as any).type === "CUSTOM_I") {
+          return {
+            title: inp1.name,
+            details: {
+              ...((inp1 as any).input_params || {}),
+              ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
+            },
+          }
         }
       } else if ("input" in inp1 && inp1.Derivative) {
         if (["open", "close", "high", "low"].includes(inp1.input?.toLowerCase() || "")) {
@@ -3085,6 +3204,14 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               inp2.input_params?.dSmoothing ??
               3,
             output: outputValue === "slowk" ? "%K" : "%D",
+            ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
+          },
+        }
+      } else if ("type" in inp2 && (inp2 as any).type === "CUSTOM_I" && "name" in inp2) {
+        return {
+          title: inp2.name,
+          details: {
+            ...((inp2 as any).input_params || {}),
             ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
           },
         }
@@ -3277,12 +3404,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
   const handleSaveDraft = async (name: string) => {
     try {
-      if (tradeTiming.trade_at === "tick" && !tradeTiming.exit_timeframe?.trim()) {
+      const needsTf = tradeTiming.entry_at === "tick" || tradeTiming.exit_at === "tick"
+      if (needsTf && !tradeTiming.execution_timeframe?.trim()) {
         toast({
           variant: "destructive",
-          title: "Exit timeframe required",
+          title: "Execution timeframe required",
           description:
-            "Trade execution timing is set to Tick level — please configure the Exit timeframe before saving.",
+            "Trade execution timing uses tick-level — please set the execution timeframe in the Strategy Tester before saving.",
         })
         return
       }
@@ -3329,17 +3457,15 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
         // Persist trade-timing fallback keyed by this strategy id (backend may drop these fields)
         try {
-          if (tradeTiming.trade_at === "tick" && tradeTiming.exit_timeframe) {
-            localStorage.setItem(
-              `trade_timing_${firstStatementId}`,
-              JSON.stringify({ trade_at: "tick", exit_timeframe: tradeTiming.exit_timeframe })
-            )
-          } else {
-            localStorage.setItem(
-              `trade_timing_${firstStatementId}`,
-              JSON.stringify({ trade_at: "bar close" })
-            )
+          const fallback: any = {
+            entry_at: tradeTiming.entry_at,
+            exit_at: tradeTiming.exit_at,
           }
+          const needsTf = tradeTiming.entry_at === "tick" || tradeTiming.exit_at === "tick"
+          if (needsTf && tradeTiming.execution_timeframe) {
+            fallback.execution_timeframe = tradeTiming.execution_timeframe
+          }
+          localStorage.setItem(`trade_timing_${firstStatementId}`, JSON.stringify(fallback))
         } catch { }
 
         // Refresh strategy data to ensure UI is in sync
@@ -3816,12 +3942,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
   const handleProceedToTesting = async (name: string) => {
     try {
-      if (tradeTiming.trade_at === "tick" && !tradeTiming.exit_timeframe?.trim()) {
+      const needsTf = tradeTiming.entry_at === "tick" || tradeTiming.exit_at === "tick"
+      if (needsTf && !tradeTiming.execution_timeframe?.trim()) {
         toast({
           variant: "destructive",
-          title: "Exit timeframe required",
+          title: "Execution timeframe required",
           description:
-            "Trade execution timing is set to Tick level — please configure the Exit timeframe before proceeding.",
+            "Trade execution timing uses tick-level — please set the execution timeframe in the Strategy Tester before proceeding.",
         })
         return
       }
@@ -3866,17 +3993,15 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
         // Persist trade-timing fallback keyed by this strategy id
         try {
-          if (tradeTiming.trade_at === "tick" && tradeTiming.exit_timeframe) {
-            localStorage.setItem(
-              `trade_timing_${firstStatementId}`,
-              JSON.stringify({ trade_at: "tick", exit_timeframe: tradeTiming.exit_timeframe })
-            )
-          } else {
-            localStorage.setItem(
-              `trade_timing_${firstStatementId}`,
-              JSON.stringify({ trade_at: "bar close" })
-            )
+          const fallback: any = {
+            entry_at: tradeTiming.entry_at,
+            exit_at: tradeTiming.exit_at,
           }
+          const needsTf2 = tradeTiming.entry_at === "tick" || tradeTiming.exit_at === "tick"
+          if (needsTf2 && tradeTiming.execution_timeframe) {
+            fallback.execution_timeframe = tradeTiming.execution_timeframe
+          }
+          localStorage.setItem(`trade_timing_${firstStatementId}`, JSON.stringify(fallback))
         } catch { }
 
         // Refresh strategy data to ensure UI is in sync
@@ -5185,6 +5310,14 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
   // Function to handle equity rule click for editing
   const handleEquityRuleClick = (statementIndex: number, equityIndex: number, rule: EquityRule) => {
+    // Custom Trade-Management blocks reuse the properties dialog so the user
+    // can re-edit the params they originally set.
+    const tm = (rule as any).trade_management
+    if (tm && tm.type === "CUSTOM_TM") {
+      openCustomBlockEditor(statementIndex, equityIndex, "trade_management", tm, equityIndex)
+      return
+    }
+
     // Determine if this is SL or TP
     const operator = rule.operator || ""
     const isSL = operator.includes("SL") || (rule.inp1 && "name" in rule.inp1 && rule.inp1.name === "SL")
@@ -5423,9 +5556,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       side: signalStatements.length > 0 ? signalStatements[0].side : (allStatementsRaw[0]?.side || "B"),
       TradingType: globalTradingType,
       ...(strategyData?.df_pickle_path && { df_pickle_path: strategyData.df_pickle_path }),
-      trade_at: tradeTiming.trade_at,
-      ...(tradeTiming.trade_at === "tick" && tradeTiming.exit_timeframe
-        ? { exit_timeframe: tradeTiming.exit_timeframe }
+      entry_at: tradeTiming.entry_at,
+      exit_at: tradeTiming.exit_at,
+      ...((tradeTiming.entry_at === "tick" || tradeTiming.exit_at === "tick") && tradeTiming.execution_timeframe
+        ? { execution_timeframe: tradeTiming.execution_timeframe }
         : {}),
     }
 
@@ -5534,15 +5668,22 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
       // Rehydrate trade-execution-timing fields from saved strategy.
       // Backend may strip unknown fields, so fall back to a per-strategy localStorage entry.
-      let resolvedTiming: TradeTimingSettings | null = null
-      if (strategyData.trade_at === "tick") {
-        resolvedTiming = {
-          trade_at: "tick",
-          exit_timeframe: strategyData.exit_timeframe || "",
+      const readTiming = (src: any): TradeTimingSettings | null => {
+        if (!src || typeof src !== "object") return null
+        const e = src.entry_at
+        const x = src.exit_at
+        if ((e === "bar close" || e === "tick") && (x === "bar close" || x === "tick")) {
+          const out: TradeTimingSettings = { entry_at: e, exit_at: x }
+          if ((e === "tick" || x === "tick") && typeof src.execution_timeframe === "string") {
+            out.execution_timeframe = src.execution_timeframe
+          }
+          return out
         }
-      } else if (strategyData.trade_at === "bar close") {
-        resolvedTiming = { trade_at: "bar close" }
-      } else {
+        return null
+      }
+
+      let resolvedTiming: TradeTimingSettings | null = readTiming(strategyData)
+      if (!resolvedTiming) {
         try {
           const sid =
             (typeof strategyId === "string" && strategyId) ||
@@ -5550,17 +5691,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             ""
           if (sid && typeof window !== "undefined") {
             const raw = localStorage.getItem(`trade_timing_${sid}`)
-            if (raw) {
-              const parsed = JSON.parse(raw)
-              if (parsed?.trade_at === "tick") {
-                resolvedTiming = {
-                  trade_at: "tick",
-                  exit_timeframe: parsed.exit_timeframe || "",
-                }
-              } else if (parsed?.trade_at === "bar close") {
-                resolvedTiming = { trade_at: "bar close" }
-              }
-            }
+            if (raw) resolvedTiming = readTiming(JSON.parse(raw))
           }
         } catch { }
       }
@@ -5742,34 +5873,45 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             ))}
           </div>
 
-          {/* Global Trade Execution Timing chip */}
-          {tradeTiming.trade_at === "tick" && (
-            <div className="flex flex-wrap items-center gap-2 mt-4 px-1">
-              <div className="mr-2 mb-2 relative group">
-                <div className="text-xs text-gray-400 mb-1">Trade Execution Timing</div>
-                <div
-                  className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[180px] cursor-pointer transition-all duration-200 hover:bg-[#252728]"
-                  onClick={() => setShowTradeTimingModal(true)}
-                  title={`Tick-level exits using ${tradeTiming.exit_timeframe || "—"} finer timeframe`}
-                >
-                  <span className="text-gray-300">
-                    Tick ({tradeTiming.exit_timeframe || "—"})
-                  </span>
-                  <ChevronDown className="ml-2 w-4 h-4" />
+          {/* Global Max Trade Duration chip — only renders when a non-zero cap is set */}
+          {(() => {
+            const dur = (statements[0]?.TradingType as any)?.Max_Duration
+            if (typeof dur !== "string" || !dur || dur === "00:00:00") return null
+            return (
+              <div className="flex flex-wrap items-center gap-2 mt-4 px-1">
+                <div className="mr-2 mb-2 relative group">
+                  <div className="text-xs text-gray-400 mb-1">Max Trade Duration</div>
+                  <div
+                    className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[180px] cursor-pointer transition-all duration-200 hover:bg-[#252728]"
+                    onClick={() => setShowMaxDurationModal(true)}
+                    title="Auto-close trades after this duration (resolution: one check per bar)."
+                  >
+                    <span className="text-gray-300">{dur}</span>
+                    <ChevronDown className="ml-2 w-4 h-4" />
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setStatements((prev) => {
+                        if (prev.length === 0) return prev
+                        const next = [...prev]
+                        const first = { ...(next[0] as any) }
+                        const tt: any = { ...(first.TradingType || {}) }
+                        delete tt.Max_Duration
+                        first.TradingType = tt
+                        next[0] = first
+                        return next
+                      })
+                    }}
+                    className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                    title="Clear Max Trade Duration"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
                 </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setTradeTiming({ trade_at: "bar close" })
-                  }}
-                  className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                  title="Reset to Bar close"
-                >
-                  <X className="w-3 h-3" />
-                </button>
               </div>
-            </div>
-          )}
+            )
+          })()}
 
           {/* Add statement button */}
           <div className="flex justify-center mt-6">
@@ -8529,46 +8671,43 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             }}
           />
         )}
-        {/* Trade Execution Timing Modal */}
-        {showTradeTimingModal && (
-          <TradeTimingModal
-            onClose={() => setShowTradeTimingModal(false)}
-            initialSettings={tradeTiming}
-            onSave={(settings) => {
-              setTradeTiming(settings)
-              setShowTradeTimingModal(false)
-
-              // Reflect change in strategy JSON immediately (savedStrategy in localStorage)
+        {/* Max Trade Duration Modal — writes to statements[0].TradingType.Max_Duration */}
+        {showMaxDurationModal && (
+          <MaxTradeDurationModal
+            onClose={() => setShowMaxDurationModal(false)}
+            initialDuration={(statements[0]?.TradingType as any)?.Max_Duration}
+            onSave={(value) => {
+              setShowMaxDurationModal(false)
+              setStatements((prev) => {
+                if (prev.length === 0) return prev
+                const next = [...prev]
+                const first = { ...(next[0] as any) }
+                const tt: any = { ...(first.TradingType || {}) }
+                if (value && /^\d+:\d+:\d+$/.test(value) && value !== "00:00:00") {
+                  tt.Max_Duration = value
+                } else {
+                  delete tt.Max_Duration
+                }
+                first.TradingType = tt
+                next[0] = first
+                return next
+              })
+              // Reflect immediately in localStorage so other pages see the new cap.
               try {
                 const existingRaw = localStorage.getItem("savedStrategy")
-                const existing = existingRaw ? JSON.parse(existingRaw) : {}
-                const next: any = {
-                  ...existing,
-                  trade_at: settings.trade_at,
-                }
-                if (settings.trade_at === "tick" && settings.exit_timeframe) {
-                  next.exit_timeframe = settings.exit_timeframe
-                } else {
-                  delete next.exit_timeframe
-                }
-                localStorage.setItem("savedStrategy", JSON.stringify(next))
-
-                // Persist as a per-strategy fallback in case backend strips these fields
-                const sid =
-                  (typeof strategyId === "string" && strategyId) ||
-                  localStorage.getItem("strategy_id") ||
-                  ""
-                if (sid) {
-                  const fallback: any = { trade_at: settings.trade_at }
-                  if (settings.trade_at === "tick" && settings.exit_timeframe) {
-                    fallback.exit_timeframe = settings.exit_timeframe
+                if (existingRaw) {
+                  const existing = JSON.parse(existingRaw)
+                  const tt: any = { ...(existing.TradingType || {}) }
+                  if (value && /^\d+:\d+:\d+$/.test(value) && value !== "00:00:00") {
+                    tt.Max_Duration = value
+                  } else {
+                    delete tt.Max_Duration
                   }
-                  localStorage.setItem(`trade_timing_${sid}`, JSON.stringify(fallback))
+                  existing.TradingType = tt
+                  localStorage.setItem("savedStrategy", JSON.stringify(existing))
                 }
-
-                console.log("🔍 DEBUG: Strategy JSON updated with trade_at:", next)
               } catch (err) {
-                console.error("Failed to sync trade_at to savedStrategy:", err)
+                console.error("Failed to sync Max_Duration to savedStrategy:", err)
               }
             }}
           />
@@ -8976,6 +9115,23 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             onSave={(result) => {
               commitCustomInsert(pendingCustomInsert, result)
               setPendingCustomInsert(null)
+            }}
+          />
+        )}
+
+        {editingCustomBlock && (
+          <CustomComponentPropertiesDialog
+            open={true}
+            componentName={editingCustomBlock.componentName}
+            componentType={editingCustomBlock.kind}
+            componentId={editingCustomBlock.componentId}
+            initialValues={editingCustomBlock.initialValues}
+            initialTimeframe={editingCustomBlock.initialTimeframe}
+            initialInput={editingCustomBlock.initialInput}
+            onClose={() => setEditingCustomBlock(null)}
+            onSave={(result) => {
+              applyCustomBlockEdit(editingCustomBlock, result)
+              setEditingCustomBlock(null)
             }}
           />
         )}
