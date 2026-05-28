@@ -3420,11 +3420,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       // Save all statements, not just the active one
       // If there's only one statement, save it normally
       // If there are multiple statements, save each one separately
-      const account = localStorage.getItem("user_id")
-      if (!account) {
-        throw new Error("No account found in localStorage")
-      }
-
       let result
       let firstStatementId: string | null = null
 
@@ -3440,7 +3435,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         result = await editStrategy(existingId, unifiedPayload)
         firstStatementId = existingId
       } else {
-        result = await createStatement({ account, statement: unifiedPayload })
+        result = await createStatement({ statement: unifiedPayload })
         if (result && result.id) {
           firstStatementId = result.id
           setPersistedId(result.id)
@@ -3967,11 +3962,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       // Rule: if persistedId exists, use it; otherwise CREATE
       let existingId: string | null = persistedId
 
-      const account = localStorage.getItem("user_id")
-      if (!account) {
-        throw new Error("No account found in localStorage")
-      }
-
       let result
       let firstStatementId: string | null = null
 
@@ -3979,7 +3969,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         result = await editStrategy(existingId, unifiedPayload)
         firstStatementId = existingId
       } else {
-        const createResult = await createStatement({ account, statement: unifiedPayload })
+        const createResult = await createStatement({ statement: unifiedPayload })
         if (createResult && createResult.id) {
           firstStatementId = createResult.id
           setPersistedId(createResult.id)
@@ -5466,8 +5456,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
   // Unified builder to generate one of three backend-compatible JSON formats
   const buildUnifiedPayload = (name: string) => {
-    const account = localStorage.getItem("user_id")
-
     // Helper to transform flat offset state to backend-expected nested format
     const transformOffset = (condition: any) => {
       if (!condition.offset) return condition
@@ -5549,7 +5537,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     }
 
     const basePayload: any = {
-      account: account ? parseInt(account) : 54,
       name: name,
       saveresult: name,
       instrument: initialInstrument,

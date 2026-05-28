@@ -535,9 +535,8 @@ export const pollJobStatus = (runId, { intervalMs = 3000, onStatus } = {}) => {
 }
 
 // AllApiCalls.ts
-export const createStatement = async ({ account, statement }) => {
+export const createStatement = async ({ statement }) => {
   const payload = {
-    account,
     ...statement,
     instrument: statement.instrument || "XAU/USD",
   }
@@ -831,9 +830,6 @@ export const getOptimizationResults = async (params = {}) => {
 
   if (params.strategy_statement_id) {
     queryParams.append('strategy_statement_id', params.strategy_statement_id);
-  }
-  if (params.account_id) {
-    queryParams.append('account_id', params.account_id);
   }
   if (params.status) {
     queryParams.append('status', params.status);
@@ -1418,7 +1414,6 @@ export const listStrategyWalkForwardJobs = async (strategyId) => {
  * Get all backtest results with optional filtering
  * @param {Object} params - Query parameters
  * @param {string} [params.strategy_statement_id] - Filter by strategy ID
- * @param {string} [params.account_id] - Filter by account ID
  * @param {string} [params.status] - Filter by status (completed/failed)
  * @param {string} [params.data_source] - Filter by data source (metaapi/file_upload)
  * @param {number} [params.page] - Page number for pagination
@@ -1429,9 +1424,6 @@ export const getBacktestResults = async (params = {}) => {
 
   if (params.strategy_statement_id) {
     queryParams.append('strategy_statement_id', params.strategy_statement_id);
-  }
-  if (params.account_id) {
-    queryParams.append('account_id', params.account_id);
   }
   if (params.status) {
     queryParams.append('status', params.status);

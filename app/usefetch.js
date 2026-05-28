@@ -25,7 +25,16 @@ export const Fetch = async (endPoint, config, headerKey) => {
     const response = await fetch(url, modifiedConfig)
 
     if (response.status === 404) throw new Error("Not Found")
-    if (response.status === 401) throw new Error("Unauthorized")
+    if (response.status === 401) {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("auth_token")
+        localStorage.removeItem("user_id")
+        if (!window.location.pathname.startsWith("/auth")) {
+          window.location.replace("/auth")
+        }
+      }
+      throw new Error("Unauthorized")
+    }
 
     return response
   } catch (error) {

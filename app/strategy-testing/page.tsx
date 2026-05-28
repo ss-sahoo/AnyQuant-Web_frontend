@@ -136,7 +136,6 @@ export default function StrategyTestingPage() {
   const [strategy_id, setStrategyId] = useState<string | null>(null)
 
   // API call related states (some are not used in the provided code, keeping for consistency)
-  const [accountId, setAccountId] = useState(45)
   const [side, setSide] = useState("buy")
   const [saveResult, setSaveResult] = useState("true")
   const [nTradeMax, setNTradeMax] = useState(2)
@@ -237,7 +236,7 @@ export default function StrategyTestingPage() {
 
   // Add backtest detail state for showing results in the same page
   const [backtestDetail, setBacktestDetail] = useState<any>(null)
-  const [backtestResultTab, setBacktestResultTab] = useState<'chart' | 'chart_data' | 'trades' | 'summary' | 'results' | 'graph'>('chart')
+  const [backtestResultTab, setBacktestResultTab] = useState<'chart' | 'chart_data' | 'trades' | 'summary' | 'results' | 'graph'>('trades')
   const [iframeLoadedResult, setIframeLoadedResult] = useState(false)
   const [isPlotExpandedResult, setIsPlotExpandedResult] = useState(false)
 
@@ -438,8 +437,8 @@ export default function StrategyTestingPage() {
       setWalkForwardOptimizationResults([])
       setWalkForwardDetailResult(null)
       setShowWalkForwardOptimizationResults(false)
-      setBacktestResultTab('chart')
-      setOptimisationTab('results')
+      setBacktestResultTab('trades')
+      setOptimisationTab('trades')
       setOptimisationStdout("")
       setOptimisationStderr("")
       setTradesData({
@@ -1106,6 +1105,15 @@ export default function StrategyTestingPage() {
   }
 
   const handleTabChange = (tab: string) => {
+    // Keep the top result tab consistent when the user moves between bottom
+    // tabs. Without this, switching from backtest↔optimisation visually
+    // resets the highlighted top tab because each mode tracks its own
+    // sub-state.
+    if (tab === 'optimisation' && activeTab !== 'optimisation') {
+      setOptimisationTab(backtestResultTab)
+    } else if (tab !== 'optimisation' && activeTab === 'optimisation') {
+      setBacktestResultTab(optimisationTab)
+    }
     setActiveTab(tab)
   }
 
@@ -2958,7 +2966,8 @@ export default function StrategyTestingPage() {
       console.error("Error creating optimization job:", error)
 
       // Error Handling: 403, 400, 500, Network errors
-      if (error.message.includes('401') || error.message.includes('403')) {
+      // usefetch.js already redirects on 401; this branch handles 403 and any legacy 401 strings.
+      if (error.message.includes('401') || error.message.includes('403') || error.message === 'Unauthorized') {
         showToast("Authentication failed. Please login again.", 'error')
         // Redirect to login
         router.push('/auth')
@@ -3639,9 +3648,28 @@ export default function StrategyTestingPage() {
                       />
                     )}
                   </div>
+                ) : backtestResultTab === 'trades' ? (
+                  <div className="w-full bg-[#000000] p-6">
+                    <h3 className="text-xs font-black text-gray-500 mb-4 uppercase tracking-[0.4em]">Backtest History</h3>
+                    {strategy_id ? (
+                      <BacktestHistoryList
+                        strategyId={strategy_id}
+                        onSelect={loadBacktestResult}
+                        isInline={true}
+                      />
+                    ) : (
+                      <p className="text-gray-500 text-[10px] font-black uppercase tracking-widest">
+                        Save the strategy to view its backtest history.
+                      </p>
+                    )}
+                  </div>
+                ) : backtestResultTab === 'results' || backtestResultTab === 'graph' ? (
+                  <div className="w-full h-[400px] bg-[#000000] flex items-center justify-center">
+                    <p className="text-gray-400 font-black uppercase tracking-[0.3em] text-[15px]">Run an optimisation from the bottom panel to view detailed results</p>
+                  </div>
                 ) : (
                   <div className="w-full h-[400px] bg-[#000000] flex items-center justify-center">
-                    <p className="text-gray-400 font-black uppercase tracking-[0.3em] text-[15px]">Run backtest from bottom panel to view results</p>
+                    <p className="text-gray-400 font-black uppercase tracking-[0.3em] text-[15px]">Run a backtest from the bottom panel to view detailed results</p>
                   </div>
                 )}
               </div>
