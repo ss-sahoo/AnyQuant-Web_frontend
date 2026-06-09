@@ -127,6 +127,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent, wi
     "At Candle",
 
     "And",
+    "Unless",
     // "Or",
     // "Not",
     // "Else",
@@ -222,6 +223,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent, wi
     "Partial TP",
     "Manage Exit",
     "Max Trade Duration",
+    "No Trade",
     "Buy",
     "Sell",
     // "Hold",
@@ -283,6 +285,11 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent, wi
                 size="sm"
                 className="bg-[#2B2E38] border-0 hover:bg-gray-700"
                 onClick={() => onComponentSelect(component)}
+                title={
+                  component === "Unless"
+                    ? "Add a row that means: enter only when this condition is NOT met. Allowed after the first row."
+                    : undefined
+                }
               >
                 {component}
               </Button>
@@ -401,6 +408,11 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent, wi
                 size="sm"
                 className="bg-[#2B2E38] border-0 hover:bg-gray-700"
                 onClick={() => onComponentSelect(action)}
+                title={
+                  action === "No Trade"
+                    ? "Mark a row so the trade is blocked when this condition is met. Allowed after the first row."
+                    : undefined
+                }
               >
                 {action}
               </Button>

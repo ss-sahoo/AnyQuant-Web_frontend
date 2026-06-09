@@ -84,6 +84,10 @@ interface IndicatorInput {
 // Update the StrategyCondition interface to fix type issues
 interface StrategyCondition {
   statement: string
+  // When true, the row negates: the trade is blocked if this condition is met.
+  // Encoded as a sibling of `statement` (statement stays "and"); backend accepts
+  // it alongside the normal condition fields.
+  no_trade?: boolean
   inp1?: IndicatorInput | { name: string }
   operator_name?: string
   operator_display?: string // Store the original display label for UI
@@ -1226,6 +1230,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     if (component.toLowerCase() === "if") return "if"
     if (component.toLowerCase() === "and") return "and"
     if (component.toLowerCase() === "or") return "or"
+    if (component.toLowerCase() === "unless") return "unless"
     if (component.toLowerCase() === "sl") return "SL"
     if (component.toLowerCase() === "tp") return "TP"
     return component.toLowerCase()
@@ -2100,6 +2105,20 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         currentStatement.strategy.push({
           statement: statementType,
         })
+      } else if (statementType === "unless") {
+        // "unless X" = enter only when X is NOT met. Only valid after the
+        // first "if" row; the first row must stay "statement": "if".
+        if (currentStatement.strategy.length === 0) {
+          toast({
+            variant: "destructive",
+            title: "Unless needs an If first",
+            description: "Start the statement with an If row, then add Unless to negate the next condition.",
+          })
+          return
+        }
+        currentStatement.strategy.push({
+          statement: "unless",
+        })
       } else if (component.toLowerCase() === "at candle" || component.toLowerCase() === "at-candle") {
         // If we have an active condition, set it as the target
         if (currentStatement.strategy.length > 0) {
@@ -2809,6 +2828,22 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     } else if (component.toLowerCase() === "trading session" || component.toLowerCase() === "trading-session") {
       // Open Trading Session modal
       setShowTradingSessionModal(true)
+    } else if (component.toLowerCase() === "no trade" || component.toLowerCase() === "no-trade") {
+      // "..., no trade" = block the trade when this condition is met.
+      // Encoded as a normal "and" row with a sibling `no_trade: true` flag.
+      // Only valid after the first "if" row.
+      if (currentStatement.strategy.length === 0) {
+        toast({
+          variant: "destructive",
+          title: "No Trade needs an If first",
+          description: "Start the statement with an If row, then add No Trade to block the trade when this condition is met.",
+        })
+        return
+      }
+      currentStatement.strategy.push({
+        statement: "and",
+        no_trade: true,
+      })
     }
 
     setStatements(newStatements)
@@ -4481,6 +4516,30 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               onClick={() => {
                 console.log("Removing statement:", condition.statement, "at index:", index, "activeStatementIndex:", activeStatementIndex)
                 removeComponent(activeStatementIndex, index, "statement")
+              }}
+              className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>,
+        )
+      }
+
+      // Render a "NO TRADE" badge for rows flagged with no_trade. Clicking X
+      // clears just the flag; removing the row uses the statement-chip's X.
+      if (condition.no_trade) {
+        components.push(
+          <div
+            key={`no-trade-${index}`}
+            className="bg-[#5A1E1E] text-white px-3 py-1 rounded-md mr-2 mb-2 relative group"
+            title="Trade is blocked when this condition is met"
+          >
+            NO TRADE
+            <button
+              onClick={() => {
+                const newStatements = [...statements]
+                delete newStatements[activeStatementIndex].strategy[index].no_trade
+                setStatements(newStatements)
               }}
               className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
             >
