@@ -2100,6 +2100,15 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         currentStatement.strategy.push({
           statement: "if",
         })
+      } else if (statementType === "if") {
+        // Statement already starts with an If row (added by addStatement). The
+        // row is invisible until it has inp1/operator/inp2, which can make a
+        // second "If" click feel like nothing happened — surface a hint.
+        toast({
+          title: "If row already exists",
+          description: "Pick an indicator, behaviour, or value to fill in this statement's If row.",
+        })
+        return
       } else if ((statementType === "and" || statementType === "or") && currentStatement.strategy.length > 0) {
         // Add "and" or "or" statement
         currentStatement.strategy.push({
@@ -4456,6 +4465,21 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     }, 100)
   }
 
+  // A partial_tp Equity rule is a Manage Exit (UI-wise) when every entry is a
+  // price-level full exit: only `Price` + `Close: "100%"`, with no `name`,
+  // `operator`, or `Action`. Backend stores both features under partial_tp; the
+  // frontend uses shape to route to the right modal/label.
+  const isManageExitPartialTpShape = (rule: any): boolean => {
+    if (!rule?.inp1 || rule.inp1.name !== "partial_tp") return false
+    const list = rule.inp1.partial_tp_list
+    if (!Array.isArray(list) || list.length === 0) return false
+    return list.every((it: any) =>
+      it && typeof it.Price === "string" &&
+      !it.name && !it.operator && !it.Action &&
+      /^(100%|1(\.0+)?)$/.test(String(it.Close ?? ""))
+    )
+  }
+
   // Update the renderStrategyConditions function to properly display At Candle components
   // Replace the existing At Candle rendering code with this:
   const renderStrategyConditions = (statement: StrategyStatement, statementIndex: number) => {
@@ -4503,8 +4527,15 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
     // Add each condition with appropriate background
     statement.strategy.forEach((condition, index) => {
-      // Skip rendering "if" statements but keep "and" statements
-      if (condition.statement && condition.statement.toLowerCase() !== "if") {
+      // Skip rendering "if" statements but keep "and"/"or"/"unless".
+      // For no_trade rows the wire format is { statement: "and", no_trade: true },
+      // but the UI represents the row with a single NO TRADE chip — don't show
+      // a separate AND chip alongside it.
+      if (
+        condition.statement &&
+        condition.statement.toLowerCase() !== "if" &&
+        !condition.no_trade
+      ) {
         // Basic components (and, etc.) with dark background
         components.push(
           <div
@@ -4525,22 +4556,19 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         )
       }
 
-      // Render a "NO TRADE" badge for rows flagged with no_trade. Clicking X
-      // clears just the flag; removing the row uses the statement-chip's X.
+      // NO TRADE chip — the sole visual representation of the row. Removing it
+      // removes the whole condition (matches AND/UNLESS chip behaviour), since
+      // there's no AND chip to anchor the row when no_trade is set.
       if (condition.no_trade) {
         components.push(
           <div
             key={`no-trade-${index}`}
-            className="bg-[#5A1E1E] text-white px-3 py-1 rounded-md mr-2 mb-2 relative group"
+            className="bg-[#151718] text-white px-3 py-1 rounded-md mr-2 mb-2 relative group"
             title="Trade is blocked when this condition is met"
           >
             NO TRADE
             <button
-              onClick={() => {
-                const newStatements = [...statements]
-                delete newStatements[activeStatementIndex].strategy[index].no_trade
-                setStatements(newStatements)
-              }}
+              onClick={() => removeComponent(activeStatementIndex, index, "statement")}
               className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
             >
               <X className="w-3 h-3" />
@@ -5089,44 +5117,118 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       }
     })
 
-    // Restore inline SL/TP rendering
+    // Inline rendering for ALL Equity (trade-management) rules. They live in
+    // the same statement node flow as conditions/actions — no separate footer
+    // block. Click routes to the correct modal/editor based on rule shape.
     if (statement.Equity && statement.Equity.length > 0) {
       statement.Equity.forEach((rule, equityIndex) => {
         const operator = rule.operator || ""
         const isSL = operator.includes("SL") || (rule.inp1 && "name" in rule.inp1 && rule.inp1.name === "SL")
         const isTP = operator.includes("TP") || (rule.inp1 && "name" in rule.inp1 && rule.inp1.name === "TP")
+        const isManageExitNew = isManageExitPartialTpShape(rule)
+        const isPartialTP = !!(rule.inp1 && rule.inp1.name === "partial_tp" && rule.inp1.partial_tp_list) && !isManageExitNew
+        const isManageExitLegacy = !!(rule.inp1 && rule.inp1.name === "manage_exit" && (rule.inp1 as any).manage_exit_list)
+        const isManageExit = isManageExitNew || isManageExitLegacy
+        const customTm = (rule as any).trade_management
+
+        let label = ""
+        let onClickHandler: () => void = () => handleEquityRuleClick(activeStatementIndex, equityIndex, rule)
+        let tooltipBuilder: (() => Record<string, string>) | null = null
+        let tooltipTitle = ""
 
         if (isSL || isTP) {
-          const label = pipsToPointsDisplay(rule.operator || (isSL ? "SL" : "TP"))
-          components.push(
-            <div key={`equity-inline-${equityIndex}`} className="flex items-center relative group">
-              <div
-                className="bg-[#C5C5C5] text-black px-3 py-2 mt-3 rounded-md mr-2 mb-2 transition-all duration-200 hover:bg-[#D5D5D5] cursor-pointer"
-                onClick={() => handleEquityRuleClick(activeStatementIndex, equityIndex, rule)}
-              >
-                {label}
-              </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  removeEquityRule(activeStatementIndex, equityIndex)
-                }}
-                className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            </div>,
-          )
-
-          // Add Wait button after each equity rule for visual consistency with the design
-          components.push(
-            <div key={`wait-equity-${equityIndex}`} className="mr-2 mb-2">
-              <button className="bg-[#2A2D42] text-white px-2 py-1 text-xs rounded-md hover:bg-[#3A3D47] transition-all duration-200">
-                Wait
-              </button>
-            </div>,
-          )
+          label = pipsToPointsDisplay(rule.operator || (isSL ? "SL" : "TP"))
+        } else if (isPartialTP) {
+          label = `Partial TP (${rule.inp1?.partial_tp_list?.length || 0})`
+          onClickHandler = () => {
+            setEditingEquityRule({ statementIndex: activeStatementIndex, equityIndex })
+            setShowPartialTPModal(true)
+          }
+          tooltipTitle = "Partial TP list"
+          tooltipBuilder = () => {
+            const details: Record<string, string> = {}
+            rule.inp1?.partial_tp_list?.forEach((lvl, i) => {
+              details[`Level ${i + 1}`] = `${pipsToPointsDisplay(lvl.Price || "")} | Close: ${lvl.Close}${lvl.Action ? ` | Action: ${pipsToPointsDisplay(lvl.Action)}` : ""}`
+            })
+            return details
+          }
+        } else if (isManageExit) {
+          const count = isManageExitNew
+            ? (rule.inp1?.partial_tp_list?.length || 0)
+            : ((rule.inp1 as any)?.manage_exit_list?.length || 0)
+          label = `Manage Exit (${count})`
+          onClickHandler = () => {
+            setEditingEquityRule({ statementIndex: activeStatementIndex, equityIndex })
+            setShowManageExitModal(true)
+          }
+          tooltipTitle = "Manage Exit"
+          tooltipBuilder = () => {
+            const details: Record<string, string> = {}
+            if (isManageExitNew && rule.inp1?.partial_tp_list) {
+              rule.inp1.partial_tp_list.forEach((lvl, i) => {
+                details[`Rule ${i + 1}`] = `${pipsToPointsDisplay(lvl.Price || "")} | Closes 100%`
+              })
+            } else if (isManageExitLegacy) {
+              const list = (rule.inp1 as any).manage_exit_list as Array<{ Price: string; Action: string }>
+              list.forEach((it, i) => {
+                details[`Rule ${i + 1}`] = `${pipsToPointsDisplay(it.Price)} | ${pipsToPointsDisplay(it.Action)}`
+              })
+            }
+            return details
+          }
+        } else if (customTm && customTm.type === "CUSTOM_TM") {
+          label = customTm.name || "Custom TM"
+          tooltipTitle = customTm.name || "Custom Trade Management"
+          tooltipBuilder = () => {
+            const details: Record<string, string> = {}
+            const params = customTm.params || {}
+            Object.entries(params).forEach(([k, v]) => {
+              details[k] = String(v)
+            })
+            return details
+          }
+        } else {
+          // Fallback for any other equity-rule shape (e.g. operator-only rules).
+          label = pipsToPointsDisplay(rule.operator || "Equity Rule")
         }
+
+        components.push(
+          <div key={`equity-inline-${equityIndex}`} className="flex items-center relative group">
+            <div
+              className="bg-[#C5C5C5] text-black px-3 py-2 mt-3 rounded-md mr-2 mb-2 transition-all duration-200 hover:bg-[#D5D5D5] cursor-pointer"
+              onClick={onClickHandler}
+              onMouseEnter={tooltipBuilder ? (e) => {
+                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                setHoveredComponent({
+                  show: true,
+                  content: { title: tooltipTitle, details: tooltipBuilder!() },
+                  position: { x: rect.left + rect.width / 2, y: rect.top - 3 },
+                })
+              } : undefined}
+              onMouseLeave={tooltipBuilder ? handleMouseLeave : undefined}
+            >
+              {label}
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                removeEquityRule(activeStatementIndex, equityIndex)
+              }}
+              className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>,
+        )
+
+        // Wait button after each equity rule for visual consistency
+        components.push(
+          <div key={`wait-equity-${equityIndex}`} className="mr-2 mb-2">
+            <button className="bg-[#2A2D42] text-white px-2 py-1 text-xs rounded-md hover:bg-[#3A3D47] transition-all duration-200">
+              Wait
+            </button>
+          </div>,
+        )
       })
     }
 
@@ -5177,6 +5279,46 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           </button>
         </div>,
       )
+    }
+
+    // Render Max Trade Duration inline (only in the first statement, since
+    // Max_Duration is a global cap stored on statements[0].TradingType).
+    if (statementIndex === 0) {
+      const dur = (statements[0]?.TradingType as any)?.Max_Duration
+      if (typeof dur === "string" && dur && dur !== "00:00:00") {
+        components.push(
+          <div key="max-duration-component" className="mr-2 mb-2 relative group">
+            <div className="text-xs text-gray-400 mb-1">Max Trade Duration</div>
+            <div
+              className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[180px] cursor-pointer transition-all duration-200 hover:bg-[#252728]"
+              onClick={() => setShowMaxDurationModal(true)}
+              title="Auto-close trades after this duration (resolution: one check per bar)."
+            >
+              <span className="text-gray-300">{dur}</span>
+              <ChevronDown className="ml-2 w-4 h-4" />
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setStatements((prev) => {
+                  if (prev.length === 0) return prev
+                  const next = [...prev]
+                  const first = { ...(next[0] as any) }
+                  const tt: any = { ...(first.TradingType || {}) }
+                  delete tt.Max_Duration
+                  first.TradingType = tt
+                  next[0] = first
+                  return next
+                })
+              }}
+              className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+              title="Clear Max Trade Duration"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>,
+        )
+      }
     }
 
     return components.reduce((acc: JSX.Element[], component, idx) => {
@@ -5233,128 +5375,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     return text.replace(/(\d+)pips/g, (match, num) => {
       return `${num}points`
     })
-  }
-
-  // A partial_tp Equity rule is a Manage Exit (UI-wise) when every entry is a
-  // price-level full exit: only `Price` + `Close: "100%"`, with no `name`,
-  // `operator`, or `Action`. Backend stores both features under partial_tp; the
-  // frontend uses shape to route to the right modal/label.
-  const isManageExitPartialTpShape = (rule: any): boolean => {
-    if (!rule?.inp1 || rule.inp1.name !== "partial_tp") return false
-    const list = rule.inp1.partial_tp_list
-    if (!Array.isArray(list) || list.length === 0) return false
-    return list.every((it: any) =>
-      it && typeof it.Price === "string" &&
-      !it.name && !it.operator && !it.Action &&
-      /^(100%|1(\.0+)?)$/.test(String(it.Close ?? ""))
-    )
-  }
-
-  const renderEquityRules = (statement: StrategyStatement, statementIndex: number) => {
-    if (!statement.Equity || statement.Equity.length === 0) {
-      return null
-    }
-
-    return (
-      <div className="mt-4">
-        <div className="flex flex-wrap gap-2">
-          {statement.Equity.map((rule, index) => {
-            // Manage Exit is serialized into the partial_tp schema (backend has
-            // no separate field). Distinguish by shape: every entry is a
-            // price-level full exit (Close === "100%", no Action/name).
-            const isManageExitNew = isManageExitPartialTpShape(rule)
-            const isPartialTP = !!(rule.inp1 && rule.inp1.name === "partial_tp" && rule.inp1.partial_tp_list) && !isManageExitNew
-            const isManageExitLegacy = !!(rule.inp1 && rule.inp1.name === "manage_exit" && (rule.inp1 as any).manage_exit_list)
-            const isManageExit = isManageExitNew || isManageExitLegacy
-
-            // Filter out SL and TP as they are now rendered inline
-            const operator = rule.operator || ""
-            const isSL = operator.includes("SL") || (rule.inp1 && "name" in rule.inp1 && rule.inp1.name === "SL")
-            const isTP = operator.includes("TP") || (rule.inp1 && "name" in rule.inp1 && rule.inp1.name === "TP")
-
-            if (isSL || isTP) return null
-
-            const manageExitCount = isManageExitNew
-              ? (rule.inp1?.partial_tp_list?.length || 0)
-              : ((rule.inp1 as any)?.manage_exit_list?.length || 0)
-
-            const label = isPartialTP
-              ? `Partial TP (${rule.inp1?.partial_tp_list?.length || 0})`
-              : isManageExit
-                ? `Manage Exit (${manageExitCount})`
-                : pipsToPointsDisplay(rule.operator || "Equity Rule")
-
-            return (
-              <div
-                key={index}
-                className="bg-[#2A2D42] text-white px-3 py-1 rounded-md relative group cursor-pointer hover:bg-[#3A3D52] transition-colors"
-                onClick={() => {
-                  if (isPartialTP) {
-                    setEditingEquityRule({ statementIndex: statementIndex, equityIndex: index })
-                    setShowPartialTPModal(true)
-                    return
-                  }
-                  if (isManageExit) {
-                    setEditingEquityRule({ statementIndex: statementIndex, equityIndex: index })
-                    setShowManageExitModal(true)
-                    return
-                  }
-                  handleEquityRuleClick(statementIndex, index, rule)
-                }}
-                onMouseEnter={(e) => {
-                  // Build tooltip content for partial TP / manage exit
-                  if (isPartialTP || isManageExit) {
-                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                    const details: Record<string, string> = {}
-
-                    if (isPartialTP && rule.inp1?.partial_tp_list) {
-                      rule.inp1.partial_tp_list.forEach((lvl, i) => {
-                        details[`Level ${i + 1}`] = `${pipsToPointsDisplay(lvl.Price || "")} | Close: ${lvl.Close}${lvl.Action ? ` | Action: ${pipsToPointsDisplay(lvl.Action)}` : ""}`
-                      })
-                    }
-
-                    if (isManageExitNew && rule.inp1?.partial_tp_list) {
-                      rule.inp1.partial_tp_list.forEach((lvl, i) => {
-                        details[`Rule ${i + 1}`] = `${pipsToPointsDisplay(lvl.Price || "")} | Closes 100%`
-                      })
-                    } else if (isManageExitLegacy && (rule.inp1 as any).manage_exit_list) {
-                      const list = (rule.inp1 as any).manage_exit_list as Array<{ Price: string; Action: string }>
-                      list.forEach((it, i) => {
-                        details[`Rule ${i + 1}`] = `${pipsToPointsDisplay(it.Price)} | ${pipsToPointsDisplay(it.Action)}`
-                      })
-                    }
-
-                    setHoveredComponent({
-                      show: true,
-                      content: {
-                        title: isPartialTP ? "Partial TP list" : "Manage Exit",
-                        details,
-                      },
-                      position: {
-                        x: rect.left + rect.width / 2,
-                        y: rect.top - 3,
-                      },
-                    })
-                  }
-                }}
-                onMouseLeave={handleMouseLeave}
-              >
-                {label}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    removeEquityRule(statementIndex, index)
-                  }}
-                  className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-    )
   }
 
   // Function to handle equity rule click for editing
@@ -5912,52 +5932,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                       )}
                     </div>
                   </div>
-                  {/* Render Equity Rules for this statement */}
-                  {renderEquityRules(statement, index)}
+                  {/* Trade-management rules render inline inside
+                      renderStrategyConditions — no separate footer block. */}
                 </div>
               </div>
             ))}
           </div>
-
-          {/* Global Max Trade Duration chip — only renders when a non-zero cap is set */}
-          {(() => {
-            const dur = (statements[0]?.TradingType as any)?.Max_Duration
-            if (typeof dur !== "string" || !dur || dur === "00:00:00") return null
-            return (
-              <div className="flex flex-wrap items-center gap-2 mt-4 px-1">
-                <div className="mr-2 mb-2 relative group">
-                  <div className="text-xs text-gray-400 mb-1">Max Trade Duration</div>
-                  <div
-                    className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[180px] cursor-pointer transition-all duration-200 hover:bg-[#252728]"
-                    onClick={() => setShowMaxDurationModal(true)}
-                    title="Auto-close trades after this duration (resolution: one check per bar)."
-                  >
-                    <span className="text-gray-300">{dur}</span>
-                    <ChevronDown className="ml-2 w-4 h-4" />
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setStatements((prev) => {
-                        if (prev.length === 0) return prev
-                        const next = [...prev]
-                        const first = { ...(next[0] as any) }
-                        const tt: any = { ...(first.TradingType || {}) }
-                        delete tt.Max_Duration
-                        first.TradingType = tt
-                        next[0] = first
-                        return next
-                      })
-                    }}
-                    className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                    title="Clear Max Trade Duration"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-            )
-          })()}
 
           {/* Add statement button */}
           <div className="flex justify-center mt-6">
@@ -8784,26 +8764,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             initialValue={selectedCandleNumber || 1}
             onClose={() => setShowAtCandleModal(false)}
             onSave={(candleNumber) => {
-              const newStatements = [...statements]
-              const currentStatement = newStatements[activeStatementIndex]
-
-              if (activeConditionIndex !== null) {
-                const condition = currentStatement.strategy[activeConditionIndex]
-
-                // Add index to the targeted input (inp1 or inp2)
-                if (targetInput === "inp1" && condition.inp1 && typeof condition.inp1 === "object") {
-                  condition.inp1.index = -candleNumber // Store negative value of candle number
-                } else if (targetInput === "inp2" && condition.inp2 && typeof condition.inp2 === "object") {
-                  condition.inp2.index = -candleNumber // Store negative value of candle number
-                }
-
-                setStatements(newStatements)
-                setSelectedCandleNumber(candleNumber)
-              } else {
-                // Fall back to the original handleAtCandleSelection if no specific condition is targeted
-                handleAtCandleSelection(candleNumber)
-              }
-
+              // Delegate to handleAtCandleSelection — it correctly stores
+              // `pendingAtCandle` when the target inp1/inp2 doesn't exist
+              // yet (e.g. clicking At Candle on a fresh If row). The earlier
+              // inline path silently dropped that case.
+              handleAtCandleSelection(candleNumber)
               setShowAtCandleModal(false)
             }}
           />
