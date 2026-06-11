@@ -21,7 +21,7 @@ import { AtCandleModal } from "@/components/modals/at-candle-modal"
 import { DerivativeSettingsModal } from "@/components/modals/derivative-settings-modal"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { createStatement, editStrategy, createCustomComponent, validateCustomComponentCode, activateCustomComponent, listCustomComponents, createCustomStrategy, validateCustomStrategyCode, getCustomStrategyTemplate, updateCustomStrategy, listCustomStrategies, deleteCustomStrategy, getCustomStrategy, updateCustomComponent, fetchStatementDetail } from "@/app/AllApiCalls"
+import { createStatement, editStrategy, createCustomComponent, validateCustomComponentCode, activateCustomComponent, listCustomComponents, createCustomStrategy, validateCustomStrategyCode, getCustomStrategyTemplate, updateCustomStrategy, listCustomStrategies, deleteCustomStrategy, getCustomStrategy, updateCustomComponent, fetchStatementDetail, validateStrategy } from "@/app/AllApiCalls"
 import type { JSX } from "react/jsx-runtime"
 import { PipsSettingsModal } from "@/components/modals/pips-settings-modal"
 import { SaveStrategyModal } from "@/components/modals/save-strategy-modal"
@@ -3372,20 +3372,18 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
       // If we have an active condition, update its timeframe
       if (activeConditionIndex !== null) {
-        // Prevent timeframe changes for inp2
-        if (activeInputType === "inp2") {
-          setShowTimeframeDropdown(false)
-          return;
-        }
-
         const newStatements = [...statements]
         const currentStatement = newStatements[activeStatementIndex]
         const condition = currentStatement.strategy[activeConditionIndex]
 
         if (condition) {
-          // Update the correct timeframe based on input type
+          // Update the correct timeframe based on input type. inp1 and inp2
+          // each carry their own timeframe and must be independently editable
+          // (per backend contract — every non-"value" operand has its own tf).
           if (activeInputType === "inp1" && condition.inp1 && "timeframe" in condition.inp1) {
             condition.inp1.timeframe = timeframe
+          } else if (activeInputType === "inp2" && condition.inp2 && typeof condition.inp2 === "object" && "timeframe" in condition.inp2) {
+            condition.inp2.timeframe = timeframe
           } else if (activeInputType === "condition") {
             // For condition-level timeframes
             if (condition.inp1 && "timeframe" in condition.inp1) {
@@ -3409,11 +3407,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     conditionIndex: number,
     inputType: "inp1" | "inp2" | "condition" = "condition",
   ) => {
-    // Prevent opening timeframe dropdown for inp2
-    if (inputType === "inp2") {
-      return;
-    }
-
+    // inp1 and inp2 both have independently editable timeframes per the
+    // backend contract — no early bail for inp2.
     setActiveStatementIndex(statementIndex)
     setActiveConditionIndex(conditionIndex)
     setActiveInputType(inputType)
@@ -3446,6 +3441,55 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     setShowAtCandleModal(true)
   }
 
+  /**
+   * Run backend validation as a preflight. Returns true when the caller should
+   * proceed (valid; warnings are surfaced but don't block). Returns false when
+   * the action should be aborted (network failure or valid === false). Toasts
+   * the first error or all warnings as appropriate.
+   *
+   * Used at exactly the two checkpoints in the spec — Save Draft and Proceed
+   * to Strategy Testing — and nowhere else.
+   */
+  const preflightValidate = async (
+    payload: any,
+    context: "save" | "proceed",
+  ): Promise<boolean> => {
+    let result: Awaited<ReturnType<typeof validateStrategy>>
+    try {
+      result = await validateStrategy(payload)
+    } catch (err: any) {
+      // Network / endpoint failure — block the action so we never persist a
+      // strategy that hasn't been verified.
+      toast({
+        variant: "destructive",
+        title: "Could not validate strategy",
+        description: err?.message || "Validation service is unreachable. Please try again.",
+      })
+      return false
+    }
+
+    if (!result?.valid) {
+      // Backend reports the first failing check only; surface it verbatim and
+      // let the user fix-and-re-validate iteratively.
+      const first = result?.errors?.[0] || "Strategy is invalid."
+      toast({
+        variant: "destructive",
+        title: context === "save" ? "Cannot save invalid strategy" : "Cannot proceed — strategy is invalid",
+        description: first,
+      })
+      return false
+    }
+
+    // Warnings are non-blocking but should still be visible.
+    if (Array.isArray(result.warnings) && result.warnings.length > 0) {
+      toast({
+        title: "Strategy validated with warnings",
+        description: result.warnings.join("\n"),
+      })
+    }
+    return true
+  }
+
   const handleSaveDraft = async (name: string) => {
     try {
       const needsTf = tradeTiming.entry_at === "tick" || tradeTiming.exit_at === "tick"
@@ -3459,8 +3503,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         return
       }
 
-      setIsSavingDraft(true)
-
       // Save all statements, not just the active one
       // If there's only one statement, save it normally
       // If there are multiple statements, save each one separately
@@ -3471,6 +3513,14 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
       // Debug: Log the unified payload
       console.log("🔍 DEBUG: Unified payload for Save Draft:", JSON.stringify(unifiedPayload, null, 2))
+
+      // Backend preflight — single source of truth. Blocks the save if the
+      // backend reports `valid: false` (includes missing/inactive CUSTOM_I,
+      // CUSTOM_B:, CUSTOM_TM: references once backend enforces those).
+      const ok = await preflightValidate(unifiedPayload, "save")
+      if (!ok) return
+
+      setIsSavingDraft(true)
 
       // Rule: if persistedId exists, use it; otherwise CREATE
       let existingId: string | null = persistedId
@@ -3992,13 +4042,19 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         return
       }
 
-      setIsProceeding(true)
-
       // Build the unified multi-statement Strategy payload
       const unifiedPayload = buildUnifiedPayload(name)
 
       // Debug: Log the unified payload
       console.log("🔍 DEBUG: Unified payload for Proceed to Testing:", JSON.stringify(unifiedPayload, null, 2))
+
+      // Backend preflight — same source of truth as Save Draft. Block the
+      // transition to Strategy Testing on `valid: false` so we never enter
+      // testing with an invalid strategy.
+      const ok = await preflightValidate(unifiedPayload, "proceed")
+      if (!ok) return
+
+      setIsProceeding(true)
 
       // Save the complete statement for local use
       localStorage.setItem("savedStrategy", JSON.stringify(unifiedPayload))
@@ -4803,27 +4859,45 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         )
       }
 
-      // Show timeframe for inp2 if it exists
+      // Show timeframe for inp2 if it exists. Editable, same as inp1.
       if (
         condition.inp2 &&
         typeof condition.inp2 === "object" &&
         "timeframe" in condition.inp2 &&
         condition.inp2.timeframe
       ) {
-        // Hide timeframe for inp2 if offset is present
-        if (true) {
-          components.push(
-            <div key={`inp2-timeframe-${index}`} className="mr-2 mb-2 relative group">
-              <div className="text-xs text-gray-400 mb-1">Timeframe </div>
-              <div
-                className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[160px] border border-[#2A2D42] opacity-60 cursor-not-allowed"
-                data-inp2-timeframe-index={index}
-              >
-                <span className="text-gray-400">{condition.inp2.timeframe}</span>
-              </div>
-            </div>,
-          )
-        }
+        components.push(
+          <div key={`inp2-timeframe-${index}`} className="mr-2 mb-2 relative group">
+            <div className="text-xs text-gray-400 mb-1">Timeframe</div>
+            <button
+              onClick={() => openTimeframeDropdown(activeStatementIndex, index, "inp2")}
+              onMouseEnter={(e) => handleMouseEnter(e, condition, "timeframe", index)}
+              onMouseLeave={handleMouseLeave}
+              className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[160px] border border-[#2A2D42] transition-all duration-200 hover:border-[#4A4D62]"
+              data-inp2-timeframe-index={index}
+            >
+              <span className="text-gray-400">{condition.inp2.timeframe}</span>
+              <ChevronDown className="ml-1 w-4 h-4" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                // Remove only inp2's timeframe (keeps inp1's tf untouched).
+                const newStatements = [...statements]
+                const currentStatement = newStatements[activeStatementIndex]
+                const cond = currentStatement.strategy[index]
+                if (cond.inp2 && typeof cond.inp2 === "object" && "timeframe" in cond.inp2) {
+                  delete (cond.inp2 as any).timeframe
+                }
+                setStatements(newStatements)
+              }}
+              className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+              title="Clear inp2 timeframe"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>,
+        )
       }
 
       // Show inp2 value for all behaviors (except moving_up/down which includes the value in operator)

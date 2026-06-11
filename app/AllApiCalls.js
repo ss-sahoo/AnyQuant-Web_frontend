@@ -319,6 +319,46 @@ export const getSymbolTimeframes = async ({ metaapi_token, metaapi_account_id, s
   return response.json()
 }
 
+/**
+ * Validate a strategy JSON against the backend's authoritative rules. The
+ * backend is the single source of truth — do not duplicate rules in JS.
+ *
+ * @param {object} strategy - The unified strategy payload (the same shape sent
+ *   to createStatement / editStrategy).
+ * @returns {Promise<{
+ *   valid: boolean,
+ *   errors: string[],
+ *   warnings: string[],
+ *   summary: null | {
+ *     total_count: number,
+ *     optimizable_count: number,
+ *     fixed_count: number,
+ *     by_category: { indicator: any[], operator: any[], threshold: any[] }
+ *   }
+ * }>}
+ *
+ * Throws on network / non-2xx errors so callers can distinguish "endpoint
+ * couldn't be reached" from "endpoint replied valid=false".
+ */
+export const validateStrategy = async (strategy) => {
+  const response = await Fetch('/api/strategies/validate/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(strategy),
+  })
+
+  if (!response.ok) {
+    let body
+    try { body = await response.json() } catch { body = null }
+    const message = body?.error || body?.detail || body?.message ||
+      `Strategy validation request failed (${response.status})`
+    const err = new Error(message)
+    err.response = { status: response.status, data: body }
+    throw err
+  }
+  return response.json()
+}
+
 // New: Validate a strategy against MetaAPI timeframes
 export const validateStrategyMetaapi = async ({ statement, metaapi_token, metaapi_account_id, symbol }) => {
   const response = await Fetch('/api/validate-strategy-metaapi/', {
