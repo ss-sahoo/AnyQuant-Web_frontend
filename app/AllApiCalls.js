@@ -341,10 +341,14 @@ export const getSymbolTimeframes = async ({ metaapi_token, metaapi_account_id, s
  * couldn't be reached" from "endpoint replied valid=false".
  */
 export const validateStrategy = async (strategy) => {
+  // Endpoint accepts POST only (GET returns 405 Method Not Allowed). The
+  // contract wraps the strategy JSON in a `statement` field so the engine's
+  // assert_statements runs against the same payload shape it sees at init
+  // time — sending the strategy as the bare body bypasses the wrapper.
   const response = await Fetch('/api/strategies/validate/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(strategy),
+    body: JSON.stringify({ statement: strategy }),
   })
 
   if (!response.ok) {

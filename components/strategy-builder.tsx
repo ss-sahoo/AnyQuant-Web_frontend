@@ -207,6 +207,49 @@ interface StrategyStatement {
   }
 }
 
+// Backend allowlist for CUSTOM_I names is case-sensitive. Naive
+// `component.toUpperCase()` turned "Open_MA" → "OPEN_MA" etc., which the engine
+// then failed to match (`Indicator 'OPEN_MA' not found`). Return the exact
+// spelling the backend expects, falling back to the generic "MA" so the rule
+// never emits an unknown name.
+const VALID_MA_FAMILY: Record<string, string> = {
+  "ma": "MA",
+  "volume_ma": "Volume_MA",
+  "volume-ma": "Volume_MA",
+  "volumema": "Volume_MA",
+  "open_ma": "Open_MA",
+  "open-ma": "Open_MA",
+  "openma": "Open_MA",
+  "close_ma": "Close_MA",
+  "close-ma": "Close_MA",
+  "closema": "Close_MA",
+  "rsi_ma": "RSI_MA",
+  "rsi-ma": "RSI_MA",
+  "rsima": "RSI_MA",
+}
+function normalizeMaFamilyName(component: string): string {
+  const key = component.toLowerCase().trim()
+  return VALID_MA_FAMILY[key] || "MA"
+}
+
+// MACD lives in its own panel on the backtest plot (engine registry routes it
+// there regardless of the strategy). Comparing it against an OHLC price renders
+// MACD (~±50) on the price axis (~4000) as a flat unreadable line. Block both
+// directions of the comparison before the row is built.
+function isPriceOhlcOperand(operand: any): boolean {
+  if (!operand || typeof operand !== "object") return false
+  const lc = (s: any) => String(s ?? "").toLowerCase()
+  if (operand.type === "C" && ["open", "high", "low", "close"].includes(lc(operand.input))) return true
+  // Generic safety net for operand shapes that store the price as `name` or
+  // `input` without a `type` field (e.g. legacy serialised data).
+  if (["open", "high", "low", "close"].includes(lc(operand.name))) return true
+  if (["open", "high", "low", "close"].includes(lc(operand.input))) return true
+  return false
+}
+function isMacdOperand(operand: any): boolean {
+  return !!(operand && typeof operand === "object" && operand.name === "MACD")
+}
+
 export function StrategyBuilder({ initialName, initialInstrument, strategyData, strategyId }: StrategyBuilderProps) {
   const router = useRouter()
   const { toast } = useToast()
@@ -1020,17 +1063,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           return
         }
 
-        // Then, try to remove Buy/Sell if set
-        if (currentStatement.side === "B" || currentStatement.side === "S") {
-          const newStatements = [...statements]
-          newStatements[statementIndex].side = ""
-          setStatements(newStatements)
-          return
-        }
-
-        if (strategy.length === 0) return
-
-        // Find the last condition that has removable components
+        /// Buy/Sell renders at the start of the statement, so it must be the
+        /// last thing backspace removes - only after every strategy condition
+        /// has already been peeled off the right. We try conditions first and
+        /// fall through to side removal if nothing in the strategy was
+        /// removable (e.g. only an empty default `{ statement: "if" }` row).
         for (let i = strategy.length - 1; i >= 0; i--) {
           const condition = strategy[i]
 
@@ -1076,6 +1113,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             removeComponent(statementIndex, i, "statement")
             return
           }
+        }
+
+        // Nothing in the strategy body was removable - clear Buy/Sell last.
+        if (currentStatement.side === "B" || currentStatement.side === "S") {
+          const newStatements = [...statements]
+          newStatements[statementIndex].side = ""
+          setStatements(newStatements)
         }
       } else {
         // Cursor is at a specific position - delete the component to the left of cursor
@@ -1342,37 +1386,44 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
     const condition = statements[statementIndex].strategy[conditionIndex]
 
+    // Predefined indicator names that have dedicated settings modals. Many of
+    // these are stored as `type: "CUSTOM_I"` in the strategy JSON (MACD, ATR,
+    // Stochastic, SuperTrend, MA, CandleSize, HistoricalPriceLevel,
+    // VolumeDelta, CumulativeVolumeDelta, RSI_MA, GENERAL_PA), so the generic
+    // `type === "CUSTOM_I"` branch below must NOT intercept them — otherwise
+    // the user gets the generic dialog that says "no configurable parameters".
+    const MA_FAMILY = new Set(["MA", "SMA", "EMA", "HMA", "WMA", "VWMA", "TEMA", "DEMA"])
+    const routePredefinedIndicator = (
+      slot: "inp1" | "inp2",
+      block: any,
+    ): boolean => {
+      if (!block || typeof block !== "object" || !("name" in block)) return false
+      // A user-defined custom indicator carries a custom_component_id from the
+      // backend. Don't intercept those — they own their own schema.
+      if (block.custom_component_id != null) return false
+      const name = block.name
+      if (name === "RSI" || name === "RSI_MA") { setShowRsiModal(true); return true }
+      if (name === "BBANDS") { setShowBollingerModal(true); return true }
+      if (name === "MACD") { setShowMacdModal(true); return true }
+      if (name === "SupertrendIndicator") { setShowSuperTrendModal(true); return true }
+      if (name === "Volume_MA") { setShowVolumeModal(true); return true }
+      if (name === "VolumeDelta" || name === "CumulativeVolumeDelta") { setShowVolumeDeltaModal(true); return true }
+      if (name === "HistoricalPriceLevel") { setShowHistoricalPriceLevelModal(true); return true }
+      if (name === "CandleSize") { setShowCandleSizeModal(true); return true }
+      if (name === "ATR") { openAtrModal(statementIndex, conditionIndex, slot); return true }
+      if (name === "Stochastic") { openStochasticModal(statementIndex, conditionIndex, slot); return true }
+      if (MA_FAMILY.has(name)) { setShowMaModal(true); return true }
+      return false
+    }
+
     switch (componentType) {
       case "inp1":
+        if (routePredefinedIndicator("inp1", condition.inp1)) break
         if (condition.inp1 && (condition.inp1 as any).type === "CUSTOM_I") {
           openCustomBlockEditor(statementIndex, conditionIndex, "inp1", condition.inp1)
           break
         }
-        if (condition.inp1 && "name" in condition.inp1) {
-          if (condition.inp1.name === "RSI" || condition.inp1.name === "RSI_MA") {
-            setShowRsiModal(true)
-          } else if (condition.inp1.name === "BBANDS") {
-            setShowBollingerModal(true)
-          } else if (condition.inp1.name === "MACD") {
-            setShowMacdModal(true)
-          } else if (condition.inp1.name === "SupertrendIndicator") {
-            setShowSuperTrendModal(true)
-          } else if (condition.inp1.name === "Volume_MA") {
-            setShowVolumeModal(true)
-          } else if (condition.inp1.name === "VolumeDelta" || condition.inp1.name === "CumulativeVolumeDelta") {
-            setShowVolumeDeltaModal(true)
-          } else if (condition.inp1.name === "HistoricalPriceLevel") {
-            setShowHistoricalPriceLevelModal(true)
-          } else if (condition.inp1.name === "CandleSize") {
-            setShowCandleSizeModal(true)
-          } else if (condition.inp1.name === "ATR") {
-            setActiveStatementIndex(statementIndex)
-            setActiveConditionIndex(conditionIndex)
-            openAtrModal(statementIndex, conditionIndex, "inp1")
-          } else if (condition.inp1.name === "Stochastic" || condition.inp1.name === "Stochastic") {
-            openStochasticModal(statementIndex, conditionIndex, "inp1")
-          }
-        } else if (condition.inp1 && "input" in condition.inp1) {
+        if (condition.inp1 && "input" in condition.inp1) {
           if (condition.inp1.input === "volume") {
             setShowVolumeModal(true)
           } else if (["open", "close", "high", "low"].includes(condition.inp1.input?.toLowerCase() || "")) {
@@ -1382,39 +1433,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         break
 
       case "inp2":
+        if (routePredefinedIndicator("inp2", condition.inp2)) break
         if (condition.inp2 && (condition.inp2 as any).type === "CUSTOM_I") {
           openCustomBlockEditor(statementIndex, conditionIndex, "inp2", condition.inp2)
           break
         }
-        if (condition.inp2 && "name" in condition.inp2) {
-          if (condition.inp2.name === "RSI" || condition.inp2.name === "RSI_MA") {
-            setShowRsiModal(true)
-          } else if (condition.inp2.name === "BBANDS") {
-            setShowBollingerModal(true)
-          } else if (condition.inp2.name === "MACD") {
-            setActiveStatementIndex(statementIndex)
-            setActiveConditionIndex(conditionIndex)
-            setShowMacdModal(true)
-          } else if (condition.inp2.name === "SupertrendIndicator") {
-            setActiveStatementIndex(statementIndex)
-            setActiveConditionIndex(conditionIndex)
-            setShowSuperTrendModal(true)
-          } else if (condition.inp2.name === "Volume_MA") {
-            setShowVolumeModal(true)
-          } else if (condition.inp2.name === "VolumeDelta" || condition.inp2.name === "CumulativeVolumeDelta") {
-            setShowVolumeDeltaModal(true)
-          } else if (condition.inp2.name === "HistoricalPriceLevel") {
-            setShowHistoricalPriceLevelModal(true)
-          } else if (condition.inp2.name === "CandleSize") {
-            setShowCandleSizeModal(true)
-          } else if (condition.inp2.name === "ATR") {
-            setActiveStatementIndex(statementIndex)
-            setActiveConditionIndex(conditionIndex)
-            openAtrModal(statementIndex, conditionIndex, "inp2")
-          } else if (condition.inp2.name === "Stochastic" || condition.inp2.name === "Stochastic") {
-            openStochasticModal(statementIndex, conditionIndex, "inp2")
-          }
-        } else if (condition.inp2 && "input" in condition.inp2) {
+        if (condition.inp2 && "input" in condition.inp2) {
           if (condition.inp2.input === "volume") {
             setShowVolumeModal(true)
           } else if (typeof condition.inp2.input === "string" && ["open", "close", "high", "low"].includes(condition.inp2.input.toLowerCase())) {
@@ -2004,8 +2028,17 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     setStatements(newStatements)
   }
 
-  // Update the handleAddComponent function to move the timeframe into inp1 and remove it from the condition
+  /**
+   * Entry point for inserting a new component from the sidebar or search
+   * box. This is always an "insert" flow, never an "edit". editingComponent
+   * is the chip-click flag for the edit flow, so we clear it here to keep
+   * the two flows disjoint - otherwise a stale conditionIndex from a prior
+   * chip click leaks into modal onSave handlers and they misroute the save
+   * (worst case: writes to the wrong condition; previously crashed when the
+   * stale index pointed past the end of the array).
+   */
   const handleAddComponent = (statementIndex: number, component: string) => {
+    setEditingComponent(null)
     const newStatements = [...statements]
     const currentStatement = newStatements[statementIndex]
     let lastAddedStochasticTarget: { target: "inp1" | "inp2"; timeframe?: string } | null = null
@@ -2040,6 +2073,17 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
       // Check if we already have inp1 and an operator - if so, we're adding to inp2
       if (lastCondition.inp1 && lastCondition.operator_name) {
+        // MACD ↔ price comparison is unreadable on the backtest plot — block
+        // the reverse direction (inp1 = MACD, user clicks a Price OHLC for
+        // inp2). The forward direction is blocked at the MACD add path.
+        if (isMacdOperand(lastCondition.inp1)) {
+          toast({
+            variant: "destructive",
+            title: "Can't compare price with MACD",
+            description: "MACD renders in its own subplot (values ~±50) and is unreadable on the price axis. Replace MACD on the left with a price-scale indicator, or compare MACD against a value or another oscillator.",
+          })
+          return
+        }
         // We're adding to inp2
         const timeframe = lastCondition.timeframe || selectedTimeframe
         lastCondition.inp2 = createConstantInput(priceType, timeframe)
@@ -2070,7 +2114,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             conditionIndex: currentStatement.strategy.length - 1,
           })
         } else {
-          console.warn("Please select a behavior first before adding a then condition")
+          // Then needs an operator on the current row to bind to.
+          toast({
+            variant: "destructive",
+            title: "Pick a behaviour first",
+            description: "Add an operator (e.g. Cross Above, Above, Below) on this row before adding a Then.",
+          })
         }
       }
     } else if (component.toLowerCase() === "timeframe") {
@@ -2307,6 +2356,16 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               timeframe: timeframe,
             }
           } else if (component.toLowerCase() === "macd") {
+            // MACD lives in its own panel — comparing it against OHLC is
+            // unreadable and the backend ignores any overlay intent.
+            if (isPriceOhlcOperand(lastCondition.inp1)) {
+              toast({
+                variant: "destructive",
+                title: "Can't compare MACD with price",
+                description: "MACD renders in its own subplot (values ~±50) and is unreadable on the price axis. Use MACD vs MACD, a value, or another oscillator.",
+              })
+              return
+            }
             lastCondition.inp2 = {
               type: "CUSTOM_I",
               name: "MACD",
@@ -2342,15 +2401,20 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               // We're adding derivative to an existing indicator
               setShowDerivativeModal(true)
             } else {
-              // No indicator selected yet, show error or default behavior
-              console.warn("Please select an indicator first before adding a derivative")
+              // Derivative/Gradient wraps an existing indicator — the user
+              // must add one first.
+              toast({
+                variant: "destructive",
+                title: "Pick an indicator first",
+                description: "Add an indicator on this row before adding a Derivative / Gradient — it wraps the existing indicator.",
+              })
             }
           } else if (component.includes("MA") || component.includes("_MA")) {
-            // Special handling for Volume_MA to preserve proper casing
-            let indicatorName = component.toUpperCase().replace("-", "_");
-            if (component.toLowerCase() === "volume_ma" || component.toLowerCase() === "volume-ma") {
-              indicatorName = "Volume_MA";
-            }
+            // Normalise to one of the backend's case-sensitive MA-family
+            // names: MA, Volume_MA, Open_MA, Close_MA, RSI_MA. Naive
+            // toUpperCase() turned "Open_MA" into "OPEN_MA" which the engine
+            // doesn't recognise.
+            const indicatorName = normalizeMaFamilyName(component)
 
             lastCondition.inp2 = {
               type: "CUSTOM_I",
@@ -2530,16 +2594,18 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               // We're adding derivative to an existing indicator
               setShowDerivativeModal(true)
             } else {
-              // No indicator selected yet, show error or default behavior
-              console.warn("Please select an indicator first before adding a derivative")
+              // Derivative/Gradient wraps an existing indicator — the user
+              // must add one first.
+              toast({
+                variant: "destructive",
+                title: "Pick an indicator first",
+                description: "Add an indicator on this row before adding a Derivative / Gradient — it wraps the existing indicator.",
+              })
             }
           } else if (component.includes("MA") || component.includes("_MA")) {
-            // Format for custom indicators like Volume_MA
-            // Special handling for Volume_MA to preserve proper casing
-            let indicatorName = component.toUpperCase().replace("-", "_");
-            if (component.toLowerCase() === "volume_ma" || component.toLowerCase() === "volume-ma") {
-              indicatorName = "Volume_MA";
-            }
+            // Normalise to the case-sensitive backend allowlist (see comment
+            // on the inp2 branch above).
+            const indicatorName = normalizeMaFamilyName(component)
 
             lastCondition.inp1 = {
               type: "CUSTOM_I",
@@ -2684,7 +2750,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             conditionIndex: currentStatement.strategy.length - 1,
           })
         } else {
-          console.warn("Please select a behavior first before adding a then condition")
+          // Then needs an operator on the current row to bind to.
+          toast({
+            variant: "destructive",
+            title: "Pick a behaviour first",
+            description: "Add an operator (e.g. Cross Above, Above, Below) on this row before adding a Then.",
+          })
         }
       }
     } else if (customBehaviorRegistry[component]) {
@@ -5355,45 +5426,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       )
     }
 
-    // Render Max Trade Duration inline (only in the first statement, since
-    // Max_Duration is a global cap stored on statements[0].TradingType).
-    if (statementIndex === 0) {
-      const dur = (statements[0]?.TradingType as any)?.Max_Duration
-      if (typeof dur === "string" && dur && dur !== "00:00:00") {
-        components.push(
-          <div key="max-duration-component" className="mr-2 mb-2 relative group">
-            <div className="text-xs text-gray-400 mb-1">Max Trade Duration</div>
-            <div
-              className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[180px] cursor-pointer transition-all duration-200 hover:bg-[#252728]"
-              onClick={() => setShowMaxDurationModal(true)}
-              title="Auto-close trades after this duration (resolution: one check per bar)."
-            >
-              <span className="text-gray-300">{dur}</span>
-              <ChevronDown className="ml-2 w-4 h-4" />
-            </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                setStatements((prev) => {
-                  if (prev.length === 0) return prev
-                  const next = [...prev]
-                  const first = { ...(next[0] as any) }
-                  const tt: any = { ...(first.TradingType || {}) }
-                  delete tt.Max_Duration
-                  first.TradingType = tt
-                  next[0] = first
-                  return next
-                })
-              }}
-              className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-              title="Clear Max Trade Duration"
-            >
-              <X className="w-3 h-3" />
-            </button>
-          </div>,
-        )
-      }
-    }
+    // Max Trade Duration is a strategy-wide cap (stored on
+    // statements[0].TradingType.Max_Duration) and applies to every statement,
+    // so it renders once below all statements rather than inside any single
+    // statement's tree. See the chip rendered next to the Add-statement
+    // button below the statements map.
 
     return components.reduce((acc: JSX.Element[], component, idx) => {
       const currentCursorPos = getCursorPosition(statementIndex)
@@ -6012,6 +6049,48 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               </div>
             ))}
           </div>
+
+          {/* Max Trade Duration — strategy-wide cap shared by every statement.
+              Stored once on statements[0].TradingType.Max_Duration, so it
+              renders here rather than inside any single statement's tree. */}
+          {(() => {
+            const dur = (statements[0]?.TradingType as any)?.Max_Duration
+            if (typeof dur !== "string" || !dur || dur === "00:00:00") return null
+            return (
+              <div className="flex flex-wrap items-center gap-2 mt-4 px-1">
+                <div className="mr-2 mb-2 relative group">
+                  <div className="text-xs text-gray-400 mb-1">Max Trade Duration (all statements)</div>
+                  <div
+                    className="bg-[#151718] text-white px-3 py-2 rounded-md flex items-center justify-between min-w-[180px] cursor-pointer transition-all duration-200 hover:bg-[#252728]"
+                    onClick={() => setShowMaxDurationModal(true)}
+                    title="Auto-close trades after this duration (resolution: one check per bar). Applies to every statement."
+                  >
+                    <span className="text-gray-300">{dur}</span>
+                    <ChevronDown className="ml-2 w-4 h-4" />
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setStatements((prev) => {
+                        if (prev.length === 0) return prev
+                        const next = [...prev]
+                        const first = { ...(next[0] as any) }
+                        const tt: any = { ...(first.TradingType || {}) }
+                        delete tt.Max_Duration
+                        first.TradingType = tt
+                        next[0] = first
+                        return next
+                      })
+                    }}
+                    className="absolute -top-2 -right-2 bg-[#808080] text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                    title="Clear Max Trade Duration"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            )
+          })()}
 
           {/* Add statement button */}
           <div className="flex justify-center mt-6">
@@ -8208,33 +8287,31 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               const newStatements = [...statements]
               const currentStatement = newStatements[activeStatementIndex]
 
+              // Backend's CUSTOM_I allowlist only contains "MA" — the SMA/EMA/
+              // HMA/etc. distinction belongs in `input_params.ma_type`, never
+              // in the indicator name. Earlier versions emitted name:"SMA"
+              // which the engine rejected with "Indicator 'SMA' not found".
+              // We always write name:"MA" now. The READ-side helpers still
+              // recognise the legacy bad names so old strategies migrate on
+              // first save.
+              const MA_NAME = "MA"
+
               if (editingComponent) {
                 const condition = currentStatement.strategy[editingComponent.conditionIndex]
                 const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
                 const timeframe = pendingTimeframe || "3h"
 
                 if (targetIndicator && "name" in targetIndicator && (targetIndicator.name === "MA" || targetIndicator.name === "SMA" || targetIndicator.name === "EMA" || targetIndicator.name === "HMA")) {
-                  // Update existing MA indicator
+                  // Update existing MA indicator — normalise the name on save.
+                  targetIndicator.name = MA_NAME
                   targetIndicator.input_params = {
                     ma_type: settings.maType,
                     ma_length: settings.maLength,
                   }
-                  // Update name based on MA type
-                  if (settings.maType === "SMA") {
-                    targetIndicator.name = "SMA"
-                  } else if (settings.maType === "EMA") {
-                    targetIndicator.name = "EMA"
-                  } else if (settings.maType === "HMA") {
-                    targetIndicator.name = "HMA"
-                  } else {
-                    targetIndicator.name = "MA"
-                  }
                 } else if (editingComponent.componentType === "inp2") {
-                  // Create new MA indicator in inp2
-                  const maName = settings.maType === "SMA" ? "SMA" : settings.maType === "EMA" ? "EMA" : settings.maType === "HMA" ? "HMA" : "MA"
                   condition.inp2 = {
                     type: "CUSTOM_I",
-                    name: maName,
+                    name: MA_NAME,
                     timeframe: timeframe,
                     input_params: {
                       ma_type: settings.maType,
@@ -8242,11 +8319,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                     },
                   }
                 } else if (editingComponent.componentType === "inp1") {
-                  // Create new MA indicator in inp1
-                  const maName = settings.maType === "SMA" ? "SMA" : settings.maType === "EMA" ? "EMA" : settings.maType === "HMA" ? "HMA" : "MA"
                   condition.inp1 = {
                     type: "CUSTOM_I",
-                    name: maName,
+                    name: MA_NAME,
                     timeframe: timeframe,
                     input_params: {
                       ma_type: settings.maType,
@@ -8262,9 +8337,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 // when the cursor was mid-statement).
                 const isMaPlaceholder = (ind: any) =>
                   ind && "name" in ind && (ind.name === "MA" || ind.name === "SMA" || ind.name === "EMA" || ind.name === "HMA")
-                const maName = settings.maType === "SMA" ? "SMA" : settings.maType === "EMA" ? "EMA" : settings.maType === "HMA" ? "HMA" : "MA"
                 const applyTo = (ind: any) => {
-                  ind.name = maName
+                  ind.name = MA_NAME
                   ind.input_params = { ma_type: settings.maType, ma_length: settings.maLength }
                 }
                 let applied = false
