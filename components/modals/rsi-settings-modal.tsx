@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react"
 import { X } from "lucide-react"
 import { DraggableModal } from "./draggable-modal"
+import { MA_TYPES } from "@/lib/indicator-contract"
 
 interface RsiSettingsModalProps {
   onClose: () => void
@@ -146,7 +147,7 @@ export function RsiSettingsModal({ onClose, onSave, initialSettings }: RsiSettin
   }
 
   const sources = ["Close", "Open", "High", "Low", "HL2", "HLC3", "OHLC4"]
-  const maTypes = ["SMA", "EMA", "WMA", "VWMA", "TEMA", "DEMA"]
+  const maTypes = [...MA_TYPES]
 
   return (
     <DraggableModal onClose={onClose} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md">

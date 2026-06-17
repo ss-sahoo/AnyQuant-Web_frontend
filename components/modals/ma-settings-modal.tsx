@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react"
 import { X } from "lucide-react"
 import { DraggableModal } from "./draggable-modal"
+import { MA_TYPES } from "@/lib/indicator-contract"
 
 interface MaSettingsModalProps {
   onClose: () => void
@@ -41,7 +42,7 @@ export function MaSettingsModal({ onClose, onSave, initialSettings }: MaSettings
     onClose()
   }
 
-  const maTypes = ["SMA", "EMA", "HMA"]
+  const maTypes = [...MA_TYPES]
 
   return (
     <DraggableModal onClose={onClose} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md">

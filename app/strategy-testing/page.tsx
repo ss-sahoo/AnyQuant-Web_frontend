@@ -49,6 +49,7 @@ import {
 import { X, ArrowLeft, Layout, Maximize2 } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
 import { extractErrorMessage, formatErrorForDisplay } from "@/lib/error-utils"
+import { validateStrategyStatement } from "@/lib/indicator-contract"
 import { matchesTimeframe as matchesTimeframeShared } from "@/lib/timeframe-match"
 import { StrategyTab } from "@/components/strategy-tab"
 import { BacktestTab } from "@/components/backtest-tab"
@@ -1155,6 +1156,18 @@ export default function StrategyTestingPage() {
     // Check requirements based on selected method
     if (!useMetaAPI && requiredTimeframes.length > uploadedFiles.length) {
       showToast("Not enough files uploaded for the required timeframes", 'error')
+      return
+    }
+
+    // Prove every indicator block conforms to the engine's contract before the
+    // backend ever sees it — catches engine-invalid names/params (e.g. an
+    // ma_type the dropdown shouldn't have offered) with a precise message
+    // instead of a cryptic backend failure. No-op for custom strategies, which
+    // carry no inp1/inp2 condition blocks.
+    try {
+      validateStrategyStatement(parsedStatement)
+    } catch (e: any) {
+      showToast(e?.message || "Strategy has an invalid indicator block", 'error')
       return
     }
 

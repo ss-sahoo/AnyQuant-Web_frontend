@@ -6905,14 +6905,22 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         )}
         {showAboveModal && (
           <AboveSettingsModal
-            onClose={() => setShowAboveModal(false)}
+            onClose={() => { setShowAboveModal(false); setEditingComponent(null) }}
             currentInp1={
-              statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]?.inp1
+              (editingComponent
+                ? statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+                : statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]
+              )?.inp1
             }
             onSave={(settings) => {
               const newStatements = [...statements]
-              const currentStatement = newStatements[activeStatementIndex]
-              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+              // Target the condition the user actually clicked to edit. Without
+              // this the edit always landed on the last condition, so editing
+              // the first of two "above" rows wrote to the second.
+              const stmtIdx = editingComponent ? editingComponent.statementIndex : activeStatementIndex
+              const currentStatement = newStatements[stmtIdx]
+              const condIdx = editingComponent ? editingComponent.conditionIndex : currentStatement.strategy.length - 1
+              const lastCondition = currentStatement.strategy[condIdx]
 
               if (lastCondition.operator_name === "above") {
                 const tf = settings.timeframe || "3h"
@@ -7097,6 +7105,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
               setStatements(newStatements)
               setShowAboveModal(false)
+              setEditingComponent(null)
               setTimeout(() => {
                 searchInputRefs.current[activeStatementIndex]?.focus()
               }, 100)
@@ -7163,14 +7172,21 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         )}
         {showBelowModal && (
           <BelowSettingsModal
-            onClose={() => setShowBelowModal(false)}
+            onClose={() => { setShowBelowModal(false); setEditingComponent(null) }}
             currentInp1={
-              statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]?.inp1
+              (editingComponent
+                ? statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+                : statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]
+              )?.inp1
             }
             onSave={(settings) => {
               const newStatements = [...statements]
-              const currentStatement = newStatements[activeStatementIndex]
-              const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+              // Target the clicked condition (see the "above" handler above) so
+              // editing one of several "below" rows updates the right one.
+              const stmtIdx = editingComponent ? editingComponent.statementIndex : activeStatementIndex
+              const currentStatement = newStatements[stmtIdx]
+              const condIdx = editingComponent ? editingComponent.conditionIndex : currentStatement.strategy.length - 1
+              const lastCondition = currentStatement.strategy[condIdx]
 
               if (lastCondition.operator_name === "below") {
                 const tf = settings.timeframe || "3h"
@@ -7355,6 +7371,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
               setStatements(newStatements)
               setShowBelowModal(false)
+              setEditingComponent(null)
               setTimeout(() => {
                 searchInputRefs.current[activeStatementIndex]?.focus()
               }, 100)
@@ -7840,6 +7857,19 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               setShowVolumeDeltaModal(false)
               setEditingComponent(null)
             }}
+            initialSettings={(() => {
+              if (!editingComponent) return undefined
+              const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+              const ind: any = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
+              if (ind && "name" in ind && (ind.name === "VolumeDelta" || ind.name === "CumulativeVolumeDelta")) {
+                return {
+                  indicatorType: ind.name === "CumulativeVolumeDelta" ? "cumulative-volume-delta" : "volume-delta",
+                  lowerTimeframe: ind.input_params?.lower_timeframe || "1min",
+                  resetPeriod: ind.input_params?.reset_period || "D",
+                }
+              }
+              return undefined
+            })()}
             onSave={(settings) => {
               const newStatements = [...statements]
               const currentStatement = newStatements[activeStatementIndex]
@@ -7917,6 +7947,18 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               setShowHistoricalPriceLevelModal(false)
               setEditingComponent(null)
             }}
+            initialSettings={(() => {
+              if (!editingComponent) return undefined
+              const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+              const ind: any = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
+              if (ind && "name" in ind && ind.name === "HistoricalPriceLevel") {
+                return {
+                  period: ind.input_params?.period || "W",
+                  level: ind.input_params?.level || "High",
+                }
+              }
+              return undefined
+            })()}
             onSave={(settings) => {
               const newStatements = [...statements]
               const currentStatement = newStatements[activeStatementIndex]
@@ -7980,6 +8022,18 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               setShowCandleSizeModal(false)
               setEditingComponent(null)
             }}
+            initialSettings={(() => {
+              if (!editingComponent) return undefined
+              const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+              const ind: any = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
+              if (ind && "name" in ind && ind.name === "CandleSize") {
+                return {
+                  assetType: ind.input_params?.asset_type || "gold",
+                  output: ind.input_params?.output || "pips",
+                }
+              }
+              return undefined
+            })()}
             onSave={(settings) => {
               const newStatements = [...statements]
               const currentStatement = newStatements[activeStatementIndex]

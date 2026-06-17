@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react"
 import { X } from "lucide-react"
 import { DraggableModal } from "./draggable-modal"
+import { ATR_SMOOTHING } from "@/lib/indicator-contract"
 
 interface AtrSettingsModalProps {
   onClose: () => void
@@ -40,7 +41,7 @@ export function AtrSettingsModal({ onClose, onSave, initialSettings }: AtrSettin
     onClose()
   }
 
-  const smoothingOptions = ["RMA", "SMA", "EMA", "WMA", "VWMA"]
+  const smoothingOptions = [...ATR_SMOOTHING]
 
   return (
     <DraggableModal onClose={onClose} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md">

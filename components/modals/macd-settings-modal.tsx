@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react"
 import { X } from "lucide-react"
 import { DraggableModal } from "./draggable-modal"
+import { MACD_MA_TYPES, MACD_SOURCES } from "@/lib/indicator-contract"
 
 interface MacdSettingsModalProps {
   onClose: () => void
@@ -68,8 +69,8 @@ export function MacdSettingsModal({ onClose, onSave, initialSettings }: MacdSett
     onClose()
   }
 
-  const sources = ["close", "open", "high", "low", "hl2", "hlc3", "ohlc4"]
-  const maTypes = ["SMA", "EMA", "WMA", "VWMA", "TEMA", "DEMA"]
+  const sources = [...MACD_SOURCES]
+  const maTypes = [...MACD_MA_TYPES]
 
   return (
     <DraggableModal onClose={onClose} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md">
