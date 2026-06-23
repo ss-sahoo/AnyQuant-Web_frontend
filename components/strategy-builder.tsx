@@ -1622,9 +1622,18 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             operator: `${settings.type} = Entry_Price ${settings.direction} ${settings.value}pips`,
           }
         } else if (settings.valueType === "percentage") {
-          // For percentage, we use multiplication
+          // For percentage we emit a multiplier. The sign of the move depends
+          // on the trade side:
+          //   Buy  : SL below entry (×<1), TP above (×>1)
+          //   Sell : SL above entry (×>1), TP below (×<1)
+          // Without this flip a 5% SL on a Sell strategy points the wrong way
+          // and never triggers.
+          const isShort = newStatements[targetStatementIndex]?.side === "S"
+          const pct = Number(settings.value) / 100
           const actualMultiplier =
-            settings.type === "SL" ? 1 - Number(settings.value) / 100 : 1 + Number(settings.value) / 100
+            settings.type === "SL"
+              ? (isShort ? 1 + pct : 1 - pct)
+              : (isShort ? 1 - pct : 1 + pct)
 
           equityRule = {
             statement: "and",
@@ -5704,21 +5713,35 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     const allStatementsRaw = statements.map((s, i) => ({
       name: s.saveresult || `Statement ${i + 1}`,
       side: s.side || "B",
-      strategy: s.strategy.map((condition: any) => {
-        const cleaned: any = {
-          ...condition,
-          inp1: cleanupVolumeMAIndicator(condition.inp1),
-          inp2: cleanupVolumeMAIndicator(condition.inp2),
-        }
-        // Engine contract: moving_up / moving_down are unary — they read inp1
-        // only. Drop any stale inp2 (e.g. left over from switching from a
-        // binary operator) so the JSON matches the contract regardless of
-        // whichever UI path produced this condition.
-        if (cleaned.operator_name === "moving_up" || cleaned.operator_name === "moving_down") {
-          delete cleaned.inp2
-        }
-        return transformOffset(cleaned)
-      }),
+      strategy: s.strategy
+        // Drop dangling connector rows (AND / OR / UNLESS / no_trade with no
+        // inp1 and no operator_name). These can appear when the user adds a
+        // connective and then follows it with a Trade Management action (SL,
+        // TP, Manage Exit) — the action goes into Equity[], leaving the
+        // connective row in strategy[] orphaned. The engine validator
+        // rejects them with `KeyError: 'inp1'`. The first row is always the
+        // "if" anchor and is kept regardless so its missing inp1 surfaces as
+        // a precise "first row is incomplete" error rather than disappearing.
+        .filter((condition: any, idx: number) => {
+          if (idx === 0) return true
+          if (condition.inp1 || condition.operator_name) return true
+          return false
+        })
+        .map((condition: any) => {
+          const cleaned: any = {
+            ...condition,
+            inp1: cleanupVolumeMAIndicator(condition.inp1),
+            inp2: cleanupVolumeMAIndicator(condition.inp2),
+          }
+          // Engine contract: moving_up / moving_down are unary — they read inp1
+          // only. Drop any stale inp2 (e.g. left over from switching from a
+          // binary operator) so the JSON matches the contract regardless of
+          // whichever UI path produced this condition.
+          if (cleaned.operator_name === "moving_up" || cleaned.operator_name === "moving_down") {
+            delete cleaned.inp2
+          }
+          return transformOffset(cleaned)
+        }),
       Equity: s.Equity || [],
       ...(s.TradingSession && { TradingSession: s.TradingSession }),
     }))
@@ -8474,6 +8497,14 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         {showSLTPSettings.show && (
           <SLTPSettingsModal
             type={showSLTPSettings.type}
+            side={(() => {
+              // Use the owning statement's side: when editing, the rule lives
+              // on editingEquityRule.statementIndex; otherwise the active
+              // statement. Buy ("B") → SL "-" / TP "+"; Sell ("S") → mirrored.
+              const idx = editingEquityRule ? editingEquityRule.statementIndex : activeStatementIndex
+              const s = statements[idx]?.side
+              return s === "B" || s === "S" ? s : undefined
+            })()}
             onClose={() => {
               setShowSLTPSettings({ show: false, type: "SL" })
               setEditingEquityRule(null)
@@ -8775,6 +8806,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         {showPartialTPModal && (
           <PartialTPSettingsModal
             onClose={() => setShowPartialTPModal(false)}
+            side={(() => {
+              const idx = editingEquityRule ? editingEquityRule.statementIndex : activeStatementIndex
+              const s = statements[idx]?.side
+              return s === "B" || s === "S" ? s : undefined
+            })()}
             initialLevels={(() => {
               if (editingEquityRule) {
                 const rule = statements[editingEquityRule.statementIndex]?.Equity[editingEquityRule.equityIndex]
@@ -8835,6 +8871,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         {showManageExitModal && (
           <ManageExitSettingsModal
             onClose={() => setShowManageExitModal(false)}
+            side={(() => {
+              const idx = editingEquityRule ? editingEquityRule.statementIndex : activeStatementIndex
+              const s = statements[idx]?.side
+              return s === "B" || s === "S" ? s : undefined
+            })()}
             initialItems={(() => {
               if (!editingEquityRule) return undefined
               const rule = statements[editingEquityRule.statementIndex]?.Equity[editingEquityRule.equityIndex]

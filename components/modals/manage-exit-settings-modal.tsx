@@ -16,6 +16,12 @@ interface ManageExitSettingsModalProps {
   onClose: () => void
   onSave: (settings: ManageExitSettings) => void
   initialItems?: ManageExitItem[]
+  /**
+   * Trade direction of the owning statement. "B" = Buy / Long, "S" = Sell /
+   * Short. Drives the default sign of seeded Price levels (above entry for
+   * Buy, below for Sell). User-typed prices and edits flow through verbatim.
+   */
+  side?: "B" | "S"
 }
 
 // Backend regex (from spec):
@@ -25,16 +31,20 @@ interface ManageExitSettingsModalProps {
 // pips↔points conversion (it caused 10× drift round-tripping through the UI).
 const PRICE_RE = /^[A-Za-z0-9_.]+(\s*[-+]\s*\d+(\.\d+)?(\s*pips)?)?$/
 
-export function ManageExitSettingsModal({ onClose, onSave, initialItems }: ManageExitSettingsModalProps) {
+export function ManageExitSettingsModal({ onClose, onSave, initialItems, side }: ManageExitSettingsModalProps) {
+  // Buy (default): exit levels are above entry (+). Sell: below entry (−).
+  const defaultSign = side === "S" ? "-" : "+"
+  const defaultPrice = `Entry_Price ${defaultSign} 200pips`
+
   const [items, setItems] = useState<ManageExitItem[]>(
     initialItems && initialItems.length > 0
       ? initialItems.map(item => ({ Price: item.Price }))
-      : [{ Price: "Entry_Price + 200pips" }],
+      : [{ Price: defaultPrice }],
   )
   const [error, setError] = useState<string | null>(null)
 
   const addItem = () => {
-    setItems(prev => [...prev, { Price: "Entry_Price + 200pips" }])
+    setItems(prev => [...prev, { Price: defaultPrice }])
   }
 
   const updateItem = (index: number, value: string) => {
@@ -96,7 +106,7 @@ export function ManageExitSettingsModal({ onClose, onSave, initialItems }: Manag
                     value={item.Price}
                     onChange={(e) => updateItem(index, e.target.value)}
                     className="w-full bg-white border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
-                    placeholder="Entry_Price + 200pips"
+                    placeholder={defaultPrice}
                   />
                 </div>
               </div>

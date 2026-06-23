@@ -19,6 +19,12 @@ interface PartialTPSettingsModalProps {
   onClose: () => void
   onSave: (settings: PartialTPSettings) => void
   initialLevels?: PartialTPLevel[]
+  /**
+   * Trade direction of the owning statement. "B" = Buy / Long, "S" = Sell /
+   * Short. Drives the default sign of seeded Price levels (above entry for
+   * Buy, below for Sell). User-typed prices and edits flow through verbatim.
+   */
+  side?: "B" | "S"
 }
 
 // Values flow through this modal verbatim. The previous 1:10 pips↔points
@@ -26,7 +32,11 @@ interface PartialTPSettingsModalProps {
 // "100points" produced "1000pips" in the saved JSON), so we now store exactly
 // what the user types.
 
-export function PartialTPSettingsModal({ onClose, onSave, initialLevels }: PartialTPSettingsModalProps) {
+export function PartialTPSettingsModal({ onClose, onSave, initialLevels, side }: PartialTPSettingsModalProps) {
+  // Buy (default): TP levels are above entry (+). Sell: below entry (−).
+  const defaultSign = side === "S" ? "-" : "+"
+  const defaultPrice = `Entry_Price ${defaultSign} 200pips`
+
   const [levels, setLevels] = useState<PartialTPLevel[]>(
     initialLevels && initialLevels.length > 0
       ? initialLevels.map(level => ({
@@ -34,11 +44,11 @@ export function PartialTPSettingsModal({ onClose, onSave, initialLevels }: Parti
           Close: level.Close,
           Action: level.Action,
         }))
-      : [{ Price: "Entry_Price + 200pips", Close: "50%" }],
+      : [{ Price: defaultPrice, Close: "50%" }],
   )
 
   const addLevel = () => {
-    setLevels((prev) => [...prev, { Price: "Entry_Price + 200pips", Close: "50%" }])
+    setLevels((prev) => [...prev, { Price: defaultPrice, Close: "50%" }])
   }
 
   const updateLevel = (index: number, field: keyof PartialTPLevel, value: string) => {
@@ -86,7 +96,7 @@ export function PartialTPSettingsModal({ onClose, onSave, initialLevels }: Parti
                     value={level.Price}
                     onChange={(e) => updateLevel(index, "Price", e.target.value)}
                     className="w-full bg-white border border-gray-300 px-3 py-2 rounded-md focus:outline-none"
-                    placeholder="Entry_Price + 200pips"
+                    placeholder={defaultPrice}
                   />
                 </div>
 

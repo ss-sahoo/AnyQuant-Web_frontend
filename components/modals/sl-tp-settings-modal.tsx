@@ -6,6 +6,13 @@ import { DraggableModal } from "./draggable-modal"
 
 interface SLTPSettingsModalProps {
   type: "SL" | "TP"
+  /**
+   * Trade direction of the owning statement. "B" = Buy / Long, "S" = Sell /
+   * Short. Used only to seed the default direction sign — Buy expects
+   * SL below entry (−) and TP above (+); Sell mirrors that. If undefined the
+   * modal falls back to the Buy defaults.
+   */
+  side?: "B" | "S"
   onClose: () => void
   onSave: (settings: SLTPSettings) => void
   initialSettings?: Partial<SLTPSettings>
@@ -53,11 +60,15 @@ const pointsToPips = (text: string): string => {
   })
 }
 
-export function SLTPSettingsModal({ type, onClose, onSave, initialSettings }: SLTPSettingsModalProps) {
+export function SLTPSettingsModal({ type, side, onClose, onSave, initialSettings }: SLTPSettingsModalProps) {
+  // Buy (and undefined side): SL "-", TP "+". Sell: flip both.
+  const sideDefaultDirection: "+" | "-" = side === "S"
+    ? (type === "SL" ? "+" : "-")
+    : (type === "SL" ? "-" : "+")
   const [settings, setSettings] = useState<SLTPSettings>({
     type,
     valueType: initialSettings?.valueType || "pips",
-    direction: initialSettings?.direction || (type === "SL" ? "-" : "+"),
+    direction: initialSettings?.direction || sideDefaultDirection,
     value: initialSettings?.value ? pipsToPoints(initialSettings.value) : (type === "SL" ? "90" : "150"),
     useAdvanced: initialSettings?.useAdvanced || false,
     trailingStop: initialSettings?.trailingStop || false,
