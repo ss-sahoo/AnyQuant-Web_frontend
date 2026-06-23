@@ -33,8 +33,13 @@ export const SOURCES = ["Open", "High", "Low", "Close", "Volume"] as const
 /** OHLCV `input` for a `type: "C"` column block (lowercase — engine reads inp.input). */
 export const OHLCV_INPUTS = ["open", "high", "low", "close", "volume"] as const
 
-/** MA types accepted by TechnicalIndicators.moving_average (the MA family). */
-export const MA_TYPES = ["SMA", "EMA", "WMA", "VWMA", "SMMA (RMA)", "Bollinger Bands"] as const
+/** MA types accepted by TechnicalIndicators.moving_average (the MA family).
+ *  "Bollinger Bands" was removed from this set — when it was selected as an
+ *  ma_type it acted as a band rather than a moving average, which doesn't fit
+ *  the MA-family dropdowns. The engine still accepts it as a string value, so
+ *  legacy strategies that picked it continue to load; it's just no longer
+ *  offered as an option in the UI. */
+export const MA_TYPES = ["SMA", "EMA", "WMA", "VWMA", "SMMA (RMA)"] as const
 
 /**
  * MA types accepted by MACD._moving_average_custom. NOTE this is a *subset* of

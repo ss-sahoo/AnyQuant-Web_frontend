@@ -1,9 +1,11 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, Fragment } from "react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Plus, X, Trash2 } from "lucide-react"
+import { applyEdits, validateRows, type PersistableRow } from "@/lib/optimisation-form-persistence"
+import { editStrategy } from "@/app/AllApiCalls"
 
 interface Parameter {
   id: string
@@ -78,6 +80,13 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
   ])
   const [isSaving, setIsSaving] = useState(false)
   const [showEquityConstraints, setShowEquityConstraints] = useState(false)
+  // Per-row range-validation errors, keyed by encoding.
+  const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
+
+  // Strategy primary key for the PATCH /api/strategies/<pk>/edit/ persistence.
+  const strategyId =
+    parsedStatement?.id ??
+    (typeof window !== "undefined" ? localStorage.getItem("strategy_id") : null)
 
   // Calculate maximum number of constraint groups
   const maxConstraintGroups = Math.floor(parameters.filter(p => p.optimise).length / 2)
@@ -105,7 +114,9 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
               start: isNumberType && hasRange && param.range?.[0] !== undefined ? param.range[0].toString() : "",
               step: isNumberType && param.step !== undefined ? param.step.toString() : "",
               stop: isNumberType && hasRange && param.range?.[1] !== undefined ? param.range[1].toString() : "",
-              editable: isOptimisable && isNumberType && hasRange,
+              // Start/step/stop are editable for any numeric param regardless of
+              // the optimise toggle, so the user can set the range up front.
+              editable: isNumberType,
               type: param.type,
               constraintGroups: []
             }
@@ -161,7 +172,23 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
 
   const handleOptimiseChange = (id: string, checked: boolean) => {
     setParameters((prevParams) =>
-      prevParams.map((param) => (param.id === id ? { ...param, optimise: checked } : param)),
+      prevParams.map((param) => {
+        if (param.id !== id) return param
+        // Start/step/stop stay editable for numbers whether optimise is on or off.
+        const updated: Parameter = { ...param, optimise: checked, editable: param.type === "number" }
+        // OFF -> ON with no prior range: seed the backend's heuristic
+        // (start = N*0.5, step = N*0.1, stop = N*1.5) so the dict-form we
+        // persist has a sensible initial range.
+        if (checked && param.type === "number") {
+          const n = Number(param.default)
+          if (Number.isFinite(n)) {
+            if (!param.start) updated.start = (n * 0.5).toString()
+            if (!param.step) updated.step = (n * 0.1).toString()
+            if (!param.stop) updated.stop = (n * 1.5).toString()
+          }
+        }
+        return updated
+      }),
     )
   }
 
@@ -292,8 +319,39 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
       return
     }
 
+    // Persist user-edited ranges/values into the strategy JSON. Build the rows
+    // the persistence layer understands, validate every optimise-on range, and
+    // bail with inline errors before any network call if something is off.
+    const persistRows: PersistableRow[] = parameters.map((p) => ({
+      encoding: p.encoding,
+      optimise: p.optimise,
+      type: p.type,
+      default: p.default,
+      start: p.start,
+      step: p.step,
+      stop: p.stop,
+    }))
+    const { errors } = validateRows(persistRows)
+    if (Object.keys(errors).length > 0) {
+      setRowErrors(errors)
+      alert("Fix the highlighted range errors before saving.")
+      return
+    }
+    setRowErrors({})
+
     setIsSaving(true)
     try {
+      // Write the edited start/step/stop/value back into the strategy JSON at
+      // the path each encoding maps to, then PATCH only the roots that changed.
+      // optimisation_strategy_creator reads these back on reload, so the rows
+      // round-trip with the saved range / optimise state.
+      const patchBody = applyEdits(parsedStatement, persistRows)
+      if (strategyId && Object.keys(patchBody).length > 0) {
+        await editStrategy(String(strategyId), patchBody)
+      } else if (!strategyId) {
+        console.warn("PropertiesTab: no strategy id available; ranges not persisted to the strategy JSON.")
+      }
+
       const currentOptimisationFormString = localStorage.getItem("optimisation_form")
       const currentOptimisationForm: OptimisationForm = currentOptimisationFormString
         ? JSON.parse(currentOptimisationFormString)
@@ -552,7 +610,8 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
               </thead>
               <tbody>
                 {parameters.map((param) => (
-                  <tr key={param.id} className="border-b border-[#2b2e38]">
+                  <Fragment key={param.id}>
+                  <tr className={`border-b border-[#2b2e38] ${rowErrors[param.encoding] ? "bg-red-950/40" : ""}`}>
                     <td className="px-4 py-2">
                       <Checkbox
                         checked={param.optimise}
@@ -634,6 +693,17 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
                       <td className="px-4 py-2"></td>
                     )}
                   </tr>
+                  {rowErrors[param.encoding] && (
+                    <tr>
+                      <td
+                        colSpan={7 + constraintGroups.length + (shouldShowAddGroupColumn() ? 1 : 0)}
+                        className="px-4 py-1 text-red-400 text-xs"
+                      >
+                        {rowErrors[param.encoding]}
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

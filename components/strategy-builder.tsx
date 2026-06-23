@@ -14,6 +14,8 @@ import { MacdSettingsModal } from "@/components/modals/macd-settings-modal"
 import { SuperTrendSettingsModal } from "@/components/modals/supertrend-settings-modal"
 import { MaSettingsModal } from "@/components/modals/ma-settings-modal"
 import { RsiSettingsModal } from "@/components/modals/rsi-settings-modal"
+import { RsiMaSettingsModal } from "@/components/modals/rsi-ma-settings-modal"
+import { VolumeMaSettingsModal } from "@/components/modals/volume-ma-settings-modal"
 import { ChannelSettingsModal } from "@/components/modals/channel-settings-modal"
 import { SLTPSettingsModal, type SLTPSettings } from "@/components/modals/sl-tp-settings-modal"
 import { PriceSettingsModal } from "@/components/modals/price-settings-modal"
@@ -37,6 +39,7 @@ import { ManageExitSettingsModal, type ManageExitSettings } from "@/components/m
 import type { TradeTimingSettings } from "@/components/modals/trade-timing-modal"
 import { MaxTradeDurationModal } from "@/components/modals/max-trade-duration-modal"
 import { VolumeDeltaSettingsModal } from "@/components/modals/volume-delta-settings-modal"
+import { CumulativeVolumeDeltaSettingsModal } from "@/components/modals/cumulative-volume-delta-settings-modal"
 import { HistoricalPriceLevelSettingsModal } from "@/components/modals/historical-price-level-settings-modal"
 import { CandleSizeSettingsModal } from "@/components/modals/candle-size-settings-modal"
 import { DeveloperModePage } from "@/components/developer-mode-page"
@@ -267,6 +270,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const [showSuperTrendModal, setShowSuperTrendModal] = useState(false)
   const [showMaModal, setShowMaModal] = useState(false)
   const [showRsiModal, setShowRsiModal] = useState(false)
+  const [showRsiMaModal, setShowRsiMaModal] = useState(false)
+  const [showVolumeMaModal, setShowVolumeMaModal] = useState(false)
   const [showChannelModal, setShowChannelModal] = useState(false)
   const [showSLTPSettings, setShowSLTPSettings] = useState<{ show: boolean; type: "SL" | "TP" }>({
     show: false,
@@ -280,6 +285,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   // the JSON payload when a strategy is loaded then re-saved.
   const [tradeTiming, setTradeTiming] = useState<TradeTimingSettings>({ entry_at: "bar close", exit_at: "bar close" })
   const [showVolumeDeltaModal, setShowVolumeDeltaModal] = useState(false)
+  const [showCumulativeVolumeDeltaModal, setShowCumulativeVolumeDeltaModal] = useState(false)
   const [showHistoricalPriceLevelModal, setShowHistoricalPriceLevelModal] = useState(false)
   const [showCandleSizeModal, setShowCandleSizeModal] = useState(false)
   const [showDerivativeModal, setShowDerivativeModal] = useState(false)
@@ -1353,7 +1359,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         settings.maLength = inp2.input_params?.ma_length || 14;
         settings.rsiSource = inp2.input_params?.rsi_source || "Close";
         settings.maType = inp2.input_params?.ma_type || "SMA";
-        settings.bbStdDev = inp2.input_params?.bb_stddev || 2.0;
+        // bb_stddev no longer read — only used by the Bollinger Bands ma_type,
+        // which has been removed from MA_TYPES.
       } else if (inp2.name === "BBANDS") {
         settings.band = inp2.input || "upperband";
         settings.timeperiod = inp2.input_params?.timeperiod || 20;
@@ -1402,12 +1409,14 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       // backend. Don't intercept those — they own their own schema.
       if (block.custom_component_id != null) return false
       const name = block.name
-      if (name === "RSI" || name === "RSI_MA") { setShowRsiModal(true); return true }
+      if (name === "RSI") { setShowRsiModal(true); return true }
+      if (name === "RSI_MA") { setShowRsiMaModal(true); return true }
       if (name === "BBANDS") { setShowBollingerModal(true); return true }
       if (name === "MACD") { setShowMacdModal(true); return true }
       if (name === "SupertrendIndicator") { setShowSuperTrendModal(true); return true }
-      if (name === "Volume_MA") { setShowVolumeModal(true); return true }
-      if (name === "VolumeDelta" || name === "CumulativeVolumeDelta") { setShowVolumeDeltaModal(true); return true }
+      if (name === "Volume_MA") { setShowVolumeMaModal(true); return true }
+      if (name === "VolumeDelta") { setShowVolumeDeltaModal(true); return true }
+      if (name === "CumulativeVolumeDelta") { setShowCumulativeVolumeDeltaModal(true); return true }
       if (name === "HistoricalPriceLevel") { setShowHistoricalPriceLevelModal(true); return true }
       if (name === "CandleSize") { setShowCandleSizeModal(true); return true }
       if (name === "ATR") { openAtrModal(statementIndex, conditionIndex, slot); return true }
@@ -2671,12 +2680,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         const shouldShowModal = !lastCondition.operator_name || (lastCondition.inp1 && lastCondition.operator_name)
 
         if (shouldShowModal) {
-          if (
-            component.toLowerCase() === "rsi" ||
+          if (component.toLowerCase() === "rsi") {
+            setShowRsiModal(true)
+          } else if (
             component.toLowerCase() === "rsi_ma" ||
             component.toLowerCase() === "rsi-ma"
           ) {
-            setShowRsiModal(true)
+            setShowRsiMaModal(true)
           } else if (component.toLowerCase() === "atr") {
             const conditionIndex = currentStatement.strategy.length - 1
             const targetInput = lastCondition.operator_name && lastCondition.inp2 ? "inp2" : "inp1"
@@ -2716,9 +2726,15 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             setShowBollingerModal(true)
           } else if (component.toLowerCase() === "volume") {
             setShowVolumeModal(true)
-          } else if (component.toLowerCase() === "volume delta" || component.toLowerCase() === "volume-delta" ||
-            component.toLowerCase() === "cumulative volume delta" || component.toLowerCase() === "cumulative-volume-delta") {
+          } else if (
+            component.toLowerCase() === "volume_ma" ||
+            component.toLowerCase() === "volume-ma"
+          ) {
+            setShowVolumeMaModal(true)
+          } else if (component.toLowerCase() === "volume delta" || component.toLowerCase() === "volume-delta") {
             setShowVolumeDeltaModal(true)
+          } else if (component.toLowerCase() === "cumulative volume delta" || component.toLowerCase() === "cumulative-volume-delta") {
+            setShowCumulativeVolumeDeltaModal(true)
           } else if (component.toLowerCase() === "historical price level" || component.toLowerCase() === "historical-price-level") {
             setShowHistoricalPriceLevelModal(true)
           } else if (component.toLowerCase() === "candle size" || component.toLowerCase() === "candle-size") {
@@ -2990,7 +3006,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               ma_length: inp1.input_params?.ma_length || 14,
               rsi_source: inp1.input_params?.rsi_source || "Close",
               ma_type: inp1.input_params?.ma_type || "SMA",
-              bb_stddev: inp1.input_params?.bb_stddev || 2.0,
+              // Only reveal bb_stddev if the saved data actually carries it
+              // (legacy strategies); new RSI_MA blocks don't include it.
+              ...(inp1.input_params?.bb_stddev != null && { bb_stddev: inp1.input_params.bb_stddev }),
               ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
             },
           }
@@ -3188,7 +3206,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             ma_length: inp2.input_params?.ma_length || 14,
             rsi_source: inp2.input_params?.rsi_source || "Close",
             ma_type: inp2.input_params?.ma_type || "SMA",
-            bb_stddev: inp2.input_params?.bb_stddev || 2.0,
+            // Only reveal bb_stddev if legacy data carries it.
+            ...(inp2.input_params?.bb_stddev != null && { bb_stddev: inp2.input_params.bb_stddev }),
             ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
           },
         }
@@ -5572,13 +5591,14 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     return result
   }, [statements])
 
-  // Add state to store the latest RSI MA settings
+  // Add state to store the latest RSI MA settings.
+  // bb_stddev is no longer collected — it was only consumed by the engine
+  // when ma_type == "Bollinger Bands", which is no longer in MA_TYPES.
   const [rsiMaSettings, setRsiMaSettings] = useState({
     rsi_length: 14,
     rsi_source: "Close",
     ma_type: "SMA",
     ma_length: 14,
-    bb_stddev: 2.0,
   })
 
   // Add state for indicator modal at the parent level
@@ -5685,10 +5705,17 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       name: s.saveresult || `Statement ${i + 1}`,
       side: s.side || "B",
       strategy: s.strategy.map((condition: any) => {
-        const cleaned = {
+        const cleaned: any = {
           ...condition,
           inp1: cleanupVolumeMAIndicator(condition.inp1),
           inp2: cleanupVolumeMAIndicator(condition.inp2),
+        }
+        // Engine contract: moving_up / moving_down are unary — they read inp1
+        // only. Drop any stale inp2 (e.g. left over from switching from a
+        // binary operator) so the JSON matches the contract regardless of
+        // whichever UI path produced this condition.
+        if (cleaned.operator_name === "moving_up" || cleaned.operator_name === "moving_down") {
+          delete cleaned.inp2
         }
         return transformOffset(cleaned)
       }),
@@ -6257,14 +6284,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                     const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
                     const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
                     const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
-                    const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
+                    // bb_stddev removed — only used by "Bollinger Bands" ma_type, no longer offered.
 
                     console.log('🔧 Final RSI_MA inp2 values:', {
                       rsi_length: finalRsiLength,
                       rsi_source: finalRsiSource,
                       ma_length: finalMaLength,
                       ma_type: finalMaType,
-                      bb_stddev: finalBbStdDev
                     });
 
                     lastCondition.inp2 = {
@@ -6276,7 +6302,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                         rsi_source: finalRsiSource,
                         ma_length: finalMaLength,
                         ma_type: finalMaType,
-                        bb_stddev: finalBbStdDev,
                       },
                     }
                   } else if (settings.indicator === "volume-ma") {
@@ -6614,14 +6639,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                     const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
                     const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
                     const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
-                    const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
+                    // bb_stddev removed — only used by "Bollinger Bands" ma_type, no longer offered.
 
                     console.log('🔧 Final RSI_MA inp2 values (crossing-down):', {
                       rsi_length: finalRsiLength,
                       rsi_source: finalRsiSource,
                       ma_length: finalMaLength,
                       ma_type: finalMaType,
-                      bb_stddev: finalBbStdDev
                     });
 
                     lastCondition.inp2 = {
@@ -6633,7 +6657,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                         rsi_source: finalRsiSource,
                         ma_length: finalMaLength,
                         ma_type: finalMaType,
-                        bb_stddev: finalBbStdDev,
                       },
                     }
                   } else if (settings.indicator === "volume-ma") {
@@ -6964,14 +6987,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                       const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
                       const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
                       const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
-                      const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
+                      // bb_stddev removed — only used by "Bollinger Bands" ma_type, no longer offered.
 
                       console.log('🔧 Final RSI_MA inp2 values (above):', {
                         rsi_length: finalRsiLength,
                         rsi_source: finalRsiSource,
                         ma_length: finalMaLength,
                         ma_type: finalMaType,
-                        bb_stddev: finalBbStdDev
                       });
 
                       lastCondition.inp2 = {
@@ -6983,8 +7005,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                           rsi_source: finalRsiSource,
                           ma_type: finalMaType,
                           ma_length: finalMaLength,
-                          bb_stddev: finalBbStdDev,
-                        },
+                          },
                       }
                       break
 
@@ -7230,14 +7251,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                       const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
                       const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
                       const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
-                      const finalBbStdDev = settings.bbStdDev || savedRsiSettings?.bbStdDev || 2.0;
+                      // bb_stddev removed — only used by "Bollinger Bands" ma_type, no longer offered.
 
                       console.log('🔧 Final RSI_MA inp2 values (below):', {
                         rsi_length: finalRsiLength,
                         rsi_source: finalRsiSource,
                         ma_length: finalMaLength,
                         ma_type: finalMaType,
-                        bb_stddev: finalBbStdDev
                       });
 
                       lastCondition.inp2 = {
@@ -7249,8 +7269,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                           rsi_source: finalRsiSource,
                           ma_type: finalMaType,
                           ma_length: finalMaLength,
-                          bb_stddev: finalBbStdDev,
-                        },
+                          },
                       }
                       break
 
@@ -7413,162 +7432,125 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
         {showRsiModal && (
           <RsiSettingsModal
-            onClose={() => setShowRsiModal(false)}
+            onClose={() => { setShowRsiModal(false); setEditingComponent(null) }}
             initialSettings={(() => {
-              if (editingComponent) {
-                const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
-                const indicator = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
-
-                console.log("Editing RSI component:", editingComponent, "indicator:", indicator)
-
-                if (indicator && "name" in indicator) {
-                  if (indicator.name === "RSI" && "input_params" in indicator) {
-                    return {
-                      indicatorType: "rsi",
-                      rsiLength: String(indicator.input_params?.timeperiod || 14),
-                      source: indicator.input_params?.source ? indicator.input_params.source.charAt(0).toUpperCase() + indicator.input_params.source.slice(1) : "Close",
-
-                      timeframe: indicator.timeframe || "3h",
-                    }
-                  } else if (indicator.name === "RSI_MA" && "input_params" in indicator) {
-                    const settings = {
-                      indicatorType: "rsi-ma",
-                      rsiLength: String(indicator.input_params?.rsi_length || 14),
-                      source: indicator.input_params?.rsi_source || "Close",
-                      maLength: String(indicator.input_params?.ma_length || 14),
-                      maType: indicator.input_params?.ma_type || "SMA",
-                      bbStdDev: String(indicator.input_params?.bb_stddev || 2.0),
-                      timeframe: indicator.timeframe || "3h",
-                    }
-                    console.log("RSI_MA initialSettings:", settings)
-                    return settings
-                  }
-                }
-              } else {
-                // Fallback to original behavior
-                const currentStatement = statements[activeStatementIndex]
-                const lastCondition = currentStatement?.strategy[currentStatement.strategy.length - 1]
-                const indicator = lastCondition?.inp1
-
-                if (indicator && "name" in indicator) {
-                  if (indicator.name === "RSI" && "input_params" in indicator) {
-                    return {
-                      indicatorType: "rsi",
-                      rsiLength: String(indicator.input_params?.timeperiod || 14),
-                      source: indicator.input_params?.source ? indicator.input_params.source.charAt(0).toUpperCase() + indicator.input_params.source.slice(1) : "Close",
-
-                      timeframe: indicator.timeframe || "3h",
-                    }
-                  } else if (indicator.name === "RSI_MA" && "input_params" in indicator) {
-                    return {
-                      indicatorType: "rsi-ma",
-                      rsiLength: String(indicator.input_params?.rsi_length || 14),
-                      source: indicator.input_params?.rsi_source || "Close",
-                      maLength: String(indicator.input_params?.ma_length || 14),
-                      maType: indicator.input_params?.ma_type || "SMA",
-                      bbStdDev: String(indicator.input_params?.bb_stddev || 2.0),
-                      timeframe: indicator.timeframe || "3h",
-                    }
-                  }
+              const condition = editingComponent
+                ? statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+                : statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]
+              const indicator: any = editingComponent
+                ? (editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2)
+                : condition?.inp1
+              if (indicator && "name" in indicator && indicator.name === "RSI" && "input_params" in indicator) {
+                const src = indicator.input_params?.source
+                return {
+                  rsiLength: String(indicator.input_params?.timeperiod || 14),
+                  source: typeof src === "string" && src.length > 0 ? src.charAt(0).toUpperCase() + src.slice(1) : "Close",
+                  timeframe: indicator.timeframe || "3h",
                 }
               }
               return undefined
             })()}
             onSave={(settings) => {
-              // Always update the rsiMaSettings state with the latest MA settings
-              setRsiMaSettings({
-                rsi_length: Number(settings.rsiLength),
-                rsi_source: settings.source || "Close",
-                ma_type: settings.maType || "SMA",
-                ma_length: Number(settings.maLength),
-                bb_stddev: Number(settings.bbStdDev) || 2.0,
-              })
-              // Update RSI settings
               const newStatements = [...statements]
               const currentStatement = newStatements[activeStatementIndex]
+              const buildBlock = (timeframe: string) => ({
+                type: "I" as const,
+                name: "RSI" as const,
+                timeframe,
+                input_params: {
+                  timeperiod: Number(settings.rsiLength),
+                  source: settings.source?.toLowerCase() || "close",
+                },
+              })
 
               if (editingComponent) {
                 const condition = currentStatement.strategy[editingComponent.conditionIndex]
-                const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
-
+                const targetIndicator: any =
+                  editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
                 if (targetIndicator && "timeframe" in targetIndicator) {
-                  if (settings.indicatorType === "rsi-ma") {
-                    // Update to RSI_MA
-                    const updatedIndicator = {
-                      type: "CUSTOM_I",
-                      name: "RSI_MA",
-                      timeframe: settings.timeframe || "3h",
-                      input_params: {
-                        rsi_length: Number(settings.rsiLength),
-                        rsi_source: settings.source || "Close",
-                        ma_type: settings.maType || "SMA",
-                        ma_length: Number(settings.maLength),
-                        bb_stddev: Number(settings.bbStdDev) || 2.0,
-                      },
-                    }
-
-                    if (editingComponent.componentType === "inp1") {
-                      condition.inp1 = updatedIndicator
-                    } else {
-                      condition.inp2 = updatedIndicator
-                    }
-                  } else {
-                    // Regular RSI
-                    const updatedIndicator = {
-                      type: "I",
-                      name: "RSI",
-                      timeframe: targetIndicator.timeframe,
-                      input_params: {
-                        timeperiod: Number(settings.rsiLength),
-                        source: settings.source?.toLowerCase() || "close",
-
-                      },
-                    }
-
-                    if (editingComponent.componentType === "inp1") {
-                      condition.inp1 = updatedIndicator
-                    } else {
-                      condition.inp2 = updatedIndicator
-                    }
-                  }
+                  const block = buildBlock(targetIndicator.timeframe || settings.timeframe || "3h")
+                  if (editingComponent.componentType === "inp1") condition.inp1 = block
+                  else condition.inp2 = block
                 }
               } else {
-                // Fallback to original behavior
                 const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-
                 if (lastCondition.inp1 && "timeframe" in lastCondition.inp1) {
-                  if (settings.indicatorType === "rsi-ma") {
-                    // Update to RSI_MA
-                    lastCondition.inp1 = {
-                      type: "CUSTOM_I",
-                      name: "RSI_MA",
-                      timeframe: settings.timeframe || "3h",
-                      input_params: {
-                        rsi_length: Number(settings.rsiLength),
-                        rsi_source: settings.source || "Close",
-                        ma_type: settings.maType || "SMA",
-                        ma_length: Number(settings.maLength),
-                        bb_stddev: Number(settings.bbStdDev) || 2.0,
-                      },
-                    }
-                  } else {
-                    // Regular RSI
-                    lastCondition.inp1 = {
-                      type: "I",
-                      name: "RSI",
-                      timeframe: lastCondition.inp1.timeframe,
-                      input_params: {
-                        timeperiod: Number(settings.rsiLength),
-                        source: settings.source?.toLowerCase() || "close",
-
-                      },
-                    }
-                  }
+                  lastCondition.inp1 = buildBlock(lastCondition.inp1.timeframe || settings.timeframe || "3h")
                 }
               }
 
               setStatements(newStatements)
               setShowRsiModal(false)
+              setEditingComponent(null)
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+          />
+        )}
+        {showRsiMaModal && (
+          <RsiMaSettingsModal
+            onClose={() => { setShowRsiMaModal(false); setEditingComponent(null) }}
+            initialSettings={(() => {
+              const condition = editingComponent
+                ? statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+                : statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]
+              const indicator: any = editingComponent
+                ? (editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2)
+                : condition?.inp1
+              if (indicator && "name" in indicator && indicator.name === "RSI_MA" && "input_params" in indicator) {
+                return {
+                  rsiLength: String(indicator.input_params?.rsi_length || 14),
+                  source: indicator.input_params?.rsi_source || "Close",
+                  maLength: String(indicator.input_params?.ma_length || 14),
+                  maType: indicator.input_params?.ma_type || "SMA",
+                  timeframe: indicator.timeframe || "3h",
+                }
+              }
+              return undefined
+            })()}
+            onSave={(settings) => {
+              // Mirror the RSI_MA params into rsiMaSettings so other callers
+              // (e.g. crossing-up modal indicator dropdown) can pre-fill.
+              setRsiMaSettings({
+                rsi_length: Number(settings.rsiLength),
+                rsi_source: settings.source || "Close",
+                ma_type: settings.maType || "SMA",
+                ma_length: Number(settings.maLength),
+              })
+
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
+              const buildBlock = (timeframe: string) => ({
+                type: "CUSTOM_I" as const,
+                name: "RSI_MA" as const,
+                timeframe,
+                input_params: {
+                  rsi_length: Number(settings.rsiLength),
+                  rsi_source: settings.source || "Close",
+                  ma_type: settings.maType || "SMA",
+                  ma_length: Number(settings.maLength),
+                },
+              })
+
+              if (editingComponent) {
+                const condition = currentStatement.strategy[editingComponent.conditionIndex]
+                const targetIndicator: any =
+                  editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
+                if (targetIndicator && "timeframe" in targetIndicator) {
+                  const block = buildBlock(targetIndicator.timeframe || settings.timeframe || "3h")
+                  if (editingComponent.componentType === "inp1") condition.inp1 = block
+                  else condition.inp2 = block
+                }
+              } else {
+                const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+                if (lastCondition.inp1 && "timeframe" in lastCondition.inp1) {
+                  lastCondition.inp1 = buildBlock(lastCondition.inp1.timeframe || settings.timeframe || "3h")
+                }
+              }
+
+              setStatements(newStatements)
+              setShowRsiMaModal(false)
               setEditingComponent(null)
               setTimeout(() => {
                 searchInputRefs.current[activeStatementIndex]?.focus()
@@ -7759,91 +7741,92 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             onClose={() => {
               setShowVolumeModal(false)
               setPendingVolumeIndicatorType(null)
+              setEditingComponent(null)
             }}
-            initialIndicatorType={pendingVolumeIndicatorType || undefined}
-            onSave={(settings) => {
-              // Update Volume settings
+            onSave={() => {
+              // Volume = raw OHLCV column, no params. Build a type:"C" /
+              // input:"volume" block targeting the right slot and slot owner.
               const newStatements = [...statements]
               const currentStatement = newStatements[activeStatementIndex]
 
               if (editingComponent) {
                 const condition = currentStatement.strategy[editingComponent.conditionIndex]
-                const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
-
+                const targetIndicator: any =
+                  editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
                 if (targetIndicator && "timeframe" in targetIndicator) {
-                  if (settings.indicatorType === "volume-ma") {
-                    // Update to Volume_MA
-                    const updatedIndicator = {
-                      type: "CUSTOM_I",
-                      name: "Volume_MA",
-                      timeframe: targetIndicator.timeframe,
-                      input_params: {
-                        ma_length: Number(settings.maLength),
-                      },
-                    }
-
-                    if (editingComponent.componentType === "inp1") {
-                      condition.inp1 = updatedIndicator
-                    } else {
-                      condition.inp2 = updatedIndicator
-                    }
-                  } else {
-                    // Regular Volume
-                    const updatedIndicator = createConstantInput("volume", targetIndicator.timeframe)
-
-                    if (editingComponent.componentType === "inp1") {
-                      condition.inp1 = updatedIndicator
-                    } else {
-                      condition.inp2 = updatedIndicator
-                    }
-                  }
+                  const block = createConstantInput("volume", targetIndicator.timeframe)
+                  if (editingComponent.componentType === "inp1") condition.inp1 = block
+                  else condition.inp2 = block
                 }
               } else if (pendingVolumeIndicatorType && pendingTimeframe) {
-                // Handle case when opened from "Other Indicator" section via onNext
                 const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-                const timeframe = pendingTimeframe
-
-                if (settings.indicatorType === "volume-ma" || pendingVolumeIndicatorType === "volume-ma") {
-                  // Create Volume_MA indicator in inp2
-                  lastCondition.inp2 = {
-                    type: "CUSTOM_I",
-                    name: "Volume_MA",
-                    timeframe: timeframe,
-                    input_params: {
-                      ma_length: Number(settings.maLength),
-                    },
-                  }
-                } else {
-                  // Create regular Volume indicator in inp2
-                  lastCondition.inp2 = createConstantInput("volume", timeframe)
-                }
-
+                lastCondition.inp2 = createConstantInput("volume", pendingTimeframe)
                 setPendingVolumeIndicatorType(null)
                 setPendingTimeframe("3h")
               } else {
-                // Fallback to original behavior
                 const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-
                 if (lastCondition.inp1 && "timeframe" in lastCondition.inp1) {
-                  if (settings.indicatorType === "volume-ma") {
-                    // Update to Volume_MA
-                    lastCondition.inp1 = {
-                      type: "CUSTOM_I",
-                      name: "Volume_MA",
-                      timeframe: lastCondition.inp1.timeframe,
-                      input_params: {
-                        ma_length: Number(settings.maLength),
-                      },
-                    }
-                  } else {
-                    // Regular Volume
-                    lastCondition.inp1 = createConstantInput("volume", lastCondition.inp1.timeframe)
-                  }
+                  lastCondition.inp1 = createConstantInput("volume", lastCondition.inp1.timeframe)
                 }
               }
 
               setStatements(newStatements)
               setShowVolumeModal(false)
+              setEditingComponent(null)
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+          />
+        )}
+        {showVolumeMaModal && (
+          <VolumeMaSettingsModal
+            onClose={() => { setShowVolumeMaModal(false); setEditingComponent(null) }}
+            initialSettings={(() => {
+              const condition = editingComponent
+                ? statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+                : statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]
+              const indicator: any = editingComponent
+                ? (editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2)
+                : condition?.inp1
+              if (indicator && "name" in indicator && indicator.name === "Volume_MA" && "input_params" in indicator) {
+                return { maLength: String(indicator.input_params?.ma_length || 20) }
+              }
+              return undefined
+            })()}
+            onSave={(settings) => {
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
+              const buildBlock = (timeframe: string) => ({
+                type: "CUSTOM_I" as const,
+                name: "Volume_MA" as const,
+                timeframe,
+                input_params: { ma_length: Number(settings.maLength) },
+              })
+
+              if (editingComponent) {
+                const condition = currentStatement.strategy[editingComponent.conditionIndex]
+                const targetIndicator: any =
+                  editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
+                if (targetIndicator && "timeframe" in targetIndicator) {
+                  const block = buildBlock(targetIndicator.timeframe || selectedTimeframe)
+                  if (editingComponent.componentType === "inp1") condition.inp1 = block
+                  else condition.inp2 = block
+                }
+              } else if (pendingVolumeIndicatorType && pendingTimeframe) {
+                const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+                lastCondition.inp2 = buildBlock(pendingTimeframe)
+                setPendingVolumeIndicatorType(null)
+                setPendingTimeframe("3h")
+              } else {
+                const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+                if (lastCondition.inp1 && "timeframe" in lastCondition.inp1) {
+                  lastCondition.inp1 = buildBlock(lastCondition.inp1.timeframe || selectedTimeframe)
+                }
+              }
+
+              setStatements(newStatements)
+              setShowVolumeMaModal(false)
               setEditingComponent(null)
               setTimeout(() => {
                 searchInputRefs.current[activeStatementIndex]?.focus()
@@ -7861,9 +7844,57 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               if (!editingComponent) return undefined
               const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
               const ind: any = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
-              if (ind && "name" in ind && (ind.name === "VolumeDelta" || ind.name === "CumulativeVolumeDelta")) {
+              if (ind && "name" in ind && ind.name === "VolumeDelta") {
+                return { lowerTimeframe: ind.input_params?.lower_timeframe || "1min" }
+              }
+              return undefined
+            })()}
+            onSave={(settings) => {
+              const newStatements = [...statements]
+              const currentStatement = newStatements[activeStatementIndex]
+              const buildBlock = (timeframe: string) => ({
+                type: "CUSTOM_I" as const,
+                name: "VolumeDelta" as const,
+                timeframe,
+                input_params: { lower_timeframe: settings.lowerTimeframe },
+              })
+
+              if (editingComponent) {
+                const condition = currentStatement.strategy[editingComponent.conditionIndex]
+                const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
+                if (targetIndicator && "timeframe" in targetIndicator) {
+                  const block = buildBlock(targetIndicator.timeframe || selectedTimeframe)
+                  if (editingComponent.componentType === "inp1") condition.inp1 = block
+                  else condition.inp2 = block
+                }
+              } else {
+                const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
+                const block = buildBlock(lastCondition.inp1?.timeframe || selectedTimeframe)
+                if (lastCondition.inp1 && lastCondition.operator_name) lastCondition.inp2 = block
+                else lastCondition.inp1 = block
+              }
+
+              setStatements(newStatements)
+              setShowVolumeDeltaModal(false)
+              setEditingComponent(null)
+              setTimeout(() => {
+                searchInputRefs.current[activeStatementIndex]?.focus()
+              }, 100)
+            }}
+          />
+        )}
+        {showCumulativeVolumeDeltaModal && (
+          <CumulativeVolumeDeltaSettingsModal
+            onClose={() => {
+              setShowCumulativeVolumeDeltaModal(false)
+              setEditingComponent(null)
+            }}
+            initialSettings={(() => {
+              if (!editingComponent) return undefined
+              const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+              const ind: any = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
+              if (ind && "name" in ind && ind.name === "CumulativeVolumeDelta") {
                 return {
-                  indicatorType: ind.name === "CumulativeVolumeDelta" ? "cumulative-volume-delta" : "volume-delta",
                   lowerTimeframe: ind.input_params?.lower_timeframe || "1min",
                   resetPeriod: ind.input_params?.reset_period || "D",
                 }
@@ -7873,67 +7904,33 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             onSave={(settings) => {
               const newStatements = [...statements]
               const currentStatement = newStatements[activeStatementIndex]
+              const buildBlock = (timeframe: string) => ({
+                type: "CUSTOM_I" as const,
+                name: "CumulativeVolumeDelta" as const,
+                timeframe,
+                input_params: {
+                  lower_timeframe: settings.lowerTimeframe,
+                  reset_period: settings.resetPeriod,
+                },
+              })
 
               if (editingComponent) {
                 const condition = currentStatement.strategy[editingComponent.conditionIndex]
                 const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
-
                 if (targetIndicator && "timeframe" in targetIndicator) {
-                  const indicatorName = settings.indicatorType === "cumulative-volume-delta"
-                    ? "CumulativeVolumeDelta"
-                    : "VolumeDelta"
-
-                  const updatedIndicator: any = {
-                    type: "CUSTOM_I",
-                    name: indicatorName,
-                    timeframe: targetIndicator.timeframe,
-                    input_params: {
-                      lower_timeframe: settings.lowerTimeframe,
-                    },
-                  }
-
-                  if (settings.indicatorType === "cumulative-volume-delta" && settings.resetPeriod) {
-                    updatedIndicator.input_params.reset_period = settings.resetPeriod
-                  }
-
-                  if (editingComponent.componentType === "inp1") {
-                    condition.inp1 = updatedIndicator
-                  } else {
-                    condition.inp2 = updatedIndicator
-                  }
+                  const block = buildBlock(targetIndicator.timeframe || selectedTimeframe)
+                  if (editingComponent.componentType === "inp1") condition.inp1 = block
+                  else condition.inp2 = block
                 }
               } else {
-                // Adding new indicator
                 const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-                const timeframe = lastCondition.inp1?.timeframe || selectedTimeframe
-
-                const indicatorName = settings.indicatorType === "cumulative-volume-delta"
-                  ? "CumulativeVolumeDelta"
-                  : "VolumeDelta"
-
-                const newIndicator: any = {
-                  type: "CUSTOM_I",
-                  name: indicatorName,
-                  timeframe: timeframe,
-                  input_params: {
-                    lower_timeframe: settings.lowerTimeframe,
-                  },
-                }
-
-                if (settings.indicatorType === "cumulative-volume-delta" && settings.resetPeriod) {
-                  newIndicator.input_params.reset_period = settings.resetPeriod
-                }
-
-                // Determine if we're adding to inp1 or inp2
-                if (lastCondition.inp1 && lastCondition.operator_name) {
-                  lastCondition.inp2 = newIndicator
-                } else {
-                  lastCondition.inp1 = newIndicator
-                }
+                const block = buildBlock(lastCondition.inp1?.timeframe || selectedTimeframe)
+                if (lastCondition.inp1 && lastCondition.operator_name) lastCondition.inp2 = block
+                else lastCondition.inp1 = block
               }
 
               setStatements(newStatements)
-              setShowVolumeDeltaModal(false)
+              setShowCumulativeVolumeDeltaModal(false)
               setEditingComponent(null)
               setTimeout(() => {
                 searchInputRefs.current[activeStatementIndex]?.focus()
@@ -8595,7 +8592,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                           rsi_source: settings.rsiSource || "Close",
                           ma_type: settings.maType || "SMA",
                           ma_length: settings.maLength || 14,
-                          bb_stddev: settings.bbStdDev || 2.0,
                         },
                       }
                       break
@@ -9103,92 +9099,53 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           <RsiSettingsModal
             onClose={() => setShowIndicatorModal(false)}
             initialSettings={{
-              indicatorType: "rsi",
               rsiLength: "14",
               source: "Close",
-              maLength: "14",
-              maType: "SMA",
-              bbStdDev: "2.0",
               timeframe: pendingTimeframe,
             }}
-            onSave={(settings: any) => {
+            onSave={(settings) => {
               setShowIndicatorModal(false)
-              // Save the indicator settings to inp2 as needed
               const newStatements = [...statements]
               const currentStatement = newStatements[activeStatementIndex]
               const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-
-              if (settings.indicatorType === "rsi-ma") {
-                lastCondition.inp2 = {
-                  type: "CUSTOM_I",
-                  name: "RSI_MA",
-                  timeframe: pendingTimeframe,
-                  input_params: {
-                    rsi_length: Number(settings.rsiLength),
-                    rsi_source: settings.source || "Close",
-                    ma_type: settings.maType || "SMA",
-                    ma_length: Number(settings.maLength) || 14,
-                    bb_stddev: Number(settings.bbStdDev) || 2.0,
-                  },
-                }
-              } else {
-                lastCondition.inp2 = {
-                  type: "I",
-                  name: "RSI",
-                  timeframe: pendingTimeframe,
-                  input_params: {
-                    timeperiod: Number(settings.rsiLength),
-                    source: settings.source?.toLowerCase() || "close",
-
-                  },
-                }
+              lastCondition.inp2 = {
+                type: "I",
+                name: "RSI",
+                timeframe: pendingTimeframe,
+                input_params: {
+                  timeperiod: Number(settings.rsiLength),
+                  source: settings.source?.toLowerCase() || "close",
+                },
               }
               setStatements(newStatements)
             }}
           />
         )}
         {showIndicatorModal && pendingOtherIndicator === "rsi-ma" && (
-          <RsiSettingsModal
+          <RsiMaSettingsModal
             onClose={() => setShowIndicatorModal(false)}
             initialSettings={{
-              indicatorType: "rsi-ma",
               rsiLength: "14",
               source: "Close",
               maLength: "14",
               maType: "SMA",
-              bbStdDev: "2.0",
               timeframe: pendingTimeframe,
             }}
-            onSave={(settings: any) => {
+            onSave={(settings) => {
               setShowIndicatorModal(false)
-              // Save the indicator settings to inp2 as needed
               const newStatements = [...statements]
               const currentStatement = newStatements[activeStatementIndex]
               const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-
-              if (settings.indicatorType === "rsi-ma") {
-                lastCondition.inp2 = {
-                  type: "CUSTOM_I",
-                  name: "RSI_MA",
-                  timeframe: pendingTimeframe,
-                  input_params: {
-                    rsi_length: Number(settings.rsiLength),
-                    rsi_source: settings.source || "Close",
-                    ma_type: settings.maType || "SMA",
-                    ma_length: Number(settings.maLength) || 14,
-                    bb_stddev: Number(settings.bbStdDev) || 2.0,
-                  },
-                }
-              } else {
-                lastCondition.inp2 = {
-                  type: "I",
-                  name: "RSI",
-                  timeframe: pendingTimeframe,
-                  input_params: {
-                    timeperiod: Number(settings.rsiLength),
-                    source: settings.source?.toLowerCase() || "close",
-                  },
-                }
+              lastCondition.inp2 = {
+                type: "CUSTOM_I",
+                name: "RSI_MA",
+                timeframe: pendingTimeframe,
+                input_params: {
+                  rsi_length: Number(settings.rsiLength),
+                  rsi_source: settings.source || "Close",
+                  ma_type: settings.maType || "SMA",
+                  ma_length: Number(settings.maLength) || 14,
+                },
               }
               setStatements(newStatements)
             }}

@@ -3,151 +3,71 @@
 import { useState, useRef, useEffect } from "react"
 import { X } from "lucide-react"
 import { DraggableModal } from "./draggable-modal"
-import { MA_TYPES } from "@/lib/indicator-contract"
+import { SOURCES } from "@/lib/indicator-contract"
 
 interface RsiSettingsModalProps {
   onClose: () => void
-  onSave: (settings: any) => void
+  onSave: (settings: { rsiLength: string; source: string; timeframe: string }) => void
   initialSettings?: {
-    indicatorType?: string
     rsiLength?: string
     source?: string
-    maLength?: string
-    maType?: string
-    bbStdDev?: string
     timeframe?: string
   }
 }
 
+// RSI-only modal. The RSI_MA variant lives in rsi-ma-settings-modal.tsx — the
+// two used to share one modal toggled by an indicator-type tab, which made
+// "which input_params will be sent?" depend on hidden state. They're now
+// separate so the contract is obvious from the call site.
 export function RsiSettingsModal({ onClose, onSave, initialSettings }: RsiSettingsModalProps) {
-  const [indicatorType, setIndicatorType] = useState(initialSettings?.indicatorType || "rsi")
   const [rsiLength, setRsiLength] = useState(initialSettings?.rsiLength || "14")
   const [source, setSource] = useState(initialSettings?.source || "Close")
-  const [maLength, setMaLength] = useState(initialSettings?.maLength || "14")
-  const [maType, setMaType] = useState(initialSettings?.maType || "SMA")
-  const [bbStdDev, setBbStdDev] = useState(initialSettings?.bbStdDev || "2.0")
   const [timeframe, setTimeframe] = useState(initialSettings?.timeframe || "3h")
-
   const [showSourceDropdown, setShowSourceDropdown] = useState(false)
-  const [showMaTypeDropdown, setShowMaTypeDropdown] = useState(false)
 
   const sourceDropdownRef = useRef<HTMLDivElement>(null)
-  const maTypeDropdownRef = useRef<HTMLDivElement>(null)
 
-  // Update form when initialSettings change
   useEffect(() => {
-    if (initialSettings) {
-      console.log("RSI Modal initialSettings:", initialSettings)
-      setIndicatorType(initialSettings.indicatorType || "rsi")
-      setRsiLength(initialSettings.rsiLength || "14")
-      setSource(initialSettings.source || "Close")
-      setMaLength(initialSettings.maLength || "14")
-      setMaType(initialSettings.maType || "SMA")
-      setBbStdDev(initialSettings.bbStdDev || "2.0")
-      setTimeframe(initialSettings.timeframe || "3h")
-    }
+    if (!initialSettings) return
+    setRsiLength(initialSettings.rsiLength || "14")
+    setSource(initialSettings.source || "Close")
+    setTimeframe(initialSettings.timeframe || "3h")
   }, [initialSettings])
 
-  // Load saved RSI settings from localStorage when modal opens
   useEffect(() => {
+    if (initialSettings) return
     try {
-      const savedRsiSettings = localStorage.getItem('rsiSettings');
-      console.log('🔍 Current localStorage rsiSettings:', savedRsiSettings);
-      if (savedRsiSettings) {
-        const parsedSettings = JSON.parse(savedRsiSettings);
-        console.log('📖 Loading saved RSI settings on modal open:', parsedSettings);
-        
-        // Only load saved settings if no initialSettings are provided
-        if (!initialSettings) {
-          if (parsedSettings.indicatorType) {
-            setIndicatorType(parsedSettings.indicatorType);
-          }
-          if (parsedSettings.rsiLength !== undefined) {
-            setRsiLength(parsedSettings.rsiLength.toString());
-          }
-          if (parsedSettings.source) {
-            setSource(parsedSettings.source);
-          }
-          if (parsedSettings.maLength !== undefined) {
-            setMaLength(parsedSettings.maLength.toString());
-          }
-          if (parsedSettings.maType) {
-            setMaType(parsedSettings.maType);
-          }
-          if (parsedSettings.bbStdDev !== undefined) {
-            setBbStdDev(parsedSettings.bbStdDev.toString());
-          }
-          if (parsedSettings.timeframe) {
-            setTimeframe(parsedSettings.timeframe);
-          }
-        }
-      } else {
-        console.log('📖 No saved RSI settings found in localStorage');
-      }
-    } catch (error) {
-      console.log('Error loading saved RSI settings:', error);
+      const saved = localStorage.getItem("rsiSettings")
+      if (!saved) return
+      const parsed = JSON.parse(saved)
+      if (parsed.rsiLength !== undefined) setRsiLength(String(parsed.rsiLength))
+      if (parsed.source) setSource(parsed.source)
+      if (parsed.timeframe) setTimeframe(parsed.timeframe)
+    } catch {
+      // ignored
     }
-  }, [initialSettings]);
+  }, [initialSettings])
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (sourceDropdownRef.current && !sourceDropdownRef.current.contains(event.target as Node)) {
         setShowSourceDropdown(false)
       }
-      if (maTypeDropdownRef.current && !maTypeDropdownRef.current.contains(event.target as Node)) {
-        setShowMaTypeDropdown(false)
-      }
     }
-
     document.addEventListener("mousedown", handleClickOutside)
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside)
-    }
+    return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
 
   const handleSave = () => {
-    // Save all RSI settings to localStorage for future use
-    const rsiSettings = {
-      indicatorType,
-      rsiLength: Number(rsiLength), // Always save rsiLength
-      source,
-      maLength: Number(maLength), // Always save maLength
-      maType, // Always save maType
-      bbStdDev: Number(bbStdDev), // Always save bbStdDev
-      timeframe,
-      lastUpdated: Date.now()
-    };
-    
-    // Save to localStorage with a unique key
-    localStorage.setItem('rsiSettings', JSON.stringify(rsiSettings));
-    console.log('💾 RSI Settings saved to localStorage:', rsiSettings);
-    console.log('💾 RSI Length being saved:', rsiLength, 'as number:', Number(rsiLength));
-    console.log('💾 MA Length being saved:', maLength, 'as number:', Number(maLength));
-    console.log('💾 Indicator type being saved:', indicatorType);
-    
-    // Only send timeperiod and source for RSI, all fields for RSI MA
-    if (indicatorType === "rsi") {
-      onSave({
-        indicatorType,
-        rsiLength: Number(rsiLength),
-        source,
-        timeframe,
-      });
-    } else {
-      onSave({
-        indicatorType,
-        rsiLength: Number(rsiLength),
-        source,
-        maLength: Number(maLength),
-        maType,
-        bbStdDev: Number(bbStdDev),
-        timeframe,
-      });
+    try {
+      localStorage.setItem("rsiSettings", JSON.stringify({ rsiLength, source, timeframe }))
+    } catch {
+      // ignored
     }
+    onSave({ rsiLength, source, timeframe })
   }
 
-  const sources = ["Close", "Open", "High", "Low", "HL2", "HLC3", "OHLC4"]
-  const maTypes = [...MA_TYPES]
+  const sources = [...SOURCES]
 
   return (
     <DraggableModal onClose={onClose} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md">
@@ -160,32 +80,8 @@ export function RsiSettingsModal({ onClose, onSave, initialSettings }: RsiSettin
         </div>
 
         <div className="px-6 pb-6">
-          <div className="mb-6">
-            <label className="block text-lg font-medium text-black mb-2">Indicator Type</label>
-            <div className="grid grid-cols-2 gap-0 border border-gray-300 rounded-md overflow-hidden">
-              <button
-                className={`py-3 px-4 text-center ${
-                  indicatorType === "rsi" ? "bg-gray-400 text-white" : "bg-white text-gray-700"
-                }`}
-                onClick={() => setIndicatorType("rsi")}
-              >
-                RSI
-              </button>
-              <button
-                className={`py-3 px-4 text-center ${
-                  indicatorType === "rsi-ma" ? "bg-gray-400 text-white" : "bg-white text-gray-700"
-                }`}
-                onClick={() => setIndicatorType("rsi-ma")}
-              >
-                RSI MA
-              </button>
-            </div>
-          </div>
-
-          <div className="border-t border-gray-300 my-6"></div>
-
           <div>
-            <h3 className="text-xl font-medium text-gray-800 mb-4">RSI Settings</h3>
+            <h3 className="text-xl font-medium text-gray-800 mb-4">Define Settings</h3>
 
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
@@ -207,17 +103,13 @@ export function RsiSettingsModal({ onClose, onSave, initialSettings }: RsiSettin
                     {source}
                     <span className="ml-2">▼</span>
                   </button>
-
                   {showSourceDropdown && (
                     <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded shadow-lg max-h-60 overflow-auto">
                       {sources.map((src) => (
                         <button
                           key={src}
                           className="w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-100"
-                          onClick={() => {
-                            setSource(src)
-                            setShowSourceDropdown(false)
-                          }}
+                          onClick={() => { setSource(src); setShowSourceDropdown(false) }}
                         >
                           {src}
                         </button>
@@ -226,61 +118,6 @@ export function RsiSettingsModal({ onClose, onSave, initialSettings }: RsiSettin
                   )}
                 </div>
               </div>
-            </div>
-
-            <div className="border-t border-gray-300 my-6"></div>
-
-            <h3 className="text-xl font-medium text-gray-800 mb-4">MA Settings</h3>
-
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block text-base font-medium text-gray-700 mb-2">MA Length</label>
-                <input
-                  type="text"
-                  value={maLength}
-                  onChange={(e) => setMaLength(e.target.value)}
-                  className="w-full p-3 border border-gray-300 rounded text-gray-700"
-                />
-              </div>
-              <div>
-                <label className="block text-base font-medium text-gray-700 mb-2">MA Type</label>
-                <div className="relative" ref={maTypeDropdownRef}>
-                  <button
-                    className="w-full p-3 border border-gray-300 rounded text-gray-700 bg-white flex justify-between items-center"
-                    onClick={() => setShowMaTypeDropdown(!showMaTypeDropdown)}
-                  >
-                    {maType}
-                    <span className="ml-2">▼</span>
-                  </button>
-
-                  {showMaTypeDropdown && (
-                    <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded shadow-lg max-h-60 overflow-auto">
-                      {maTypes.map((type) => (
-                        <button
-                          key={type}
-                          className="w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-100"
-                          onClick={() => {
-                            setMaType(type)
-                            setShowMaTypeDropdown(false)
-                          }}
-                        >
-                          {type}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-base font-medium text-gray-700 mb-2">BB Std Dev</label>
-              <input
-                type="text"
-                value={bbStdDev}
-                onChange={(e) => setBbStdDev(e.target.value)}
-                className="w-full p-3 border border-gray-300 rounded text-gray-700"
-              />
             </div>
           </div>
 
