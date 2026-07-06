@@ -24,6 +24,7 @@ import { DerivativeSettingsModal } from "@/components/modals/derivative-settings
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { createStatement, editStrategy, createCustomComponent, validateCustomComponentCode, activateCustomComponent, listCustomComponents, createCustomStrategy, validateCustomStrategyCode, getCustomStrategyTemplate, updateCustomStrategy, listCustomStrategies, deleteCustomStrategy, getCustomStrategy, updateCustomComponent, fetchStatementDetail, validateStrategy } from "@/app/AllApiCalls"
+import { mergeOptimisationForm } from "@/lib/optimisation-form-merge"
 import type { JSX } from "react/jsx-runtime"
 import { PipsSettingsModal } from "@/components/modals/pips-settings-modal"
 import { SaveStrategyModal } from "@/components/modals/save-strategy-modal"
@@ -4207,9 +4208,17 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       // Update local state immediately for better UX
       setStrategyName(name)
 
-      // Store timeframes_required if it exists in the response
+      // Store timeframes_required if it exists in the response.
+      // Per-param merge against the existing localStorage form so user-edited
+      // Properties-tab ranges aren't wiped on the next Proceed-to-Testing.
       if (result && result.optimisation_form) {
-        localStorage.setItem("optimisation_form", JSON.stringify(result.optimisation_form))
+        let savedForm: any = null
+        try {
+          const raw = localStorage.getItem("optimisation_form")
+          if (raw) savedForm = JSON.parse(raw)
+        } catch { savedForm = null }
+        const merged = mergeOptimisationForm(result.optimisation_form, savedForm)
+        localStorage.setItem("optimisation_form", JSON.stringify(merged))
       }
       if (result && result.timeframes_required) {
         localStorage.setItem("timeframes_required", JSON.stringify(result.timeframes_required))
@@ -4621,17 +4630,17 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   }
 
   // A partial_tp Equity rule is a Manage Exit (UI-wise) when every entry is a
-  // price-level full exit: only `Price` + `Close: "100%"`, with no `name`,
-  // `operator`, or `Action`. Backend stores both features under partial_tp; the
-  // frontend uses shape to route to the right modal/label.
+  // price-level rule: `Price` + `Close` (any %) + optional `Action`, with no
+  // `name`/`operator` (those mark equity-based Partial TP entries). Backend
+  // stores both features under partial_tp; the frontend uses shape to route to
+  // the right modal/label.
   const isManageExitPartialTpShape = (rule: any): boolean => {
     if (!rule?.inp1 || rule.inp1.name !== "partial_tp") return false
     const list = rule.inp1.partial_tp_list
     if (!Array.isArray(list) || list.length === 0) return false
     return list.every((it: any) =>
       it && typeof it.Price === "string" &&
-      !it.name && !it.operator && !it.Action &&
-      /^(100%|1(\.0+)?)$/.test(String(it.Close ?? ""))
+      !it.name && !it.operator
     )
   }
 
@@ -5339,7 +5348,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             const details: Record<string, string> = {}
             if (isManageExitNew && rule.inp1?.partial_tp_list) {
               rule.inp1.partial_tp_list.forEach((lvl, i) => {
-                details[`Rule ${i + 1}`] = `${pipsToPointsDisplay(lvl.Price || "")} | Closes 100%`
+                details[`Rule ${i + 1}`] = `${pipsToPointsDisplay(lvl.Price || "")} | Close: ${lvl.Close || "100%"}${lvl.Action ? ` | Action: ${pipsToPointsDisplay(lvl.Action)}` : ""}`
               })
             } else if (isManageExitLegacy) {
               const list = (rule.inp1 as any).manage_exit_list as Array<{ Price: string; Action: string }>
@@ -8879,15 +8888,23 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             initialItems={(() => {
               if (!editingEquityRule) return undefined
               const rule = statements[editingEquityRule.statementIndex]?.Equity[editingEquityRule.equityIndex]
-              // New shape: stored as partial_tp with Close === "100%".
+              // New shape: stored as partial_tp with Price + Close + optional Action.
               const ptList = (rule?.inp1 as any)?.partial_tp_list
               if (Array.isArray(ptList) && isManageExitPartialTpShape(rule)) {
-                return ptList.map((it: any) => ({ Price: it.Price }))
+                return ptList.map((it: any) => ({
+                  Price: it.Price,
+                  Close: it.Close || "100%",
+                  ...(it.Action ? { Action: it.Action } : {}),
+                }))
               }
-              // Legacy shape: manage_exit_list with Price + Action. Drop Action.
+              // Legacy shape: manage_exit_list with Price + Action (implicit full close).
               const legacy = (rule?.inp1 as any)?.manage_exit_list
               if (Array.isArray(legacy)) {
-                return legacy.map((it: any) => ({ Price: it.Price }))
+                return legacy.map((it: any) => ({
+                  Price: it.Price,
+                  Close: "100%",
+                  ...(it.Action ? { Action: it.Action } : {}),
+                }))
               }
               return undefined
             })()}
@@ -8920,7 +8937,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                   name: "partial_tp",
                   partial_tp_list: settings.items.map((it) => ({
                     Price: it.Price,
-                    Close: "100%",
+                    Close: it.Close || "100%",
+                    ...(it.Action ? { Action: it.Action } : {}),
                   })),
                 },
               }

@@ -51,6 +51,7 @@ import AuthGuard from "@/hooks/useAuthGuard"
 import { extractErrorMessage, formatErrorForDisplay } from "@/lib/error-utils"
 import { validateStrategyStatement } from "@/lib/indicator-contract"
 import { matchesTimeframe as matchesTimeframeShared } from "@/lib/timeframe-match"
+import { mergeOptimisationForm } from "@/lib/optimisation-form-merge"
 import { StrategyTab } from "@/components/strategy-tab"
 import { BacktestTab } from "@/components/backtest-tab"
 import { OptimisationTab } from "@/components/optimisation-tab"
@@ -72,6 +73,7 @@ import { OptimizationCostDialog } from "@/components/optimization-cost-dialog"
 import { OptimizationErrorDisplay } from "@/components/optimization-error-display"
 // Backtest history components
 import { BacktestHistoryList } from "@/components/BacktestHistoryList"
+import { BacktestSummaryStats } from "@/components/backtest-summary-stats"
 // MetaAPI debugging
 import { MetaAPIDebugModal } from "@/components/metaapi-debug-modal"
 // Custom strategy backtest results
@@ -286,6 +288,32 @@ export default function StrategyTestingPage() {
     }
   }, [isResizingPane])
 
+  // Locate the MT5-style extended stats object across the shapes the backend may
+  // return it in (top-level, nested under result/data, or serialized as a JSON string).
+  const extractSummaryStats = (obj: any): Record<string, unknown> | null => {
+    if (!obj || typeof obj !== "object") return null
+    const candidates = [
+      obj.summary_stats,
+      obj.summaryStats,
+      obj.result?.summary_stats,
+      obj.result?.summaryStats,
+      obj.data?.summary_stats,
+      obj.data?.summaryStats,
+      obj.statistics?.summary_stats,
+      obj.metrics?.summary_stats,
+    ]
+    for (let candidate of candidates) {
+      if (candidate == null) continue
+      if (typeof candidate === "string") {
+        try { candidate = JSON.parse(candidate) } catch { continue }
+      }
+      if (candidate && typeof candidate === "object" && !Array.isArray(candidate) && Object.keys(candidate).length > 0) {
+        return candidate as Record<string, unknown>
+      }
+    }
+    return null
+  }
+
   // Normalize raw API response to handle different field naming conventions
   const normalizeBacktestResult = (raw: any): any => {
     const pick = (...keys: string[]) => {
@@ -305,6 +333,7 @@ export default function StrategyTestingPage() {
       chart_data: raw.chart_data ?? null,
       trades_data: raw.trades_data ?? [],
       plot_html: raw.plot_html ?? '',
+      summary_stats: extractSummaryStats(raw),
       final_equity: pick('final_equity', 'equity_final', 'balance'),
       return_percent: pick('return_percent', 'return_pct', 'total_return', 'return'),
       return_ann_percent: pick('return_ann_percent', 'return_ann', 'annual_return', 'return_ann_percent_value'),
@@ -342,11 +371,23 @@ export default function StrategyTestingPage() {
     }
   }
 
-  const loadBacktestResult = async (backtestId: string) => {
+  const loadBacktestResult = async (backtestId: string, fallbackResult: any = null) => {
     try {
       setIsLoading(true)
       const raw = await getBacktestResultDetail(backtestId)
       const normalized = normalizeBacktestResult(raw)
+      // The detail endpoint can return a sparse record (missing summary_stats and
+      // several scalar metrics). Fill any gaps from the richer backtest run response,
+      // without overwriting values the detail endpoint did provide.
+      if (fallbackResult) {
+        const fb = normalizeBacktestResult(fallbackResult)
+        for (const key of Object.keys(fb)) {
+          if (normalized[key] == null && fb[key] != null) normalized[key] = fb[key]
+        }
+      }
+      if (!normalized.summary_stats) {
+        console.warn("[summary_stats] missing after merge. Detail keys:", Object.keys(raw || {}))
+      }
       setBacktestDetail(normalized)
       setBacktestResultTab('chart')
       if (normalized.plot_html) {
@@ -387,6 +428,10 @@ export default function StrategyTestingPage() {
       return 'N/A'
     }
   }
+
+  // Lightweight numeric formatter for the summary rows: tolerates strings, null and NaN.
+  const fmtStat = (v: any, digits = 2, suffix = ""): string =>
+    v == null || v === "" || Number.isNaN(Number(v)) ? "N/A" : `${Number(v).toFixed(digits)}${suffix}`
 
   // Helper function to map MetaAPI symbols to Backtest instruments
   const mapSymbolToInstrument = (symbol: string): string | null => {
@@ -765,8 +810,18 @@ export default function StrategyTestingPage() {
               setRequiredTimeframes(strategyData.timeframes_required)
             }
             if (strategyData.optimisation_form) {
-              localStorage.setItem("optimisation_form", JSON.stringify(strategyData.optimisation_form))
-              const optimisationForm = strategyData.optimisation_form
+              // Merge per-param so the user's edited start/step/stop survive a
+              // reload — the backend reconstruction doesn't carry edits for
+              // `optimise: false` params, which would otherwise be clobbered.
+              let savedForm: any = null
+              try {
+                const raw = localStorage.getItem("optimisation_form")
+                if (raw) savedForm = JSON.parse(raw)
+              } catch { savedForm = null }
+              const merged = mergeOptimisationForm(strategyData.optimisation_form, savedForm)
+              strategyData.optimisation_form = merged
+              localStorage.setItem("optimisation_form", JSON.stringify(merged))
+              const optimisationForm = merged
 
               // Add null checks and fallback values
               const maximiseOpts = optimisationForm.maximise_options || []
@@ -842,8 +897,18 @@ export default function StrategyTestingPage() {
             }
 
             if (strategyData.optimisation_form) {
-              localStorage.setItem("optimisation_form", JSON.stringify(strategyData.optimisation_form))
-              const optimisationForm = strategyData.optimisation_form
+              // Same per-param merge as above — this branch runs in the
+              // symbol-extraction follow-up after the main payload write, and
+              // would otherwise re-clobber the merged form we just stored.
+              let savedForm: any = null
+              try {
+                const raw = localStorage.getItem("optimisation_form")
+                if (raw) savedForm = JSON.parse(raw)
+              } catch { savedForm = null }
+              const merged = mergeOptimisationForm(strategyData.optimisation_form, savedForm)
+              strategyData.optimisation_form = merged
+              localStorage.setItem("optimisation_form", JSON.stringify(merged))
+              const optimisationForm = merged
               setSelectedMaximiseOption(optimisationForm.maximise_options[0] || "")
               setSelectedAlgorithm(optimisationForm.default_algorithm || "")
               setPopulationSize(optimisationForm.algorithm_defaults.population_size.toString())
@@ -1228,6 +1293,7 @@ export default function StrategyTestingPage() {
             },
             plot_html: result.plot_html || null,
             csv_url: result.csv_url || null,
+            summary_stats: extractSummaryStats(result),
             metadata: result.metadata || {}
           }
 
@@ -1299,7 +1365,7 @@ export default function StrategyTestingPage() {
         const resultId = result?.backtest_result_id || result?.backtest_id || result?.result?.backtest_result_id
         if (resultId) {
           showToast("Backtest completed!", 'success')
-          loadBacktestResult(resultId)
+          loadBacktestResult(resultId, result)
         } else if (result?.trades_csv) {
           showToast("Backtest completed but no result ID returned.", 'warning')
         } else if (!result?.plot_html) {
@@ -1345,7 +1411,7 @@ export default function StrategyTestingPage() {
         const resultId2 = result?.backtest_result_id || result?.backtest_id || result?.result?.backtest_result_id
         if (resultId2) {
           showToast("Backtest completed!", 'success')
-          loadBacktestResult(resultId2)
+          loadBacktestResult(resultId2, result)
         } else if (result?.trades_csv) {
           showToast("Backtest completed but no result ID returned.", 'warning')
         } else if (!result?.plot_html) {
@@ -3606,6 +3672,18 @@ export default function StrategyTestingPage() {
                                   {backtestDetail.return_percent != null ? backtestDetail.return_percent.toFixed(4) : 'N/A'}%
                                 </span>
                               </div>
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Return (Ann.) (%):</span>
+                                <span className="text-white font-medium">{fmtStat(backtestDetail.return_ann_percent, 2, '%')}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Buy &amp; Hold (%):</span>
+                                <span className="text-white font-medium">{fmtStat(backtestDetail.buy_hold_return_percent, 2, '%')}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Exposure (%):</span>
+                                <span className="text-white font-medium">{fmtStat(backtestDetail.exposure_time_percent, 2, '%')}</span>
+                              </div>
                             </div>
                           </div>
                           {/* Column 2 */}
@@ -3624,6 +3702,26 @@ export default function StrategyTestingPage() {
                                 <span className="text-gray-400">Win Rate (%):</span>
                                 <span className="text-white font-medium">{backtestDetail.win_rate_percent != null ? backtestDetail.win_rate_percent.toFixed(2) : 'N/A'}%</span>
                               </div>
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Sortino:</span>
+                                <span className="text-white font-medium">{fmtStat(backtestDetail.sortino_ratio)}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Calmar:</span>
+                                <span className="text-white font-medium">{fmtStat(backtestDetail.calmar_ratio)}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Volatility (Ann.) (%):</span>
+                                <span className="text-white font-medium">{fmtStat(backtestDetail.volatility_ann_percent, 2, '%')}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Profit Factor:</span>
+                                <span className="text-white font-medium">{fmtStat(backtestDetail.profit_factor)}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">SQN:</span>
+                                <span className="text-white font-medium">{fmtStat(backtestDetail.sqn)}</span>
+                              </div>
                             </div>
                           </div>
                           {/* Column 3 */}
@@ -3638,9 +3736,32 @@ export default function StrategyTestingPage() {
                                 <span className="text-gray-400">Final Equity:</span>
                                 <span className="text-white font-medium">${backtestDetail.final_equity != null ? backtestDetail.final_equity.toFixed(2) : 'N/A'}</span>
                               </div>
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Equity Peak:</span>
+                                <span className="text-white font-medium">${backtestDetail.equity_peak != null ? Number(backtestDetail.equity_peak).toFixed(2) : 'N/A'}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Best Trade (%):</span>
+                                <span className="text-white font-medium">{fmtStat(backtestDetail.best_trade_percent, 2, '%')}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Worst Trade (%):</span>
+                                <span className="text-white font-medium">{fmtStat(backtestDetail.worst_trade_percent, 2, '%')}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Avg Trade (%):</span>
+                                <span className="text-white font-medium">{fmtStat(backtestDetail.avg_trade_percent, 2, '%')}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-gray-900 py-2 text-[11px]">
+                                <span className="text-gray-400">Expectancy (%):</span>
+                                <span className="text-white font-medium">{fmtStat(backtestDetail.expectancy_percent, 2, '%')}</span>
+                              </div>
                             </div>
                           </div>
                         </div>
+
+                        {/* Extended MT5-style statistics (rendered only when summary_stats is present) */}
+                        <BacktestSummaryStats stats={backtestDetail.summary_stats} />
                       </div>
                     )}
 
