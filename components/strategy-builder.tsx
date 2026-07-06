@@ -4244,17 +4244,17 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   }
 
   const handleEditStrategyName = async (newName: string) => {
-    try {
-      // Get strategy ID from localStorage if not in URL
-      let id = strategyId
-      if (!id) {
-        id = localStorage.getItem("strategy_id")
-      }
+    // New/unsaved strategy: no backend record exists yet. Just update the local
+    // name — it will be persisted when the user clicks Save Draft or proceeds to
+    // testing (which reads this name via SaveStrategyModal's initialName).
+    if (!persistedId) {
+      setStrategyName(newName)
+      setShowEditNameModal(false)
+      return
+    }
 
-      if (!id) {
-        console.error("No strategy ID available for editing")
-        return
-      }
+    try {
+      const id = persistedId
 
       const idToUpdate = id
       const unifiedPayload = buildUnifiedPayload(newName)
@@ -5966,15 +5966,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                   ? (initialInstrument || persistedId)
                   : `Building algorithm for ${initialInstrument || "XAU/USD"}`)}
               </h1>
-              {persistedId && (
-                <button
-                  onClick={() => setShowEditNameModal(true)}
-                  className="ml-2 p-1 hover:bg-gray-700 rounded-full"
-                  title="Edit strategy name"
-                >
-                  <Edit className="w-5 h-5" />
-                </button>
-              )}
+              <button
+                onClick={() => setShowEditNameModal(true)}
+                className="ml-2 p-1 hover:bg-gray-700 rounded-full"
+                title="Edit strategy name"
+              >
+                <Edit className="w-5 h-5" />
+              </button>
             </div>
             <div className="flex gap-3">
               {/* Buy/Sell selector */}
@@ -9272,7 +9270,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           <EditStrategyModal
             strategy={{
               id: strategyId || localStorage.getItem("strategy_id") || "0",
-              name: strategyName,
+              name: strategyName || (persistedId
+                ? (initialInstrument || persistedId)
+                : `Building algorithm for ${initialInstrument || "XAU/USD"}`),
               instrument: initialInstrument || "XAU/USD",
               side: statements[0]?.side || "S",
               strategy: statements[0]?.strategy || [],
@@ -9280,7 +9280,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             }}
-            isEdit={true}
+            // Persisted strategies keep the existing "Edit" (save + reopen) flow.
+            // New/unsaved strategies get a plain "Save" that only sets the local
+            // name — it's persisted later via Save Draft / Proceed to Testing.
+            isEdit={!!persistedId}
             onClose={() => setShowEditNameModal(false)}
             onSave={handleEditStrategyName}
           />
