@@ -339,17 +339,27 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
     }
     setRowErrors({})
 
+    // Developer-Mode (custom Python) strategies have no visual strategy JSON:
+    // /api/strategies/<pk>/edit/ and /api/optimisation/save/ are keyed to the
+    // strategy-builder pipeline and don't apply. Ranges live in the
+    // localStorage optimisation_form and are sent per-request to
+    // /api/custom-strategies/optimise/.
+    const isCustomStrategy = !!parsedStatement?.is_custom_strategy ||
+      (typeof window !== "undefined" && localStorage.getItem("is_custom_strategy") === "true")
+
     setIsSaving(true)
     try {
       // Write the edited start/step/stop/value back into the strategy JSON at
       // the path each encoding maps to, then PATCH only the roots that changed.
       // optimisation_strategy_creator reads these back on reload, so the rows
       // round-trip with the saved range / optimise state.
-      const patchBody = applyEdits(parsedStatement, persistRows)
-      if (strategyId && Object.keys(patchBody).length > 0) {
-        await editStrategy(String(strategyId), patchBody)
-      } else if (!strategyId) {
-        console.warn("PropertiesTab: no strategy id available; ranges not persisted to the strategy JSON.")
+      if (!isCustomStrategy) {
+        const patchBody = applyEdits(parsedStatement, persistRows)
+        if (strategyId && Object.keys(patchBody).length > 0) {
+          await editStrategy(String(strategyId), patchBody)
+        } else if (!strategyId) {
+          console.warn("PropertiesTab: no strategy id available; ranges not persisted to the strategy JSON.")
+        }
       }
 
       const currentOptimisationFormString = localStorage.getItem("optimisation_form")
@@ -459,8 +469,10 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
       }
       currentOptimisationForm.Parameters = parametersObject
 
-      console.log("Sending ui_data to API:", currentOptimisationForm)
-      await saveOptimisationInput(parsedStatement, currentOptimisationForm)
+      if (!isCustomStrategy) {
+        console.log("Sending ui_data to API:", currentOptimisationForm)
+        await saveOptimisationInput(parsedStatement, currentOptimisationForm)
+      }
 
       // Persist ALL parameters (including non-optimise) back to localStorage
       // so that changes survive tab switches and page refreshes

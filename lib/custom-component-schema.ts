@@ -135,24 +135,76 @@ export function coerceDefault(type: ParameterType, raw: any): number | string | 
   return String(raw ?? "")
 }
 
-// Normalize whatever the backend gives us for a component's `parameters`
-// field into a ParameterSchema[].
-// Accepts the new nested shape `{ parameters: [ ...schemas ] }` and the old
-// flat `{ name: value }` shape (upgrade path for components saved before
-// this feature shipped).
+// Map an arbitrary (possibly Python-flavoured) type string to our ParameterType,
+// falling back to inference from a sample default value.
+function normalizeParamType(rawType: any, sampleDefault: any): ParameterType {
+  const t = String(rawType ?? "").toLowerCase().trim()
+  if (t === "int" || t === "integer") return "int"
+  if (t === "float" || t === "number" || t === "double" || t === "decimal") return "float"
+  if (t === "bool" || t === "boolean") return "bool"
+  if (t === "select" || t === "choice" || t === "enum" || t === "categorical") return "select"
+  if (t === "source" || t === "ohlcv") return "source"
+  if (t === "str" || t === "string" || t === "text") return "string"
+  // Unknown/blank type: infer from the value.
+  if (typeof sampleDefault === "number") return Number.isInteger(sampleDefault) ? "int" : "float"
+  if (typeof sampleDefault === "boolean") return "bool"
+  return "string"
+}
+
+// Turn one (name, value) pair into a ParameterSchema. `value` may be a bare
+// scalar (legacy flat shape) or a descriptor object emitted by the backend for
+// custom strategies, e.g. { default | value, type, min, max, step, options }.
+// This is what stops descriptor objects from rendering as "[object Object]".
+function toParameterSchema(name: string, value: any): ParameterSchema {
+  // Bare scalar → infer type directly.
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    let type: ParameterType = "string"
+    if (typeof value === "number") type = Number.isInteger(value) ? "int" : "float"
+    else if (typeof value === "boolean") type = "bool"
+    return { name, type, default: value as any }
+  }
+
+  // Descriptor object → pull the default out of whichever key the backend used.
+  const d = value as Record<string, any>
+  let rawDefault = d.default ?? d.value ?? d.val ?? d.current ?? d.initial ?? ""
+  // Guard against a nested range object (e.g. { start, stop, value }) so the
+  // scalar — not the object — lands in the Value cell.
+  if (rawDefault && typeof rawDefault === "object" && !Array.isArray(rawDefault)) {
+    rawDefault = rawDefault.value ?? rawDefault.default ?? ""
+  }
+  const type = normalizeParamType(d.type, rawDefault)
+  const schema: ParameterSchema = { name: d.name || name, type, default: rawDefault }
+  if (typeof d.min === "number") schema.min = d.min
+  if (typeof d.max === "number") schema.max = d.max
+  if (typeof d.step === "number") schema.step = d.step
+  if (Array.isArray(d.options)) schema.options = d.options.map(String)
+  if (d.description) schema.description = String(d.description)
+  if (typeof d.optimizable === "boolean") schema.optimizable = d.optimizable
+  return schema
+}
+
+// Normalize whatever the backend gives us for a component's / strategy's
+// `parameters` field into a ParameterSchema[]. Accepts:
+//   - array of ParameterSchema (custom components)                → mapped through toParameterSchema (idempotent)
+//   - `{ parameters: [ ...schemas ] }`                            → same
+//   - array of descriptor objects `[{ name, default|value, ... }]`
+//   - flat `{ name: scalar }` (legacy) or `{ name: {descriptor} }` (custom strategies)
 export function normalizeStoredParameters(raw: any): ParameterSchema[] {
   if (!raw) return []
-  if (Array.isArray(raw)) return raw as ParameterSchema[]
-  if (Array.isArray(raw.parameters)) return raw.parameters as ParameterSchema[]
 
-  // Old flat shape: upgrade.
+  const list = Array.isArray(raw)
+    ? raw
+    : Array.isArray(raw.parameters)
+    ? raw.parameters
+    : null
+  if (list) {
+    return list.map((item: any, i: number) =>
+      toParameterSchema(item?.name ?? `param_${i}`, item),
+    )
+  }
+
   if (typeof raw === "object") {
-    return Object.entries(raw).map(([name, value]): ParameterSchema => {
-      let type: ParameterType = "string"
-      if (typeof value === "number") type = Number.isInteger(value) ? "int" : "float"
-      else if (typeof value === "boolean") type = "bool"
-      return { name, type, default: value as any }
-    })
+    return Object.entries(raw).map(([name, value]) => toParameterSchema(name, value))
   }
   return []
 }

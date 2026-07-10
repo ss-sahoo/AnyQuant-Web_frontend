@@ -1994,6 +1994,79 @@ export const runCustomStrategyBacktest = async ({ strategy_id, params = {}, init
 };
 
 /**
+ * Run a grid/random-search optimisation on a custom (Developer Mode) strategy.
+ * Returns 202 with { run_id, grid_size, n_evaluations_planned, sampled, poll_url };
+ * poll GET /api/job-status/<run_id>/ (pollJobStatus) until completed. Cancellable
+ * via the existing cancelOptimisationRun(run_id).
+ *
+ * @param {Object} params
+ * @param {number} params.strategy_id - The custom strategy ID
+ * @param {Array}  params.parameters - Per-param spec:
+ *   { name, optimise: true, start, step, stop } or { name, optimise: false, value }
+ * @param {string} [params.maximise] - Objective: final_equity | total_return |
+ *   sharpe_ratio | win_rate | profit_factor | num_trades | max_drawdown
+ * @param {number} [params.max_evals] - Evaluation cap (backend caps at 1000)
+ * @param {number} [params.time_budget_seconds] - Wall-clock budget (partial results if hit)
+ * @param {string} [params.symbol]
+ * @param {string} [params.timeframe]
+ * @param {number} [params.initial_equity]
+ * @param {number} [params.commission]
+ * @param {string} [params.start_date]
+ * @param {string} [params.end_date]
+ * @param {string} [params.metaapi_token] - Optional; sample-data fallback when absent
+ * @param {string} [params.metaapi_account_id]
+ * @returns {Promise} Promise with the 202 start payload
+ */
+export const runCustomStrategyOptimisation = async ({
+  strategy_id,
+  parameters,
+  maximise = "final_equity",
+  max_evals = 300,
+  time_budget_seconds = 1200,
+  symbol = "XAUUSD",
+  timeframe = "1h",
+  initial_equity = 10000,
+  commission = 0.00007,
+  start_date = null,
+  end_date = null,
+  metaapi_token = null,
+  metaapi_account_id = null,
+}) => {
+  const body = {
+    strategy_id,
+    parameters,
+    maximise,
+    max_evals,
+    time_budget_seconds,
+    symbol,
+    timeframe,
+    initial_equity,
+    commission,
+    start_date,
+    end_date,
+  }
+  if (metaapi_token && metaapi_account_id) {
+    body.metaapi_token = metaapi_token
+    body.metaapi_account_id = metaapi_account_id
+  }
+
+  const response = await Fetch("/api/custom-strategies/optimise/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}))
+    throw new Error(errorData.error || errorData.detail || JSON.stringify(errorData) || "Failed to start custom strategy optimisation")
+  }
+
+  return response.json()
+}
+
+/**
  * Get a starter template for writing custom strategies
  * @returns {Promise} Promise with template data
  */

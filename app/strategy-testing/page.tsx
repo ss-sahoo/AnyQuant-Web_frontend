@@ -41,6 +41,7 @@ import {
   // Custom strategy API
   getCustomStrategy,
   runCustomStrategyBacktest,
+  runCustomStrategyOptimisation,
   // Backtest result API
   getBacktestResultDetail,
   getStrategyBacktestResults,
@@ -1469,9 +1470,164 @@ export default function StrategyTestingPage() {
     showToast("Backtest cancelled", 'warning')
   }
 
+  // Map the UI maximise label (e.g. "Return [%]", "Sharpe_Ratio") to the
+  // custom-strategy optimiser's objective vocabulary.
+  const mapMaximiseToCustomObjective = (label: string): string => {
+    const l = (label || "").toLowerCase()
+    if (l.includes("sharpe")) return "sharpe_ratio"
+    if (l.includes("win")) return "win_rate"
+    if (l.includes("profit factor") || l.includes("profit_factor")) return "profit_factor"
+    if (l.includes("drawdown")) return "max_drawdown"
+    if (l.includes("trade")) return "num_trades"
+    if (l.includes("equity")) return "final_equity"
+    if (l.includes("return")) return "total_return"
+    return "final_equity"
+  }
+
+  // Adapt the custom optimiser's result rows ({ params, final_equity, ... })
+  // to the backtesting.py-style keys renderResultsTable expects. param_<name>
+  // entries feed the "Inputs" column.
+  const adaptCustomOptimisationRows = (rows: any[]): any[] => {
+    if (!Array.isArray(rows)) return []
+    return rows.map((r: any) => {
+      const out: Record<string, any> = {
+        'Equity Final [$]': r.final_equity,
+        'Return [%]': r.total_return,
+        '# Trades': r.num_trades,
+        'Win Rate [%]': r.win_rate,
+        'Max. Drawdown [%]': r.max_drawdown,
+        'Sharpe Ratio': r.sharpe_ratio,
+        'Profit Factor': r.profit_factor,
+      }
+      for (const [k, v] of Object.entries(r.params || {})) {
+        out[`param_${k}`] = v
+      }
+      return out
+    })
+  }
+
+  // Optimisation for Developer-Mode (custom Python) strategies. Talks to the
+  // dedicated POST /api/custom-strategies/optimise/ endpoint — the visual
+  // pipeline (run-optimisation + strategies/<pk>/edit) is keyed to the
+  // strategy-builder JSON and cannot apply here. Ranges come from the
+  // Properties tab via the localStorage optimisation_form (they're never
+  // persisted server-side for custom strategies; the endpoint takes them
+  // per-request).
+  const handleCustomStrategyOptimisation = async () => {
+    const customStrategyId = parsedStatement?.custom_strategy_id || parsedStatement?.id
+    if (!customStrategyId) {
+      showToast("Custom strategy id is missing — reload the strategy and try again.", 'error')
+      return
+    }
+
+    // Collect the rows the Properties tab synthesised/edited for this strategy.
+    let formParams: any[] = []
+    try {
+      const raw = localStorage.getItem("optimisation_form")
+      if (raw) formParams = JSON.parse(raw).parameters || []
+    } catch { formParams = [] }
+    const strategyRows = formParams.filter(
+      (p: any) => typeof p?.encoding === "string" && p.encoding.startsWith("custom:strategy:")
+    )
+    if (strategyRows.length === 0) {
+      showToast("No parameters found for this strategy. Open the Properties tab first.", 'error')
+      return
+    }
+
+    const parameters = strategyRows.map((p: any) => {
+      const hasRange = Array.isArray(p.range) && p.range.length === 2
+      if (p.optimise && hasRange) {
+        return {
+          name: p.name,
+          optimise: true,
+          start: Number(p.range[0]),
+          step: Number(p.step) || 1,
+          stop: Number(p.range[1]),
+        }
+      }
+      return { name: p.name, optimise: false, value: Number(p.default) }
+    })
+
+    if (!parameters.some((p: any) => p.optimise)) {
+      showToast("Mark at least one parameter as Optimise in the Properties tab.", 'error')
+      return
+    }
+
+    try {
+      setIsLoading2(true)
+
+      const symbol = metaAPIConfig?.symbol || "XAUUSD"
+      const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
+      const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
+
+      const startData = await runCustomStrategyOptimisation({
+        strategy_id: Number(customStrategyId),
+        parameters,
+        maximise: mapMaximiseToCustomObjective(selectedMaximiseOption),
+        symbol,
+        initial_equity: Number(accountDeposit.replace(/,/g, "")) || 10000,
+        ...(useMetaAPI && token && accountId
+          ? { metaapi_token: token, metaapi_account_id: accountId }
+          : {}),
+      })
+
+      console.log("✅ Custom strategy optimisation started:", startData)
+
+      let polledResult: any = startData
+      if (startData?.run_id) {
+        optimisationRunIdRef.current = startData.run_id
+        const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000 })
+        optimisationPollerRef.current = stop
+        try {
+          const polled = await promise
+          polledResult = polled?.result ?? polled
+        } catch (e: any) {
+          if (e?.message === 'cancelled') return
+          throw e
+        }
+        optimisationPollerRef.current = null
+      }
+
+      // No DB record exists for custom optimisation runs (job-store only), so
+      // the polled payload IS the final result — no detail re-fetch.
+      const adapted = adaptCustomOptimisationRows(polledResult?.results)
+      setOptimisationResult({
+        ...polledResult,
+        table: adapted,
+        // Don't let the raw custom rows shadow the adapted table in previewRows.
+        results: undefined,
+      })
+      setOptimisationMessage(
+        polledResult?.partial
+          ? "Time budget hit — showing partial ranked results."
+          : `Evaluated ${polledResult?.n_evaluated ?? adapted.length} combinations` +
+            (polledResult?.elapsed_seconds != null ? ` in ${polledResult.elapsed_seconds}s.` : ".")
+      )
+      setActiveTab("optimisation")
+      setShowOptimisationResults(true)
+      setOptimisationTab('results')
+      showToast("Optimisation completed!", 'success')
+    } catch (error: any) {
+      console.error("Custom strategy optimisation failed:", error)
+      showToast(formatErrorForDisplay(error) || "Custom strategy optimisation failed", 'error')
+    } finally {
+      setIsLoading2(false)
+      optimisationRunIdRef.current = null
+      optimisationPollerRef.current = null
+    }
+  }
+
   const handleOptimisation = async (wait = false) => {
     if (!parsedStatement) {
       showToast("Strategy statement is missing or not parsed!", 'error')
+      return
+    }
+
+    // Developer-Mode strategies use their own optimisation endpoint.
+    const isCustomStrategyOpt = parsedStatement?.is_custom_strategy ||
+      localStorage.getItem("is_custom_strategy") === "true"
+    if (isCustomStrategyOpt) {
+      await handleCustomStrategyOptimisation()
       return
     }
 
