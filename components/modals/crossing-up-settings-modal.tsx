@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { X } from "lucide-react"
 import { RsiSettingsModal } from "@/components/modals/rsi-settings-modal"
 import { DraggableModal } from "./draggable-modal"
+import { CustomTimeframeModal } from "./custom-timeframe-modal"
 
 interface CrossingUpSettingsModalProps {
   onClose: () => void
@@ -94,7 +95,10 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
   const [timeframe, setTimeframe] = useState("3h")
   const [band, setBand] = useState("upperband")
   const [timeperiod, setTimeperiod] = useState(17)
-  const [customTimeframe, setCustomTimeframe] = useState("")
+  const [showCustomTimeframeModal, setShowCustomTimeframeModal] = useState(false)
+  // Preset options in the timeframe dropdown; any other value came from the
+  // Custom Timeframe dialog and is injected as its own option.
+  const TIMEFRAME_PRESETS = ["1min", "5min", "15min", "30min", "45min", "1h", "2h", "3h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"]
 
   // RSI parameters
   const [rsiLength, setRsiLength] = useState(14)
@@ -117,12 +121,12 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
   // Load saved Volume settings from localStorage on component mount
   useEffect(() => {
     try {
-      const savedVolumeSettings = localStorage.getItem('volumeSettings');
+      const savedVolumeSettings = localStorage.getItem('volumeMaSettings');
       if (savedVolumeSettings) {
         const parsedSettings = JSON.parse(savedVolumeSettings);
         console.log('🔍 Loaded saved Volume settings in crossing-up modal:', parsedSettings);
         if (parsedSettings.maLength) {
-          setVolumeMaLength(parsedSettings.maLength);
+          setVolumeMaLength(Number(parsedSettings.maLength) || 20);
           console.log('🔍 DEBUG: Set initial volumeMaLength to saved value:', parsedSettings.maLength);
         }
       }
@@ -206,15 +210,9 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
       if (initialSettings.customValue !== undefined) setCustomValue(String(initialSettings.customValue));
       if (initialSettings.indicator) setIndicator(initialSettings.indicator);
       if (initialSettings.timeframe) {
-        // Check if timeframe is a custom value (not in standard list)
-        const standardTimeframes = ["1min", "5min", "15min", "30min", "45min", "1h", "2h", "3h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"];
-        if (standardTimeframes.includes(initialSettings.timeframe)) {
-          setTimeframe(initialSettings.timeframe);
-        } else {
-          // It's a custom timeframe
-          setTimeframe("custom");
-          setCustomTimeframe(initialSettings.timeframe);
-        }
+        // Custom (non-preset) timeframes are injected as their own dropdown
+        // option, so the raw value can be set directly.
+        setTimeframe(initialSettings.timeframe);
       }
       if (initialSettings.band) setBand(initialSettings.band);
       if (initialSettings.timeperiod) setTimeperiod(initialSettings.timeperiod);
@@ -232,6 +230,11 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
       if (initialSettings.kPeriod) setKPeriod(initialSettings.kPeriod);
       if (initialSettings.dPeriod) setDPeriod(initialSettings.dPeriod);
       if (initialSettings.period) setPeriod(initialSettings.period);
+      if (initialSettings.offsetLogicalOperator) setOffsetLogicalOperator(initialSettings.offsetLogicalOperator);
+      if (initialSettings.offsetValue !== undefined) setOffsetValue(initialSettings.offsetValue);
+      if (initialSettings.offsetUnit !== undefined) {
+        setOffsetUnit(initialSettings.offsetUnit === "" ? "none" : initialSettings.offsetUnit);
+      }
     }
   }, [initialSettings]);
 
@@ -271,10 +274,10 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
         // Get saved Volume settings as fallback
         let savedVolumeMaLength = 20;
         try {
-          const savedVolumeSettings = localStorage.getItem('volumeSettings');
+          const savedVolumeSettings = localStorage.getItem('volumeMaSettings');
           if (savedVolumeSettings) {
             const parsedSettings = JSON.parse(savedVolumeSettings);
-            savedVolumeMaLength = parsedSettings.maLength || 20;
+            savedVolumeMaLength = Number(parsedSettings.maLength) || 20;
           }
         } catch (error) {
           console.log('Error reading saved Volume settings:', error);
@@ -316,7 +319,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
         onSave({
           valueType,
           indicator: "stochastic",
-          timeframe: currentInp1.timeframe || (timeframe === "custom" ? customTimeframe : timeframe),
+          timeframe: currentInp1.timeframe || timeframe,
           fastk_period: currentInp1.input_params.fastk_period || 14,
           slowk_period: currentInp1.input_params.slowk_period || 3,
           slowd_period: currentInp1.input_params.slowd_period || 3,
@@ -331,7 +334,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
       // Get saved RSI settings from localStorage
       let savedRsiSettings = null;
       try {
-        const savedSettings = localStorage.getItem('rsiSettings');
+        const savedSettings = localStorage.getItem('rsiMaSettings');
         console.log('🔍 Retrieved saved RSI settings in handleSave:', savedSettings);
         if (savedSettings) {
           savedRsiSettings = JSON.parse(savedSettings);
@@ -342,11 +345,11 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
       }
 
       // Use saved values with fallbacks
-      const finalRsiMaLength = savedRsiSettings?.rsiLength || 14;
-      const finalMaLength = savedRsiSettings?.maLength || 14;
+      const finalRsiMaLength = Number(savedRsiSettings?.rsiLength) || 14;
+      const finalMaLength = Number(savedRsiSettings?.maLength) || 14;
       const finalRsiSource = savedRsiSettings?.source || "Close";
       const finalMaType = savedRsiSettings?.maType || "SMA";
-      const finalBbStdDev = savedRsiSettings?.bbStdDev || 2;
+      const finalBbStdDev = Number(savedRsiSettings?.bbStdDev) || 2;
 
       console.log('🔧 Final values for RSI_MA in handleSave:', {
         rsiMaLength: finalRsiMaLength,
@@ -359,7 +362,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
       onSave({
         valueType,
         indicator,
-        timeframe: timeframe === "custom" ? customTimeframe : timeframe,
+        timeframe: timeframe,
         rsiMaLength: finalRsiMaLength,
         maLength: finalMaLength,
         rsiSource: finalRsiSource,
@@ -381,7 +384,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
       valueType,
       customValue,
       indicator,
-      timeframe: timeframe === "custom" ? customTimeframe : timeframe,
+      timeframe: timeframe,
       band,
       timeperiod,
       rsiLength,
@@ -422,10 +425,9 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
     if (indicator === "volume-ma" && volumeMaLength) {
       try {
         const volumeSettings = {
-          indicatorType: "volume-ma",
-          maLength: volumeMaLength,
+          maLength: Number(volumeMaLength) || 20,
         };
-        localStorage.setItem('volumeSettings', JSON.stringify(volumeSettings));
+        localStorage.setItem('volumeMaSettings', JSON.stringify(volumeSettings));
         console.log('🔍 Saved Volume settings to localStorage:', volumeSettings);
       } catch (error) {
         console.log('Error saving Volume settings:', error);
@@ -458,7 +460,7 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
           const parsedSettings = JSON.parse(savedRsiSettings);
           console.log('📖 Parsed RSI settings:', parsedSettings);
           // For RSI, use rsiLength if available, otherwise fall back to defaults
-          rsiLength = parsedSettings.rsiLength || 14;
+          rsiLength = Number(parsedSettings.rsiLength) || 14;
           rsiSource = parsedSettings.source || "close";
           console.log('📖 Retrieved saved RSI settings for RSI - rsiLength:', rsiLength, 'rsiSource:', rsiSource);
         } else {
@@ -489,14 +491,14 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
 
       // Try to get saved RSI settings from localStorage first
       try {
-        const savedRsiSettings = localStorage.getItem('rsiSettings');
+        const savedRsiSettings = localStorage.getItem('rsiMaSettings');
         if (savedRsiSettings) {
           const parsedSettings = JSON.parse(savedRsiSettings);
-          rsiLength = parsedSettings.rsiLength || 14;
+          rsiLength = Number(parsedSettings.rsiLength) || 14;
           rsiSource = parsedSettings.source || "Close";
-          maLength = parsedSettings.maLength || 14;
+          maLength = Number(parsedSettings.maLength) || 14;
           maType = parsedSettings.maType || "SMA";
-          bbStdDev = parsedSettings.bbStdDev || 2;
+          bbStdDev = Number(parsedSettings.bbStdDev) || 2;
           console.log('📖 Retrieved saved RSI settings for RSI_MA:', parsedSettings);
         }
       } catch (error) {
@@ -525,10 +527,10 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
       // Get saved Volume settings from localStorage
       let savedVolumeMaLength = 20;
       try {
-        const savedVolumeSettings = localStorage.getItem('volumeSettings');
+        const savedVolumeSettings = localStorage.getItem('volumeMaSettings');
         if (savedVolumeSettings) {
           const parsedSettings = JSON.parse(savedVolumeSettings);
-          savedVolumeMaLength = parsedSettings.maLength || 20;
+          savedVolumeMaLength = Number(parsedSettings.maLength) || 20;
           console.log('🔍 DEBUG: Using saved Volume settings in getReadOnlyParams:', parsedSettings);
         }
       } catch (error) {
@@ -870,7 +872,13 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
                   Timeframe
                 </Label>
                 <div className="space-y-2">
-                  <Select value={timeframe} onValueChange={setTimeframe}>
+                  <Select
+                    value={timeframe}
+                    onValueChange={(v) => {
+                      if (v === "add-custom") setShowCustomTimeframeModal(true)
+                      else setTimeframe(v)
+                    }}
+                  >
                     <SelectTrigger id="timeframe" className="w-full border border-gray-300 text-black bg-white">
                       <SelectValue placeholder="Select timeframe" />
                     </SelectTrigger>
@@ -891,15 +899,16 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
                       <SelectItem value="3d">3 days</SelectItem>
                       <SelectItem value="1w">1 week</SelectItem>
                       <SelectItem value="1M">1 month</SelectItem>
-                      <SelectItem value="custom">Custom</SelectItem>
+                      {timeframe && !TIMEFRAME_PRESETS.includes(timeframe) && (
+                        <SelectItem value={timeframe}>{timeframe}</SelectItem>
+                      )}
+                      <SelectItem value="add-custom">Add Custom</SelectItem>
                     </SelectContent>
                   </Select>
-                  {timeframe === "custom" && (
-                    <Input
-                      placeholder="Enter custom timeframe (e.g., 36min, 2.5h)"
-                      value={customTimeframe}
-                      onChange={(e) => setCustomTimeframe(e.target.value)}
-                      className="w-full border border-gray-300 rounded-md text-black"
+                  {showCustomTimeframeModal && (
+                    <CustomTimeframeModal
+                      onClose={() => setShowCustomTimeframeModal(false)}
+                      onSave={(tf) => setTimeframe(tf)}
                     />
                   )}
                 </div>
@@ -908,10 +917,10 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
               <div className="flex justify-end gap-2 pt-2">
                 <Button
                   onClick={() => {
-                    onNext(indicator, timeframe === "custom" ? customTimeframe : timeframe)
+                    onNext(indicator, timeframe)
                   }}
                   className="rounded-full px-6 bg-[#85e1fe] text-black hover:bg-[#6bc8e3] border-none"
-                  disabled={!indicator || !timeframe || (timeframe === "custom" && !customTimeframe)}
+                  disabled={!indicator || !timeframe}
                 >
                   Next
                 </Button>

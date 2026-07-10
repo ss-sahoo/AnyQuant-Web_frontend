@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { X } from "lucide-react"
 import { DraggableModal } from "./draggable-modal"
+import { CustomTimeframeModal } from "./custom-timeframe-modal"
 
 interface CustomIndicatorSettingsModalProps {
   onClose: () => void
@@ -29,6 +30,8 @@ const TIMEFRAME_OPTIONS = [
   { value: "1w", label: "1 Week" },
 ]
 
+const isPresetTimeframe = (tf?: string) => !!tf && TIMEFRAME_OPTIONS.some((o) => o.value === tf)
+
 export function CustomIndicatorSettingsModal({
   onClose,
   onSave,
@@ -37,6 +40,7 @@ export function CustomIndicatorSettingsModal({
   initialSettings,
 }: CustomIndicatorSettingsModalProps) {
   const [timeframe, setTimeframe] = useState(initialSettings?.timeframe || "1h")
+  const [showCustomTimeframeModal, setShowCustomTimeframeModal] = useState(false)
   const [params, setParams] = useState<Record<string, any>>(
     initialSettings?.input_params || componentParameters || {}
   )
@@ -89,7 +93,10 @@ export function CustomIndicatorSettingsModal({
             <label className="block text-sm text-gray-400 mb-2">Timeframe</label>
             <select
               value={timeframe}
-              onChange={(e) => setTimeframe(e.target.value)}
+              onChange={(e) => {
+                if (e.target.value === "add-custom") setShowCustomTimeframeModal(true)
+                else setTimeframe(e.target.value)
+              }}
               className="w-full px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded-lg text-white focus:outline-none focus:border-[#85e1fe]"
             >
               {TIMEFRAME_OPTIONS.map((option) => (
@@ -97,7 +104,15 @@ export function CustomIndicatorSettingsModal({
                   {option.label}
                 </option>
               ))}
+              {!isPresetTimeframe(timeframe) && <option value={timeframe}>{timeframe}</option>}
+              <option value="add-custom">Add Custom</option>
             </select>
+            {showCustomTimeframeModal && (
+              <CustomTimeframeModal
+                onClose={() => setShowCustomTimeframeModal(false)}
+                onSave={(tf) => setTimeframe(tf)}
+              />
+            )}
           </div>
 
           {/* Dynamic Parameters */}

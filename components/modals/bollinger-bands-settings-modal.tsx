@@ -7,15 +7,26 @@ import { DraggableModal } from "./draggable-modal"
 interface BollingerBandsSettingsModalProps {
   onClose: () => void
   onSave: (settings: any) => void
+  initialSettings?: {
+    timeperiod?: number
+    input?: string
+    nbdevup?: number
+    nbdevdn?: number
+    source?: string
+    ma_type?: string
+    offset?: number
+  }
 }
 
-export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsSettingsModalProps) {
-  const [level, setLevel] = useState("lower")
-  const [length, setLength] = useState("20")
-  const [maType, setMaType] = useState("SMA")
-  const [source, setSource] = useState("close")
-  const [stdDev, setStdDev] = useState("2")
-  const [offset, setOffset] = useState("2")
+export function BollingerBandsSettingsModal({ onClose, onSave, initialSettings }: BollingerBandsSettingsModalProps) {
+  const [level, setLevel] = useState(
+    initialSettings?.input === "upperband" ? "upper" : initialSettings?.input === "middleband" ? "basis" : "lower",
+  )
+  const [length, setLength] = useState(String(initialSettings?.timeperiod ?? 20))
+  const [maType, setMaType] = useState(initialSettings?.ma_type ?? "SMA")
+  const [source, setSource] = useState(initialSettings?.source ?? "close")
+  const [stdDev, setStdDev] = useState(String(initialSettings?.nbdevup ?? initialSettings?.nbdevdn ?? 2))
+  const [offset, setOffset] = useState(String(initialSettings?.offset ?? 0))
   const [showMaTypeDropdown, setShowMaTypeDropdown] = useState(false)
   const [showSourceDropdown, setShowSourceDropdown] = useState(false)
 
@@ -42,6 +53,7 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
   const handleSave = () => {
     const timeperiod = Number.parseInt(length, 10) || 20
     const stdDevValue = Number.parseFloat(stdDev) || 2.0
+    const offsetValue = Number.parseInt(offset, 10) || 0
 
     // Determine input based on level
     let input = "lowerband"
@@ -51,10 +63,13 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
       input = "middleband"
     }
 
-    // Build input_params based on band selection
+    // Build input_params based on band selection. ma_type and offset are
+    // persisted here so they round-trip through the strategy JSON.
     const inputParams: any = {
       timeperiod: timeperiod,
       source: source,
+      ma_type: maType,
+      offset: offsetValue,
     }
 
     // Add deviation parameters based on band selection
@@ -76,7 +91,7 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
       maType: maType,
       source: source,
       stdDev: stdDevValue,
-      offset: Number.parseFloat(offset) || 2,
+      offset: offsetValue,
     })
   }
 
@@ -84,8 +99,10 @@ export function BollingerBandsSettingsModal({ onClose, onSave }: BollingerBandsS
   const sources = ["close", "open", "high", "low", "hl2", "hlc3", "ohlc4"]
 
   return (
-    <DraggableModal onClose={onClose} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md max-h-[90vh] flex flex-col">
-      <div className="flex flex-col h-full">
+    <DraggableModal onClose={onClose} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden">
+      {/* min-h-0 lets this flex item shrink below its content height so the
+          body scrolls and the footer stays inside the max-h-[90vh] box */}
+      <div className="flex flex-col min-h-0">
         {/* Fixed Header */}
         <div className="flex justify-between items-center p-6 border-b border-gray-200 flex-shrink-0">
           <h2 className="text-2xl font-bold text-black">Bollinger Bands Settings</h2>

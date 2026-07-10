@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react"
 import { X } from "lucide-react"
 import { DraggableModal } from "./draggable-modal"
+import { CustomTimeframeModal } from "./custom-timeframe-modal"
 
 interface ChannelSettingsModalProps {
   onClose: () => void
@@ -15,6 +16,7 @@ export function ChannelSettingsModal({ onClose, onSave }: ChannelSettingsModalPr
   const [timeframe, setTimeframe] = useState("")
   const [periods, setPeriods] = useState("")
   const [showTimeframeDropdown, setShowTimeframeDropdown] = useState(false)
+  const [showCustomTimeframeModal, setShowCustomTimeframeModal] = useState(false)
 
   const timeframeDropdownRef = useRef<HTMLDivElement>(null)
 
@@ -51,6 +53,8 @@ export function ChannelSettingsModal({ onClose, onSave }: ChannelSettingsModalPr
     "4 hour",
     "1 day",
   ]
+
+  const isPresetTimeframe = timeframes.includes(timeframe)
 
   return (
     <DraggableModal onClose={onClose} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md">
@@ -113,9 +117,32 @@ export function ChannelSettingsModal({ onClose, onSave }: ChannelSettingsModalPr
                       {tf}
                     </button>
                   ))}
+                  {timeframe && !isPresetTimeframe && (
+                    <button
+                      className="w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-100"
+                      onClick={() => setShowTimeframeDropdown(false)}
+                    >
+                      {timeframe}
+                    </button>
+                  )}
+                  <button
+                    className="w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-100 border-t border-gray-200 font-medium"
+                    onClick={() => {
+                      setShowCustomTimeframeModal(true)
+                      setShowTimeframeDropdown(false)
+                    }}
+                  >
+                    Add Custom
+                  </button>
                 </div>
               )}
             </div>
+            {showCustomTimeframeModal && (
+              <CustomTimeframeModal
+                onClose={() => setShowCustomTimeframeModal(false)}
+                onSave={(tf) => setTimeframe(tf)}
+              />
+            )}
           </div>
 
           <div className="mb-6">
@@ -136,7 +163,11 @@ export function ChannelSettingsModal({ onClose, onSave }: ChannelSettingsModalPr
             >
               Cancel
             </button>
-            <button onClick={handleSave} className="px-6 py-3 bg-[#85e1fe] rounded-full text-black hover:bg-[#6bcae2]">
+            <button
+              onClick={handleSave}
+              disabled={!timeframe}
+              className="px-6 py-3 bg-[#85e1fe] rounded-full text-black hover:bg-[#6bcae2] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               Save
             </button>
           </div>

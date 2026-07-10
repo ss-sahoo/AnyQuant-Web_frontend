@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DraggableModal } from "./draggable-modal"
+import { CustomTimeframeModal } from "./custom-timeframe-modal"
 
 interface VolumeDeltaSettingsModalProps {
   onClose: () => void
@@ -27,8 +28,11 @@ const TIMEFRAME_OPTIONS = [
   { value: "4h", label: "4 hours" },
 ]
 
+const isPresetTimeframe = (tf?: string) => !!tf && TIMEFRAME_OPTIONS.some((o) => o.value === tf)
+
 export function VolumeDeltaSettingsModal({ onClose, onSave, initialSettings }: VolumeDeltaSettingsModalProps) {
   const [lowerTimeframe, setLowerTimeframe] = useState(initialSettings?.lowerTimeframe || "1min")
+  const [showCustomTimeframeModal, setShowCustomTimeframeModal] = useState(false)
 
   // Restore the user's last choice across opens, but never override an
   // explicit `initialSettings` (editing flow).
@@ -74,7 +78,13 @@ export function VolumeDeltaSettingsModal({ onClose, onSave, initialSettings }: V
             <Label htmlFor="vd-lower-timeframe" className="block text-sm font-medium text-gray-700 mb-2">
               Lower Timeframe
             </Label>
-            <Select value={lowerTimeframe} onValueChange={setLowerTimeframe}>
+            <Select
+              value={lowerTimeframe}
+              onValueChange={(v) => {
+                if (v === "add-custom") setShowCustomTimeframeModal(true)
+                else setLowerTimeframe(v)
+              }}
+            >
               <SelectTrigger id="vd-lower-timeframe" className="w-full border border-gray-300 text-black bg-white">
                 <SelectValue placeholder="Select lower timeframe" />
               </SelectTrigger>
@@ -84,8 +94,18 @@ export function VolumeDeltaSettingsModal({ onClose, onSave, initialSettings }: V
                     {opt.label}
                   </SelectItem>
                 ))}
+                {!isPresetTimeframe(lowerTimeframe) && (
+                  <SelectItem value={lowerTimeframe}>{lowerTimeframe}</SelectItem>
+                )}
+                <SelectItem value="add-custom">Add Custom</SelectItem>
               </SelectContent>
             </Select>
+            {showCustomTimeframeModal && (
+              <CustomTimeframeModal
+                onClose={() => setShowCustomTimeframeModal(false)}
+                onSave={(tf) => setLowerTimeframe(tf)}
+              />
+            )}
             <p className="text-xs text-gray-500 mt-1">
               The timeframe used to calculate the signed volume delta — must be lower than the chart timeframe.
             </p>

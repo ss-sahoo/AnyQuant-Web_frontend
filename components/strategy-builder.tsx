@@ -336,16 +336,22 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     statements.forEach((stmt, sIdx) => {
       const stmtLabel = stmt.saveresult || `Statement ${sIdx + 1}`
       stmt.strategy.forEach((cond, cIdx) => {
+        // moving_up / moving_down are unary — they read inp1 only and carry
+        // their comparison in cond.Operator, so a missing inp2 is expected and
+        // must not be flagged as incomplete.
+        const isUnaryOperator =
+          cond.operator_name === "moving_up" || cond.operator_name === "moving_down"
         const hasInp1 = !!cond.inp1
         const hasOp = !!cond.operator_name
         const hasInp2 = !!cond.inp2
+        const needsInp2 = !isUnaryOperator
         const hasAny = hasInp1 || hasOp || hasInp2
-        const hasAll = hasInp1 && hasOp && hasInp2
+        const hasAll = hasInp1 && hasOp && (hasInp2 || !needsInp2)
         if (hasAny && !hasAll) {
           const missing: string[] = []
           if (!hasInp1) missing.push("first input")
           if (!hasOp) missing.push("operator")
-          if (!hasInp2) missing.push("second input")
+          if (!hasInp2 && needsInp2) missing.push("second input")
           issues.push({ statement: stmtLabel, conditionIndex: cIdx, missing })
         }
       })
@@ -1382,6 +1388,20 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     return undefined;
   };
 
+  // Build the settings used to pre-fill the Above / Below / Crossing operator
+  // modals when the user clicks an existing operator to edit it. Combines the
+  // inp2 indicator/value settings with the row-level offset so both round-trip.
+  const getOperatorEditSettings = (condition: any) => {
+    if (!condition) return undefined
+    const base: any = extractInp2Settings(condition.inp2, condition.inp1) || {}
+    if (condition.offset) {
+      base.offsetLogicalOperator = condition.offset.logical_operator ?? ">="
+      base.offsetValue = condition.offset.value ?? 0
+      base.offsetUnit = condition.offset.unit ?? ""
+    }
+    return Object.keys(base).length ? base : undefined
+  }
+
   // Add function to handle component clicks for editing
   const handleComponentClick = (
     statementIndex: number,
@@ -1467,8 +1487,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         }
         if (condition.operator_name === "crossabove" || condition.operator_name === "crossbelow") {
           if (condition.operator_name === "crossabove") {
-            const initialSettings = extractInp2Settings(condition.inp2, condition.inp1)
-            setCrossingUpInitialSettings(initialSettings)
+            setCrossingUpInitialSettings(getOperatorEditSettings(condition))
             setShowCrossingUpModal(true)
           } else {
             setShowCrossingDownModal(true)
@@ -2169,13 +2188,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           statement: "if",
         })
       } else if (statementType === "if") {
-        // Statement already starts with an If row (added by addStatement). The
-        // row is invisible until it has inp1/operator/inp2, which can make a
-        // second "If" click feel like nothing happened — surface a hint.
-        toast({
-          title: "If row already exists",
-          description: "Pick an indicator, behaviour, or value to fill in this statement's If row.",
-        })
+        // Every statement is pre-seeded with an invisible If row, so clicking
+        // "If" again has nothing to do. Treat it as a silent no-op — the row is
+        // filled by picking an indicator/behaviour/value, not by re-clicking If.
         return
       } else if ((statementType === "and" || statementType === "or") && currentStatement.strategy.length > 0) {
         // Add "and" or "or" statement
@@ -5630,7 +5645,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const createVolumeMAIndicator = (timeframe: string, maLength: number) => {
     // Get saved Volume settings as fallback
     const savedVolumeSettings = getSavedVolumeSettings();
-    const finalMaLength = maLength || savedVolumeSettings?.maLength || 20;
+    const finalMaLength = Number(maLength || savedVolumeSettings?.maLength) || 20;
 
     return {
       type: "CUSTOM_I" as const,
@@ -5645,7 +5660,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   // Utility function to get saved Volume settings from localStorage
   const getSavedVolumeSettings = () => {
     try {
-      const savedVolumeSettings = localStorage.getItem('volumeSettings');
+      const savedVolumeSettings = localStorage.getItem('volumeMaSettings');
       if (savedVolumeSettings) {
         const parsedSettings = JSON.parse(savedVolumeSettings);
         console.log('🔍 DEBUG: Retrieved saved Volume settings:', parsedSettings);
@@ -5670,7 +5685,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     if (indicator && indicator.name === "Volume MA" && indicator.input_params) {
       // Get saved Volume settings as fallback
       const savedVolumeSettings = getSavedVolumeSettings();
-      const finalMaLength = indicator.input_params.ma_length || savedVolumeSettings?.maLength || 20;
+      const finalMaLength = Number(indicator.input_params.ma_length || savedVolumeSettings?.maLength) || 20;
 
       return {
         ...indicator,
@@ -6300,7 +6315,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                     // Get saved RSI settings from localStorage for better defaults
                     let savedRsiSettings = null;
                     try {
-                      const savedSettings = localStorage.getItem('rsiSettings');
+                      const savedSettings = localStorage.getItem('rsiMaSettings');
                       if (savedSettings) {
                         savedRsiSettings = JSON.parse(savedSettings);
                         console.log('🔍 Retrieved saved RSI settings for RSI_MA inp2:', savedRsiSettings);
@@ -6310,9 +6325,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                     }
 
                     // Priority order: settings from modal > saved settings > defaults
-                    const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
+                    const finalRsiLength = Number(settings.rsiMaLength || savedRsiSettings?.rsiLength) || 14;
                     const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
-                    const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
+                    const finalMaLength = Number(settings.maLength || savedRsiSettings?.maLength) || 14;
                     const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
                     // bb_stddev removed — only used by "Bollinger Bands" ma_type, no longer offered.
 
@@ -6608,9 +6623,19 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         )}
         {showCrossingDownModal && (
           <CrossingDownSettingsModal
-            onClose={() => setShowCrossingDownModal(false)}
+            onClose={() => { setShowCrossingDownModal(false); setEditingComponent(null) }}
             currentInp1={
-              statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]?.inp1
+              (editingComponent
+                ? statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+                : statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]
+              )?.inp1
+            }
+            initialSettings={
+              editingComponent
+                ? getOperatorEditSettings(
+                    statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex],
+                  )
+                : undefined
             }
             onSave={(settings) => {
               // Update crossing down settings with the custom value
@@ -6655,7 +6680,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                     // Get saved RSI settings from localStorage for better defaults
                     let savedRsiSettings = null;
                     try {
-                      const savedSettings = localStorage.getItem('rsiSettings');
+                      const savedSettings = localStorage.getItem('rsiMaSettings');
                       if (savedSettings) {
                         savedRsiSettings = JSON.parse(savedSettings);
                         console.log('🔍 Retrieved saved RSI settings for RSI_MA inp2 (crossing-down):', savedRsiSettings);
@@ -6665,9 +6690,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                     }
 
                     // Priority order: settings from modal > saved settings > defaults
-                    const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
+                    const finalRsiLength = Number(settings.rsiMaLength || savedRsiSettings?.rsiLength) || 14;
                     const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
-                    const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
+                    const finalMaLength = Number(settings.maLength || savedRsiSettings?.maLength) || 14;
                     const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
                     // bb_stddev removed — only used by "Bollinger Bands" ma_type, no longer offered.
 
@@ -6965,6 +6990,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 : statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]
               )?.inp1
             }
+            initialSettings={
+              editingComponent
+                ? getOperatorEditSettings(
+                    statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex],
+                  )
+                : undefined
+            }
             onSave={(settings) => {
               const newStatements = [...statements]
               // Target the condition the user actually clicked to edit. Without
@@ -7003,7 +7035,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                       // Get saved RSI settings from localStorage for better defaults
                       let savedRsiSettings = null;
                       try {
-                        const savedSettings = localStorage.getItem('rsiSettings');
+                        const savedSettings = localStorage.getItem('rsiMaSettings');
                         if (savedSettings) {
                           savedRsiSettings = JSON.parse(savedSettings);
                           console.log('🔍 Retrieved saved RSI settings for RSI_MA inp2 (above):', savedRsiSettings);
@@ -7013,9 +7045,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                       }
 
                       // Priority order: settings from modal > saved settings > defaults
-                      const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
+                      const finalRsiLength = Number(settings.rsiMaLength || savedRsiSettings?.rsiLength) || 14;
                       const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
-                      const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
+                      const finalMaLength = Number(settings.maLength || savedRsiSettings?.maLength) || 14;
                       const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
                       // bb_stddev removed — only used by "Bollinger Bands" ma_type, no longer offered.
 
@@ -7230,6 +7262,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 : statements[activeStatementIndex]?.strategy[statements[activeStatementIndex].strategy.length - 1]
               )?.inp1
             }
+            initialSettings={
+              editingComponent
+                ? getOperatorEditSettings(
+                    statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex],
+                  )
+                : undefined
+            }
             onSave={(settings) => {
               const newStatements = [...statements]
               // Target the clicked condition (see the "above" handler above) so
@@ -7267,7 +7306,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                       // Get saved RSI settings from localStorage for better defaults
                       let savedRsiSettings = null;
                       try {
-                        const savedSettings = localStorage.getItem('rsiSettings');
+                        const savedSettings = localStorage.getItem('rsiMaSettings');
                         if (savedSettings) {
                           savedRsiSettings = JSON.parse(savedSettings);
                           console.log('🔍 Retrieved saved RSI settings for RSI_MA inp2 (below):', savedRsiSettings);
@@ -7277,9 +7316,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                       }
 
                       // Priority order: settings from modal > saved settings > defaults
-                      const finalRsiLength = settings.rsiMaLength || savedRsiSettings?.rsiLength || 14;
+                      const finalRsiLength = Number(settings.rsiMaLength || savedRsiSettings?.rsiLength) || 14;
                       const finalRsiSource = settings.rsiSource || savedRsiSettings?.source || "Close";
-                      const finalMaLength = settings.maLength || savedRsiSettings?.maLength || 14;
+                      const finalMaLength = Number(settings.maLength || savedRsiSettings?.maLength) || 14;
                       const finalMaType = settings.maType || savedRsiSettings?.maType || "SMA";
                       // bb_stddev removed — only used by "Bollinger Bands" ma_type, no longer offered.
 
@@ -7603,6 +7642,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                     nbdevup: indicator.input_params?.nbdevup,
                     nbdevdn: indicator.input_params?.nbdevdn,
                     source: indicator.input_params?.source || "high",
+                    ma_type: indicator.input_params?.ma_type || "SMA",
+                    offset: indicator.input_params?.offset ?? 0,
                   }
                 }
               } else {
@@ -7635,6 +7676,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                     nbdevup: indicator.input_params?.nbdevup,
                     nbdevdn: indicator.input_params?.nbdevdn,
                     source: indicator.input_params?.source || "high",
+                    ma_type: indicator.input_params?.ma_type || "SMA",
+                    offset: indicator.input_params?.offset ?? 0,
                   }
                 }
               }

@@ -7,10 +7,42 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { X } from 'lucide-react'
 import { DraggableModal } from "./draggable-modal"
+import { CustomTimeframeModal } from "./custom-timeframe-modal"
 
 interface CrossingDownSettingsModalProps {
   onClose: () => void
   currentInp1?: any // Information about the current inp1 indicator
+  // Pre-fills the form when editing an existing operator. Mirrors the shape
+  // produced by onSave so a saved condition round-trips back into the modal.
+  initialSettings?: {
+    valueType?: string
+    customValue?: string
+    indicator?: string
+    timeframe?: string
+    band?: string
+    timeperiod?: number
+    rsiLength?: number
+    rsiMaLength?: number
+    maLength?: number
+    rsiSource?: string
+    maType?: string
+    bbStdDev?: number
+    bbSource?: string
+    volumeMaLength?: number
+    fastPeriod?: number
+    slowPeriod?: number
+    signalPeriod?: number
+    kPeriod?: number
+    dPeriod?: number
+    period?: number
+    offsetLogicalOperator?: string
+    offsetValue?: number
+    offsetUnit?: string
+    fastk_period?: number
+    slowk_period?: number
+    slowd_period?: number
+    stochasticOutput?: string
+  }
   onSave: (settings: {
     valueType: string
     customValue?: string
@@ -46,14 +78,17 @@ interface CrossingDownSettingsModalProps {
   onNext: (indicator: string, timeframe: string) => void
 }
 
-export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext }: CrossingDownSettingsModalProps) {
+export function CrossingDownSettingsModal({ onClose, currentInp1, initialSettings, onSave, onNext }: CrossingDownSettingsModalProps) {
   const [valueType, setValueType] = useState("value")
   const [customValue, setCustomValue] = useState("50")
   const [indicator, setIndicator] = useState("")
   const [timeframe, setTimeframe] = useState("3h")
   const [band, setBand] = useState("upperband")
   const [timeperiod, setTimeperiod] = useState(17)
-  const [customTimeframe, setCustomTimeframe] = useState("")
+  const [showCustomTimeframeModal, setShowCustomTimeframeModal] = useState(false)
+  // Preset options in the timeframe dropdown; any other value came from the
+  // Custom Timeframe dialog and is injected as its own option.
+  const TIMEFRAME_PRESETS = ["1min", "5min", "15min", "30min", "45min", "1h", "2h", "3h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"]
 
   // RSI parameters
   const [rsiLength, setRsiLength] = useState(14)
@@ -71,12 +106,12 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext
   // Load saved Volume settings from localStorage on component mount
   useEffect(() => {
     try {
-      const savedVolumeSettings = localStorage.getItem('volumeSettings');
+      const savedVolumeSettings = localStorage.getItem('volumeMaSettings');
       if (savedVolumeSettings) {
         const parsedSettings = JSON.parse(savedVolumeSettings);
         console.log('🔍 Loaded saved Volume settings in crossing-down modal:', parsedSettings);
         if (parsedSettings.maLength) {
-          setVolumeMaLength(parsedSettings.maLength);
+          setVolumeMaLength(Number(parsedSettings.maLength) || 20);
         }
       }
     } catch (error) {
@@ -150,8 +185,41 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext
 
   const existingIndicatorOptions = getExistingIndicatorOptions()
 
+  // Restore the saved values when editing an existing operator. Runs before the
+  // currentInp1 effect (which is skipped while initialSettings is present) so
+  // the user's configured inp2 wins over inp1-derived defaults.
+  useEffect(() => {
+    if (!initialSettings) return
+    if (initialSettings.valueType) setValueType(initialSettings.valueType)
+    if (initialSettings.customValue !== undefined) setCustomValue(String(initialSettings.customValue))
+    if (initialSettings.indicator) setIndicator(initialSettings.indicator)
+    if (initialSettings.timeframe) setTimeframe(initialSettings.timeframe)
+    if (initialSettings.band) setBand(initialSettings.band)
+    if (initialSettings.timeperiod) setTimeperiod(initialSettings.timeperiod)
+    if (initialSettings.rsiLength) setRsiLength(initialSettings.rsiLength)
+    if (initialSettings.rsiMaLength) setRsiMaLength(initialSettings.rsiMaLength)
+    if (initialSettings.maLength) setMaLength(initialSettings.maLength)
+    if (initialSettings.rsiSource) setRsiSource(initialSettings.rsiSource)
+    if (initialSettings.maType) setMaType(initialSettings.maType)
+    if (initialSettings.bbStdDev !== undefined) setBbStdDev(initialSettings.bbStdDev)
+    if (initialSettings.bbSource) setBbSource(initialSettings.bbSource)
+    if (initialSettings.volumeMaLength) setVolumeMaLength(initialSettings.volumeMaLength)
+    if (initialSettings.fastPeriod) setFastPeriod(initialSettings.fastPeriod)
+    if (initialSettings.slowPeriod) setSlowPeriod(initialSettings.slowPeriod)
+    if (initialSettings.signalPeriod) setSignalPeriod(initialSettings.signalPeriod)
+    if (initialSettings.kPeriod) setKPeriod(initialSettings.kPeriod)
+    if (initialSettings.dPeriod) setDPeriod(initialSettings.dPeriod)
+    if (initialSettings.period) setPeriod(initialSettings.period)
+    if (initialSettings.offsetLogicalOperator) setOffsetLogicalOperator(initialSettings.offsetLogicalOperator)
+    if (initialSettings.offsetValue !== undefined) setOffsetValue(initialSettings.offsetValue)
+    if (initialSettings.offsetUnit !== undefined) {
+      setOffsetUnit(initialSettings.offsetUnit === "" ? "none" : initialSettings.offsetUnit)
+    }
+  }, [initialSettings])
+
   // Initialize parameters based on current inp1
   useEffect(() => {
+    if (initialSettings) return
     if (currentInp1) {
       if (currentInp1.name === "RSI") {
         setRsiLength(currentInp1.input_params?.timeperiod || 14)
@@ -175,10 +243,10 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext
         // Get saved Volume settings as fallback
         let savedVolumeMaLength = 20;
         try {
-          const savedVolumeSettings = localStorage.getItem('volumeSettings');
+          const savedVolumeSettings = localStorage.getItem('volumeMaSettings');
           if (savedVolumeSettings) {
             const parsedSettings = JSON.parse(savedVolumeSettings);
-            savedVolumeMaLength = parsedSettings.maLength || 20;
+            savedVolumeMaLength = Number(parsedSettings.maLength) || 20;
           }
         } catch (error) {
           console.log('Error reading saved Volume settings:', error);
@@ -230,7 +298,7 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext
           const parsedSettings = JSON.parse(savedRsiSettings);
           console.log('📖 Parsed RSI settings (crossing-down):', parsedSettings);
           // For RSI, use rsiLength if available, otherwise fall back to defaults
-          rsiLength = parsedSettings.rsiLength || 14;
+          rsiLength = Number(parsedSettings.rsiLength) || 14;
           rsiSource = parsedSettings.source || "close";
           console.log('📖 Retrieved saved RSI settings for RSI (crossing-down) - rsiLength:', rsiLength, 'rsiSource:', rsiSource);
         } else {
@@ -261,14 +329,14 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext
 
       // Try to get saved RSI settings from localStorage first
       try {
-        const savedRsiSettings = localStorage.getItem('rsiSettings');
+        const savedRsiSettings = localStorage.getItem('rsiMaSettings');
         if (savedRsiSettings) {
           const parsedSettings = JSON.parse(savedRsiSettings);
-          rsiLength = parsedSettings.rsiLength || 14;
+          rsiLength = Number(parsedSettings.rsiLength) || 14;
           rsiSource = parsedSettings.source || "Close";
-          maLength = parsedSettings.maLength || 14;
+          maLength = Number(parsedSettings.maLength) || 14;
           maType = parsedSettings.maType || "SMA";
-          bbStdDev = parsedSettings.bbStdDev || 2;
+          bbStdDev = Number(parsedSettings.bbStdDev) || 2;
         }
       } catch (error) {
         console.log('Error reading saved RSI settings:', error);
@@ -296,10 +364,10 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext
       // Get saved Volume settings from localStorage
       let savedVolumeMaLength = 20;
       try {
-        const savedVolumeSettings = localStorage.getItem('volumeSettings');
+        const savedVolumeSettings = localStorage.getItem('volumeMaSettings');
         if (savedVolumeSettings) {
           const parsedSettings = JSON.parse(savedVolumeSettings);
-          savedVolumeMaLength = parsedSettings.maLength || 20;
+          savedVolumeMaLength = Number(parsedSettings.maLength) || 20;
           console.log('🔍 DEBUG: Using saved Volume settings in getReadOnlyParams:', parsedSettings);
         }
       } catch (error) {
@@ -539,7 +607,7 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext
       // Get saved RSI settings from localStorage
       let savedRsiSettings = null;
       try {
-        const savedSettings = localStorage.getItem('rsiSettings');
+        const savedSettings = localStorage.getItem('rsiMaSettings');
         console.log('🔍 Retrieved saved RSI settings in handleSave (crossing-down):', savedSettings);
         if (savedSettings) {
           savedRsiSettings = JSON.parse(savedSettings);
@@ -550,11 +618,11 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext
       }
 
       // Use saved values with fallbacks
-      const finalRsiMaLength = savedRsiSettings?.rsiLength || 14;
-      const finalMaLength = savedRsiSettings?.maLength || 14;
+      const finalRsiMaLength = Number(savedRsiSettings?.rsiLength) || 14;
+      const finalMaLength = Number(savedRsiSettings?.maLength) || 14;
       const finalRsiSource = savedRsiSettings?.source || "Close";
       const finalMaType = savedRsiSettings?.maType || "SMA";
-      const finalBbStdDev = savedRsiSettings?.bbStdDev || 2;
+      const finalBbStdDev = Number(savedRsiSettings?.bbStdDev) || 2;
 
       console.log('🔧 Final values for RSI_MA in handleSave (crossing-down):', {
         rsiMaLength: finalRsiMaLength,
@@ -635,10 +703,9 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext
     if (indicator === "volume-ma" && volumeMaLength) {
       try {
         const volumeSettings = {
-          indicatorType: "volume-ma",
-          maLength: volumeMaLength,
+          maLength: Number(volumeMaLength) || 20,
         };
-        localStorage.setItem('volumeSettings', JSON.stringify(volumeSettings));
+        localStorage.setItem('volumeMaSettings', JSON.stringify(volumeSettings));
         console.log('🔍 Saved Volume settings to localStorage:', volumeSettings);
       } catch (error) {
         console.log('Error saving Volume settings:', error);
@@ -774,7 +841,13 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext
                   Timeframe
                 </Label>
                 <div className="space-y-2">
-                  <Select value={timeframe} onValueChange={setTimeframe}>
+                  <Select
+                    value={timeframe}
+                    onValueChange={(v) => {
+                      if (v === "add-custom") setShowCustomTimeframeModal(true)
+                      else setTimeframe(v)
+                    }}
+                  >
                     <SelectTrigger id="timeframe" className="w-full border border-gray-300 text-black bg-white">
                       <SelectValue placeholder="Select timeframe" />
                     </SelectTrigger>
@@ -795,15 +868,16 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext
                       <SelectItem value="3d">3 days</SelectItem>
                       <SelectItem value="1w">1 week</SelectItem>
                       <SelectItem value="1M">1 month</SelectItem>
-                      <SelectItem value="custom">Custom</SelectItem>
+                      {timeframe && !TIMEFRAME_PRESETS.includes(timeframe) && (
+                        <SelectItem value={timeframe}>{timeframe}</SelectItem>
+                      )}
+                      <SelectItem value="add-custom">Add Custom</SelectItem>
                     </SelectContent>
                   </Select>
-                  {timeframe === "custom" && (
-                    <Input
-                      placeholder="Enter custom timeframe (e.g., 36min, 2.5h)"
-                      value={customTimeframe}
-                      onChange={(e) => setCustomTimeframe(e.target.value)}
-                      className="w-full border border-gray-300 rounded-md text-black"
+                  {showCustomTimeframeModal && (
+                    <CustomTimeframeModal
+                      onClose={() => setShowCustomTimeframeModal(false)}
+                      onSave={(tf) => setTimeframe(tf)}
                     />
                   )}
                 </div>
@@ -812,10 +886,10 @@ export function CrossingDownSettingsModal({ onClose, currentInp1, onSave, onNext
               <div className="flex justify-end gap-2 pt-2">
                 <Button
                   onClick={() => {
-                    onNext(indicator, timeframe === "custom" ? customTimeframe : timeframe)
+                    onNext(indicator, timeframe)
                   }}
                   className="rounded-full px-6 bg-[#85e1fe] text-black hover:bg-[#6bc8e3] border-none"
-                  disabled={!indicator || !timeframe || (timeframe === "custom" && !customTimeframe)}
+                  disabled={!indicator || !timeframe}
                 >
                   Next
                 </Button>

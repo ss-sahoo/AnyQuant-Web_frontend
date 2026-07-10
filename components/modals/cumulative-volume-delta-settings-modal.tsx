@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DraggableModal } from "./draggable-modal"
+import { CustomTimeframeModal } from "./custom-timeframe-modal"
 
 interface CumulativeVolumeDeltaSettingsModalProps {
   onClose: () => void
@@ -36,12 +37,15 @@ const RESET_PERIOD_OPTIONS = [
   { value: "Q", label: "Quarterly" },
 ]
 
+const isPresetTimeframe = (tf?: string) => !!tf && TIMEFRAME_OPTIONS.some((o) => o.value === tf)
+
 export function CumulativeVolumeDeltaSettingsModal({
   onClose,
   onSave,
   initialSettings,
 }: CumulativeVolumeDeltaSettingsModalProps) {
   const [lowerTimeframe, setLowerTimeframe] = useState(initialSettings?.lowerTimeframe || "1min")
+  const [showCustomTimeframeModal, setShowCustomTimeframeModal] = useState(false)
   const [resetPeriod, setResetPeriod] = useState(initialSettings?.resetPeriod || "D")
 
   // Restore the user's last choice across opens, but never override an
@@ -93,7 +97,13 @@ export function CumulativeVolumeDeltaSettingsModal({
               >
                 Lower Timeframe
               </Label>
-              <Select value={lowerTimeframe} onValueChange={setLowerTimeframe}>
+              <Select
+                value={lowerTimeframe}
+                onValueChange={(v) => {
+                  if (v === "add-custom") setShowCustomTimeframeModal(true)
+                  else setLowerTimeframe(v)
+                }}
+              >
                 <SelectTrigger id="cvd-lower-timeframe" className="w-full border border-gray-300 text-black bg-white">
                   <SelectValue placeholder="Select lower timeframe" />
                 </SelectTrigger>
@@ -103,8 +113,18 @@ export function CumulativeVolumeDeltaSettingsModal({
                       {opt.label}
                     </SelectItem>
                   ))}
+                  {!isPresetTimeframe(lowerTimeframe) && (
+                    <SelectItem value={lowerTimeframe}>{lowerTimeframe}</SelectItem>
+                  )}
+                  <SelectItem value="add-custom">Add Custom</SelectItem>
                 </SelectContent>
               </Select>
+              {showCustomTimeframeModal && (
+                <CustomTimeframeModal
+                  onClose={() => setShowCustomTimeframeModal(false)}
+                  onSave={(tf) => setLowerTimeframe(tf)}
+                />
+              )}
               <p className="text-xs text-gray-500 mt-1">
                 The timeframe used to calculate the running delta — must be lower than the chart timeframe.
               </p>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { DraggableModal } from "./draggable-modal"
+import { CustomTimeframeModal } from "./custom-timeframe-modal"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -47,7 +48,10 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
   const [timeframe, setTimeframe] = useState("3h")
   const [band, setBand] = useState("upperband")
   const [timeperiod, setTimeperiod] = useState(17)
-  const [customTimeframe, setCustomTimeframe] = useState("")
+  const [showCustomTimeframeModal, setShowCustomTimeframeModal] = useState(false)
+  // Preset options in the timeframe dropdown; any other value came from the
+  // Custom Timeframe dialog and is injected as its own option.
+  const TIMEFRAME_PRESETS = ["1min", "5min", "15min", "30min", "45min", "1h", "2h", "3h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"]
 
   // RSI parameters
   const [rsiLength, setRsiLength] = useState(14)
@@ -66,12 +70,12 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
   // Load saved Volume settings from localStorage on component mount
   useEffect(() => {
     try {
-      const savedVolumeSettings = localStorage.getItem('volumeSettings');
+      const savedVolumeSettings = localStorage.getItem('volumeMaSettings');
       if (savedVolumeSettings) {
         const parsedSettings = JSON.parse(savedVolumeSettings);
         console.log('🔍 Loaded saved Volume settings in pips modal:', parsedSettings);
         if (parsedSettings.maLength) {
-          setVolumeMaLength(parsedSettings.maLength);
+          setVolumeMaLength(Number(parsedSettings.maLength) || 20);
         }
       }
     } catch (error) {
@@ -157,10 +161,10 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
         // Get saved Volume settings as fallback
         let savedVolumeMaLength = 20;
         try {
-          const savedVolumeSettings = localStorage.getItem('volumeSettings');
+          const savedVolumeSettings = localStorage.getItem('volumeMaSettings');
           if (savedVolumeSettings) {
             const parsedSettings = JSON.parse(savedVolumeSettings);
-            savedVolumeMaLength = parsedSettings.maLength || 20;
+            savedVolumeMaLength = Number(parsedSettings.maLength) || 20;
           }
         } catch (error) {
           console.log('Error reading saved Volume settings:', error);
@@ -197,7 +201,7 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
         onSave({
           valueType,
           indicator: "stochastic",
-          timeframe: currentInp1.timeframe || (timeframe === "custom" ? customTimeframe : timeframe),
+          timeframe: currentInp1.timeframe || timeframe,
           fastk_period: currentInp1.input_params.fastk_period || 14,
           slowk_period: currentInp1.input_params.slowk_period || 3,
           slowd_period: currentInp1.input_params.slowd_period || 3,
@@ -213,7 +217,7 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
       valueType,
       customValue,
       indicator,
-      timeframe: timeframe === "custom" ? customTimeframe : timeframe,
+      timeframe: timeframe,
       band,
       timeperiod,
       rsiLength,
@@ -240,10 +244,9 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
     if (indicator === "volume-ma" && volumeMaLength) {
       try {
         const volumeSettings = {
-          indicatorType: "volume-ma",
-          maLength: volumeMaLength,
+          maLength: Number(volumeMaLength) || 20,
         };
-        localStorage.setItem('volumeSettings', JSON.stringify(volumeSettings));
+        localStorage.setItem('volumeMaSettings', JSON.stringify(volumeSettings));
         console.log('🔍 Saved Volume settings to localStorage:', volumeSettings);
       } catch (error) {
         console.log('Error saving Volume settings:', error);
@@ -553,7 +556,13 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
                   Timeframe
                 </Label>
                 <div className="space-y-2">
-                  <Select value={timeframe} onValueChange={setTimeframe}>
+                  <Select
+                    value={timeframe}
+                    onValueChange={(v) => {
+                      if (v === "add-custom") setShowCustomTimeframeModal(true)
+                      else setTimeframe(v)
+                    }}
+                  >
                     <SelectTrigger id="timeframe" className="w-full border border-gray-300 text-black bg-white">
                       <SelectValue placeholder="Select timeframe" />
                     </SelectTrigger>
@@ -574,15 +583,16 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
                       <SelectItem value="3d">3 days</SelectItem>
                       <SelectItem value="1w">1 week</SelectItem>
                       <SelectItem value="1M">1 month</SelectItem>
-                      <SelectItem value="custom">Custom</SelectItem>
+                      {timeframe && !TIMEFRAME_PRESETS.includes(timeframe) && (
+                        <SelectItem value={timeframe}>{timeframe}</SelectItem>
+                      )}
+                      <SelectItem value="add-custom">Add Custom</SelectItem>
                     </SelectContent>
                   </Select>
-                  {timeframe === "custom" && (
-                    <Input
-                      placeholder="Enter custom timeframe (e.g., 36min, 2.5h)"
-                      value={customTimeframe}
-                      onChange={(e) => setCustomTimeframe(e.target.value)}
-                      className="w-full border border-gray-300 rounded-md text-black"
+                  {showCustomTimeframeModal && (
+                    <CustomTimeframeModal
+                      onClose={() => setShowCustomTimeframeModal(false)}
+                      onSave={(tf) => setTimeframe(tf)}
                     />
                   )}
                 </div>
@@ -592,10 +602,10 @@ export function PipsSettingsModal({ initialValue = 500, onClose, currentInp1, on
                 <div className="flex justify-end gap-2 pt-2">
                   <Button
                     onClick={() => {
-                      onNext(indicator, timeframe === "custom" ? customTimeframe : timeframe)
+                      onNext(indicator, timeframe)
                     }}
                     className="rounded-full px-6 bg-[#85e1fe] text-black hover:bg-[#6bc8e3] border-none"
-                    disabled={!indicator || !timeframe || (timeframe === "custom" && !customTimeframe)}
+                    disabled={!indicator || !timeframe}
                   >
                     Next
                   </Button>
