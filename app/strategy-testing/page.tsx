@@ -51,7 +51,11 @@ import { X, ArrowLeft, Layout, Maximize2 } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
 import { extractErrorMessage, formatErrorForDisplay } from "@/lib/error-utils"
 import { validateStrategyStatement } from "@/lib/indicator-contract"
-import { matchesTimeframe as matchesTimeframeShared } from "@/lib/timeframe-match"
+import {
+  matchesTimeframe as matchesTimeframeShared,
+  resolveTimeframeFiles,
+  timeframeToMinutes,
+} from "@/lib/timeframe-match"
 import { mergeOptimisationForm } from "@/lib/optimisation-form-merge"
 import { StrategyTab } from "@/components/strategy-tab"
 import { BacktestTab } from "@/components/backtest-tab"
@@ -109,6 +113,17 @@ export default function StrategyTestingPage() {
   // Legacy file upload states (kept for backward compatibility)
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([])
   const [fileObjects, setFileObjects] = useState<Record<string, File>>({})
+  // Bar cadence in minutes measured from each uploaded CSV, keyed by filename.
+  // Used only to cross-check an explicit slot assignment and warn on mismatch —
+  // never to reassign, since raw MT4/MT5 exports don't cadence-detect reliably.
+  const [fileTimeframeMinutes, setFileTimeframeMinutes] = useState<Record<string, number>>({})
+  // Explicit binding of a required timeframe slot to the file the user dropped
+  // into it: timeframe -> filename. This is the source of truth for which file
+  // is submitted under which slot; it removes the old upload-order guessing.
+  const [slotFiles, setSlotFiles] = useState<Record<string, string>>({})
+  // Which slot's upload control is currently open, so the shared hidden <input>
+  // knows where a picked file belongs.
+  const [activeUploadSlot, setActiveUploadSlot] = useState<string | null>(null)
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [currentFile, setCurrentFile] = useState("")
   const [inputFile, setInputFile] = useState<File | null>(null)
@@ -967,35 +982,103 @@ export default function StrategyTestingPage() {
     }, 3000);
   };
 
-  // Helper function to detect timeframe from CSV timestamps
+  // Parse one CSV cell into epoch seconds. Handles unix seconds, unix
+  // milliseconds, and the datetime strings broker exports use
+  // ("2024-07-19 10:00:00", "2024.07.19 10:00"). Returns null if it isn't a time.
+  const parseTimestampCell = (raw: string): number | null => {
+    const val = raw.trim().replace(/^"|"$/g, "")
+    if (!val) return null
+
+    if (/^\d+$/.test(val)) {
+      const n = parseInt(val, 10)
+      if (n > 1e12) return Math.round(n / 1000) // milliseconds
+      if (n > 1e9) return n // seconds
+      return null
+    }
+
+    // MT4/MT5 write "YYYY.MM.DD"; Date.parse only understands dashes/slashes.
+    const iso = val.replace(/^(\d{4})\.(\d{2})\.(\d{2})/, "$1-$2-$3").replace(" ", "T")
+    const ms = Date.parse(iso)
+    return Number.isNaN(ms) ? null : Math.round(ms / 1000)
+  }
+
+  // Helper function to detect timeframe from CSV timestamps.
+  // Handles the shapes broker exports actually ship:
+  //   - normal CSV with a time/datetime/unix header column
+  //   - MT5: TAB-separated, "<DATE> <TIME>" header tokens, dot-dated
+  //   - MT4: comma-separated, NO header, "2024.07.19,10:00,O,H,L,C,V"
   const detectTimeframeFromTimestamps = (csvContent: string): { detected: boolean; timeframeMinutes: number; timeframeLabel: string; matchesRequired: boolean } => {
-    const lines = csvContent.split('\n')
+    const lines = csvContent.split(/\r?\n/).filter((l) => l.trim() !== '')
     if (lines.length < 3) {
       return { detected: false, timeframeMinutes: 0, timeframeLabel: '', matchesRequired: false }
     }
 
-    // Get headers to find the time/timestamp column
-    const headers = lines[0].toLowerCase().split(',').map(col => col.trim())
-    const timeColumnIndex = headers.findIndex(h =>
-      h === 'time' || h === 'timestamp' || h === 'datetime' || h === 'date' || h === 'unix' || h === 'epoch'
-    )
+    // Sniff the delimiter: MT5 uses tabs, MT4/most use commas, some EU exports
+    // use semicolons. Pick whichever splits the first line into the most fields.
+    const delimiter = [',', '\t', ';']
+      .map((d) => ({ d, n: lines[0].split(d).length }))
+      .reduce((best, c) => (c.n > best.n ? c : best), { d: ',', n: 0 }).d
 
-    // If no time column header found, assume first column is timestamp
-    const colIndex = timeColumnIndex >= 0 ? timeColumnIndex : 0
-    console.log("🔍 Using column index for timestamps:", colIndex, "Header:", headers[colIndex])
+    const rows = lines.map((l) => l.split(delimiter))
 
-    // Get timestamps from first few rows (skip header)
-    const timestamps: number[] = []
-    for (let i = 1; i < Math.min(5, lines.length); i++) {
-      const row = lines[i].split(',')
-      if (row[colIndex]) {
-        const val = row[colIndex].trim()
-        // Check if it's a Unix timestamp (number)
-        const timestamp = parseInt(val, 10)
-        if (!isNaN(timestamp) && timestamp > 1000000000) { // Valid Unix timestamp
-          timestamps.push(timestamp)
-        }
+    // Normalise the first row so header tokens like "<DATE>" read as "date".
+    const header = rows[0].map((c) => c.trim().toLowerCase().replace(/^[<"]+|[">]+$/g, ''))
+    const HEADER_WORDS = ['time', 'timestamp', 'datetime', 'date', 'unix', 'epoch',
+      'open', 'high', 'low', 'close', 'volume', 'tickvol', 'vol', 'spread']
+    const hasHeader = header.some((h) => HEADER_WORDS.includes(h))
+
+    // Resolve which column(s) carry the timestamp.
+    //   dateIdx + timeIdx : combine two columns ("2024.07.19" + "10:00:00")
+    //   singleIdx         : one column holds the whole stamp (datetime or unix)
+    let dateIdx = -1
+    let timeIdx = -1
+    let singleIdx = -1
+
+    if (hasHeader) {
+      dateIdx = header.findIndex((h) => h === 'date')
+      timeIdx = header.findIndex((h) => h === 'time')
+      singleIdx = header.findIndex((h) => h === 'datetime' || h === 'timestamp' || h === 'unix' || h === 'epoch')
+      if (dateIdx >= 0 && timeIdx >= 0) {
+        singleIdx = -1 // prefer combining the split columns
+      } else if (singleIdx < 0) {
+        // A lone "time" (or "date") column here holds the full stamp.
+        if (timeIdx >= 0) { singleIdx = timeIdx; timeIdx = -1 }
+        else if (dateIdx >= 0) { singleIdx = dateIdx; dateIdx = -1 }
+        else { singleIdx = 0 } // unknown headers: assume the first column
       }
+    } else {
+      // Headerless MT4 export: infer date/time columns positionally from the
+      // first data row, and count that row as data (there is no header to skip).
+      const first = rows[0]
+      dateIdx = first.findIndex((c) => /^\d{4}[.\-/]\d{2}[.\-/]\d{2}$/.test(c.trim()))
+      timeIdx = first.findIndex((c) => /^\d{1,2}:\d{2}(:\d{2})?$/.test(c.trim()))
+      if (dateIdx < 0 || timeIdx < 0) {
+        dateIdx = -1
+        timeIdx = -1
+        singleIdx = 0 // a single datetime or unix column
+      }
+    }
+
+    const dataStart = hasHeader ? 1 : 0
+    console.log("🔍 Timestamp columns:", { delimiter: JSON.stringify(delimiter), hasHeader, dateIdx, timeIdx, singleIdx })
+
+    // Sample a window of rows — enough to survive a session/weekend gap.
+    const timestamps: number[] = []
+    for (let i = dataStart; i < Math.min(dataStart + 50, rows.length); i++) {
+      const row = rows[i]
+      if (!row) continue
+      let cell: string | undefined
+      if (dateIdx >= 0 && timeIdx >= 0) {
+        const d = row[dateIdx]?.trim()
+        const t = row[timeIdx]?.trim()
+        if (!d) continue
+        cell = t ? `${d} ${t}` : d
+      } else if (singleIdx >= 0) {
+        cell = row[singleIdx]
+      }
+      if (!cell) continue
+      const timestamp = parseTimestampCell(cell)
+      if (timestamp !== null) timestamps.push(timestamp)
     }
 
     console.log("🔍 Extracted timestamps:", timestamps)
@@ -1010,13 +1093,21 @@ export default function StrategyTestingPage() {
       differences.push(timestamps[i] - timestamps[i - 1])
     }
 
-    // Get the most common difference (in case of gaps)
-    const avgDiff = differences.reduce((a, b) => a + b, 0) / differences.length
-    const timeframeSeconds = Math.round(avgDiff)
+    // Median, not mean: one weekend or session gap drags an average far past
+    // the real bar size, which would mislabel the file's timeframe.
+    const positive = differences.filter((d) => d > 0).sort((a, b) => a - b)
+    if (positive.length === 0) {
+      return { detected: false, timeframeMinutes: 0, timeframeLabel: '', matchesRequired: false }
+    }
+    const timeframeSeconds = positive[Math.floor(positive.length / 2)]
     const timeframeMinutes = Math.round(timeframeSeconds / 60)
 
     console.log("🔍 Timestamp differences (seconds):", differences)
-    console.log("🔍 Average difference:", avgDiff, "seconds =", timeframeMinutes, "minutes")
+    console.log("🔍 Median difference:", timeframeSeconds, "seconds =", timeframeMinutes, "minutes")
+
+    if (timeframeMinutes <= 0) {
+      return { detected: false, timeframeMinutes: 0, timeframeLabel: '', matchesRequired: false }
+    }
 
     // Convert minutes to human-readable label
     let timeframeLabel = ''
@@ -1030,15 +1121,11 @@ export default function StrategyTestingPage() {
 
     console.log("🔍 Detected timeframe:", timeframeLabel, `(${timeframeMinutes} minutes)`)
 
-    // Check if detected timeframe matches any required timeframe
-    const timeframeToMinutes: { [key: string]: number } = {
-      "1min": 1, "5min": 5, "15min": 15, "20min": 20, "30min": 30, "36min": 36, "45min": 45,
-      "1h": 60, "2h": 120, "3h": 180, "4h": 240, "6h": 360, "8h": 480, "12h": 720,
-      "1d": 1440, "1 day": 1440, "1w": 10080, "1 week": 10080
-    }
-
+    // Check if detected timeframe matches any required timeframe. Uses the
+    // shared parser rather than a hardcoded table, which silently failed for
+    // any timeframe not in the list (6min, 36min, 2min, ...).
     const matchesRequired = requiredTimeframes.some(tf => {
-      const requiredMinutes = timeframeToMinutes[tf.toLowerCase()]
+      const requiredMinutes = timeframeToMinutes(tf)
       if (requiredMinutes) {
         // Allow some tolerance (±5% or ±1 minute for small timeframes)
         const tolerance = Math.max(1, requiredMinutes * 0.05)
@@ -1090,13 +1177,17 @@ export default function StrategyTestingPage() {
     return hasTimeframeColumn
   }
 
-  const handleFile = (file: File) => {
+  // `targetSlot` is the required-timeframe slot the file was dropped into. When
+  // present, the file is bound to that slot explicitly (the source of truth for
+  // submission) and its cadence is only cross-checked against the slot, warning
+  // on a mismatch rather than moving the file.
+  const handleFile = (file: File, targetSlot?: string) => {
     // Only allow .py and .csv files. Update here if you want to support more types.
     const fileExtension = file.name.split(".").pop()?.toLowerCase()
     if (fileExtension === "py" || fileExtension === "csv") {
       setInputFile(file)
       setCurrentFile(file.name)
-      setUploadedFiles([...uploadedFiles, file.name])
+      setUploadedFiles((prev) => (prev.includes(file.name) ? prev : [...prev, file.name]))
 
       // Store the actual File object
       setFileObjects((prev) => ({
@@ -1104,52 +1195,86 @@ export default function StrategyTestingPage() {
         [file.name]: file,
       }))
 
+      // Bind this file to the slot it was dropped into, replacing whatever was
+      // there. Re-uploading the same file into a second slot moves it.
+      if (targetSlot) {
+        setSlotFiles((prev) => {
+          const next: Record<string, string> = {}
+          for (const [tf, fname] of Object.entries(prev)) {
+            if (tf !== targetSlot && fname !== file.name) next[tf] = fname
+          }
+          next[targetSlot] = file.name
+          return next
+        })
+      }
+
       // For CSV files, check timestamps to detect timeframe
       if (fileExtension === "csv") {
         const reader = new FileReader()
         reader.onload = (e) => {
           const content = e.target?.result as string
           if (content) {
-            console.log("🔍 File upload validation:", {
-              filename: file.name,
-              requiredTimeframes,
-              fileExtension
-            })
-
-            // Primary check: detect timeframe from timestamps
+            // Detect bar cadence from the file's own timestamps.
             const timestampResult = detectTimeframeFromTimestamps(content)
 
-            // Fallback checks
+            // Remember the measured cadence for the slot cross-check display.
+            if (timestampResult.detected && timestampResult.timeframeMinutes > 0) {
+              setFileTimeframeMinutes((prev) => ({
+                ...prev,
+                [file.name]: timestampResult.timeframeMinutes,
+              }))
+            }
+
+            // With an explicit slot, the user's choice wins. Cadence only
+            // confirms or warns — it never reassigns.
+            if (targetSlot) {
+              const target = timeframeToMinutes(targetSlot)
+              if (
+                timestampResult.detected &&
+                target != null &&
+                Math.abs(timestampResult.timeframeMinutes - target) > Math.max(1, target * 0.05)
+              ) {
+                showToast(
+                  `Heads up: this file looks like ${timestampResult.timeframeLabel} data but you placed it in the ${targetSlot} slot. Submitting as ${targetSlot} — replace it if that's wrong.`,
+                  'warning',
+                )
+              } else if (timestampResult.detected) {
+                setShowSuccessModal(true)
+                showToast(`${targetSlot} file added (verified ${timestampResult.timeframeLabel} data).`, 'success')
+              } else {
+                // Couldn't read cadence (e.g. tab-separated MT5 export). Accept
+                // the user's assignment; we can't contradict it.
+                setShowSuccessModal(true)
+                showToast(`${targetSlot} file added. Couldn't auto-verify cadence — trusting your slot choice.`, 'success')
+              }
+              return
+            }
+
+            // No explicit slot (legacy path): fall back to the old best-effort
+            // messaging based on cadence / filename.
             const hasValidTimeframeColumn = checkCsvColumnsForTimeframe(content)
             const matchesFilename = requiredTimeframes.some(timeframe =>
               matchesTimeframe(file.name, timeframe)
             )
-
-            console.log("🔍 Validation results:", {
-              timestampResult,
-              hasValidTimeframeColumn,
-              matchesFilename
-            })
-
             if (timestampResult.detected && timestampResult.matchesRequired) {
-              // Best case: timestamp analysis confirms matching timeframe
               setShowSuccessModal(true)
               showToast(`File uploaded successfully! Detected ${timestampResult.timeframeLabel} timeframe data.`, 'success')
             } else if (timestampResult.detected && !timestampResult.matchesRequired) {
-              // Timestamp detected but doesn't match required
               showToast(`File contains ${timestampResult.timeframeLabel} data but required timeframes are: ${requiredTimeframes.join(', ')}. You may get incorrect results.`, 'warning')
             } else if (hasValidTimeframeColumn || matchesFilename) {
-              // Fallback: column names or filename match
               setShowSuccessModal(true)
               showToast(`File uploaded successfully! Valid timeframe pattern found.`, 'success')
             } else {
-              // No valid timeframe detected
               showToast(`File uploaded but couldn't detect timeframe. Required: ${requiredTimeframes.join(', ')}. You may get incorrect results.`, 'warning')
             }
           }
         }
         reader.onerror = () => {
-          // If we can't read the file, fall back to filename matching
+          if (targetSlot) {
+            setShowSuccessModal(true)
+            showToast(`${targetSlot} file added. Couldn't read it to verify cadence.`, 'warning')
+            return
+          }
           const matchesAnyTimeframe = requiredTimeframes.some(timeframe =>
             matchesTimeframe(file.name, timeframe)
           )
@@ -1188,7 +1313,37 @@ export default function StrategyTestingPage() {
     const file = event.target.files?.[0]
     if (file) {
       setInputFile(file)
-      handleFile(file)
+      handleFile(file, activeUploadSlot ?? undefined)
+    }
+    setActiveUploadSlot(null)
+    // Allow re-picking the same filename into another slot.
+    event.target.value = ""
+  }
+
+  // Open the shared file picker for a specific timeframe slot.
+  const handleSlotUploadClick = (timeframe: string) => {
+    setActiveUploadSlot(timeframe)
+    fileInputRef.current?.click()
+  }
+
+  // Drop a file directly onto a timeframe slot.
+  const handleSlotDrop = (e: React.DragEvent<HTMLDivElement>, timeframe: string) => {
+    e.preventDefault()
+    const file = e.dataTransfer.files?.[0]
+    if (file) handleFile(file, timeframe)
+  }
+
+  // Clear a timeframe slot: unbind it and drop the file if nothing else uses it.
+  const handleClearSlot = (timeframe: string) => {
+    const filename = slotFiles[timeframe]
+    setSlotFiles((prev) => {
+      const next = { ...prev }
+      delete next[timeframe]
+      return next
+    })
+    // Only remove the underlying file if no other slot still references it.
+    if (filename && !Object.entries(slotFiles).some(([tf, f]) => tf !== timeframe && f === filename)) {
+      handleDeleteFile(filename)
     }
   }
 
@@ -1211,6 +1366,64 @@ export default function StrategyTestingPage() {
   // shared canonical-minute matcher so finer timeframes (e.g. "6min" vs
   // "EURUSD_M6.csv") match across naming conventions.
   const matchesTimeframe = matchesTimeframeShared
+
+  // Build the timeframe -> File map submitted to the backend.
+  //
+  // Source of truth is the explicit slot binding the user made in the upload UI
+  // (slotFiles). Any slot left unbound falls back to the content/filename/order
+  // resolver over the still-unclaimed files, so a partially-filled form or a
+  // legacy flow still produces a best-effort mapping.
+  const buildTimeframeFiles = (): Record<string, File> => {
+    const files: Record<string, File> = {}
+    const usedFilenames = new Set<string>()
+
+    for (const tf of requiredTimeframes) {
+      const filename = slotFiles[tf]
+      if (filename && fileObjects[filename]) {
+        files[tf] = fileObjects[filename]
+        usedFilenames.add(filename)
+      }
+    }
+
+    const unresolved = requiredTimeframes.filter((tf) => !files[tf])
+    if (unresolved.length > 0) {
+      const remaining = uploadedFiles.filter((f) => !usedFilenames.has(f))
+      const { files: fallback, guessed } = resolveTimeframeFiles(
+        unresolved,
+        remaining,
+        fileObjects,
+        fileTimeframeMinutes,
+      )
+      Object.assign(files, fallback)
+      if (guessed.length > 1) {
+        showToast(
+          `Couldn't tell which file belongs to ${guessed.join(", ")} — assigning by upload order. Upload a file into each slot to be sure.`,
+          'warning',
+        )
+      }
+    }
+
+    console.log(
+      "📁 Timeframe slot assignment:",
+      Object.fromEntries(Object.entries(files).map(([tf, f]) => [tf, f.name])),
+    )
+
+    return files
+  }
+
+  // Per-slot view model for the upload UI: the file bound to each required
+  // timeframe and whether its measured cadence agrees with that slot.
+  const slotAssignments = requiredTimeframes.map((timeframe) => {
+    const filename = slotFiles[timeframe]
+    const detectedMinutes = filename ? fileTimeframeMinutes[filename] : undefined
+    const target = timeframeToMinutes(timeframe)
+    // undefined = couldn't measure (accept silently); true/false = match result.
+    const cadenceOk =
+      filename == null || detectedMinutes == null || target == null
+        ? undefined
+        : Math.abs(detectedMinutes - target) <= Math.max(1, target * 0.05)
+    return { timeframe, filename, detectedMinutes, cadenceOk }
+  })
 
   // Updated handleRunBacktest function to support both MetaAPI and file upload
   const handleRunBacktest = async () => {
@@ -1374,16 +1587,7 @@ export default function StrategyTestingPage() {
         }
       } else {
         // File upload method
-        const timeframeFiles: Record<string, File> = {}
-        requiredTimeframes.forEach((timeframe, index) => {
-          const filename = uploadedFiles[index]
-          if (filename && fileObjects[filename]) timeframeFiles[timeframe] = fileObjects[filename]
-        })
-        uploadedFiles.forEach((filename) => {
-          if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
-            timeframeFiles[filename.split(".")[0]] = fileObjects[filename]
-          }
-        })
+        const timeframeFiles = buildTimeframeFiles()
 
         // Step 1: start the job
         const startData = await (runBacktest as any)({ statement: parsedStatement, files: timeframeFiles })
@@ -1643,21 +1847,7 @@ export default function StrategyTestingPage() {
 
       // Only process files if NOT using MetaAPI
       if (!useMetaAPI) {
-        // Directly map each required timeframe to the uploaded file in order
-        requiredTimeframes.forEach((timeframe, index) => {
-          const filename = uploadedFiles[index]
-          if (filename && fileObjects[filename]) {
-            timeframeFiles[timeframe] = fileObjects[filename]
-          }
-        })
-
-        // Add unmatched remaining files to the form with filename as key (optional fallback)
-        uploadedFiles.forEach((filename) => {
-          if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
-            const key = filename.split(".")[0]
-            timeframeFiles[key] = fileObjects[filename]
-          }
-        })
+        timeframeFiles = buildTimeframeFiles()
       }
 
       // Get optimisation form from localStorage to extract Parameters and Constraints
@@ -1903,21 +2093,7 @@ export default function StrategyTestingPage() {
 
       // Only process files if NOT using MetaAPI
       if (!useMetaAPI) {
-        // Directly map each required timeframe to the uploaded file in order
-        requiredTimeframes.forEach((timeframe, index) => {
-          const filename = uploadedFiles[index]
-          if (filename && fileObjects[filename]) {
-            timeframeFiles[timeframe] = fileObjects[filename]
-          }
-        })
-
-        // Add unmatched remaining files to the form with filename as key (optional fallback)
-        uploadedFiles.forEach((filename) => {
-          if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
-            const key = filename.split(".")[0]
-            timeframeFiles[key] = fileObjects[filename]
-          }
-        })
+        timeframeFiles = buildTimeframeFiles()
       }
 
       // Get walk forward settings from localStorage
@@ -2324,6 +2500,21 @@ export default function StrategyTestingPage() {
     const newFileObjects = { ...fileObjects }
     delete newFileObjects[fileName]
     setFileObjects(newFileObjects)
+
+    setFileTimeframeMinutes((prev) => {
+      const next = { ...prev }
+      delete next[fileName]
+      return next
+    })
+
+    // Unbind any slot that pointed at this file.
+    setSlotFiles((prev) => {
+      const next: Record<string, string> = {}
+      for (const [tf, fname] of Object.entries(prev)) {
+        if (fname !== fileName) next[tf] = fname
+      }
+      return next
+    })
 
     if (currentFile === fileName) {
       setCurrentFile("")
@@ -3027,20 +3218,7 @@ export default function StrategyTestingPage() {
       let timeframeFiles: Record<string, File> = {}
 
       if (!useMetaAPI) {
-        requiredTimeframes.forEach((timeframe, index) => {
-          const filename = uploadedFiles[index]
-          if (filename && fileObjects[filename]) {
-            timeframeFiles[timeframe] = fileObjects[filename]
-          }
-        })
-
-        // Add unmatched remaining files
-        uploadedFiles.forEach((filename) => {
-          if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
-            const key = filename.split(".")[0]
-            timeframeFiles[key] = fileObjects[filename]
-          }
-        })
+        timeframeFiles = buildTimeframeFiles()
       }
 
       // Get optimisation form settings
@@ -4094,21 +4272,13 @@ export default function StrategyTestingPage() {
                       </div>
                     ) : (
                       <StrategyTab
-                        selectedStrategy={selectedStrategy}
-                        setSelectedStrategy={setSelectedStrategy}
                         requiredTimeframes={requiredTimeframes}
-                        uploadedFiles={uploadedFiles}
-                        matchesTimeframe={matchesTimeframe}
-                        handleFileChange={handleFileChange}
-                        handleDeleteFile={handleDeleteFile}
+                        slotAssignments={slotAssignments}
                         fileInputRef={fileInputRef}
-                        handleClick={handleClick}
-                        isDragging={isDragging}
-                        handleDragOver={handleDragOver}
-                        handleDragLeave={handleDragLeave}
-                        handleDrop={handleDrop}
-                        setShowSuccessModal={setShowSuccessModal}
-                        currentFile={currentFile}
+                        handleFileChange={handleFileChange}
+                        onSlotUpload={handleSlotUploadClick}
+                        onSlotDrop={handleSlotDrop}
+                        onClearSlot={handleClearSlot}
                       />
                     )}
                   </div>
