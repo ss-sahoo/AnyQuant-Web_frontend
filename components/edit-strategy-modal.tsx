@@ -4,6 +4,7 @@ import type React from "react"
 import { useEffect, useState } from "react"
 import { X } from "lucide-react"
 import type { Algorithm } from "@/lib/types"
+import { isCustomStrategyRow } from "@/lib/builder-mode"
 import { useRouter } from "next/navigation"
 import { DraggableModal } from "./modals/draggable-modal"
 
@@ -33,7 +34,15 @@ export function EditStrategyModal({ strategy, onClose, onSave, isEdit = false }:
     e.stopPropagation()
     onSave(strategyName)
     const id = strategy.id.toString().split("-")[0]
-    router.push(`/strategy-builder/${id}/`)
+    if (isCustomStrategyRow(strategy.id)) {
+      // Custom (code-based) strategies open straight in Developer Mode — there
+      // is no regular strategy behind them to show (ANY-308). The check is on
+      // the row's origin, not its badge: a regular strategy labelled Developer
+      // still opens by its own id, and the two id sequences are unrelated.
+      router.push(`/strategy-builder?mode=developer&custom=${id}`)
+    } else {
+      router.push(`/strategy-builder/${id}/`)
+    }
     onClose()
   }
 

@@ -8,12 +8,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import Link from "next/link"
 import { AlgorithmShortTable } from "@/components/algorithm-shorttable"
-import { fetchStatement, editStrategy, deleteStatement, addToShortlist, removeFromShortlist, getShortlistedStrategies, duplicateStrategy } from "@/app/AllApiCalls"
-import { Search, X } from "lucide-react"
+import { fetchStatement, editStrategy, deleteStatement, addToShortlist, removeFromShortlist, getShortlistedStrategies, duplicateStrategy, listCustomStrategies, getCustomStrategy, updateCustomStrategy, deleteCustomStrategy, createStatement, updateStrategyType } from "@/app/AllApiCalls"
+import { Search, X, Code } from "lucide-react"
 
 import { useRouter } from "next/navigation"
 import { mockAlgorithms, mockShortlistedAlgorithms } from "@/lib/mock-data"
 import type { Algorithm } from "@/lib/types"
+import { wasDevModeUsed, clearDevLinksTo, getBuilderType, setBuilderType, getDevLink, setDevLink, isBuilderType, isCustomStrategyRow, type BuilderType } from "@/lib/builder-mode"
 import AuthGuard from "@/hooks/useAuthGuard"
 
 export function ResponsiveTradingPlatform() {
@@ -32,22 +33,82 @@ export function ResponsiveTradingPlatform() {
   const [searchQuery, setSearchQuery] = useState("")
   const [isSearchOpen, setIsSearchOpen] = useState(false)
 
+// When a Developer-Mode strategy is backtested, the backend creates a
+// placeholder StrategyStatement to hang the BacktestResult off, with
+// `strategy` set to a `{ custom_strategy_id }` marker instead of a condition
+// list. It is not a no-code strategy: the same strategy is already listed from
+// the custom-strategies API, `/strategy-builder/<id>` renders it as empty, and
+// PATCHing it (rename) fails the backend validator, which indexes `strategy`
+// as a list. Keep these rows out of the table.
+const isCustomStrategyStub = (item: any) =>
+  !!item?.strategy && !Array.isArray(item.strategy) && item.strategy.custom_strategy_id != null
+
+// The backend `builder_type` wins; on backends without the field the type falls
+// back to this browser's explicit choice, then to whether Developer Mode has
+// ever touched the strategy.
+const resolveType = (item: any): BuilderType => {
+  if (isBuilderType(item?.builder_type)) return item.builder_type
+  if (item?.id == null) return "nocode"
+  return getBuilderType(item.id) ?? (wasDevModeUsed(item.id) ? "hybrid" : "nocode")
+}
+
+/** The custom strategy paired with a regular one, from the backend or this browser. */
+const linkedCustomId = (item: any): number | null => {
+  const fromServer = Number(item?.linked_custom_strategy_id)
+  if (Number.isFinite(fromServer) && fromServer > 0) return fromServer
+  return item?.id != null ? getDevLink(item.id) : null
+}
+
 const refreshAlgorithms = async (pageToFetch = page, search = searchQuery) => {
   setLoading(true)
   try {
     const { strategies, total } = await fetchStatement(pageToFetch, pageSize, search)
 
-    const mapped = strategies.map((item: any, index: number): Algorithm => ({
+    const regular = strategies.filter((item: any) => !isCustomStrategyStub(item))
+    const mapped = regular.map((item: any, index: number): Algorithm => ({
       ...item,
       id: item.id ? `${item.id}-${index}` : `strategy-${index}`,
       name: item.name || item.saveresult || "Unnamed Strategy",
       instrument: item.instrument || "Unknown",
+      type: resolveType(item),
     }))
+
+    // A hybrid strategy is one record pair, so the custom half must not also
+    // appear as its own Developer row.
+    const pairedCustomIds = new Set(
+      regular.map(linkedCustomId).filter((id: number | null): id is number => id != null),
+    )
+
+    // Developer-mode (custom) strategies live in a separate unpaginated API
+    // (ANY-308): show them on page 1, filtered by the same search string. The
+    // `-dev-` display-id marker keeps row keys unique (custom and regular ids
+    // collide numerically) while `id.split("-")[0]` still recovers the raw id.
+    let devRows: Algorithm[] = []
+    if (pageToFetch === 1) {
+      try {
+        const customs = await listCustomStrategies()
+        const term = (search || "").toLowerCase()
+        devRows = (Array.isArray(customs) ? customs : customs?.results || [])
+          .filter((c: any) => !term || String(c.name || "").toLowerCase().includes(term))
+          .filter((c: any) => !pairedCustomIds.has(Number(c.id)))
+          .map((c: any, i: number): Algorithm => ({
+            ...c,
+            id: `${c.id}-dev-${i}`,
+            name: c.name || "Unnamed Strategy",
+            instrument: "-",
+            strategy: false,
+            type: "developer",
+          }))
+      } catch (err) {
+        // A failing custom endpoint must not blank the regular table.
+        console.error("Error fetching custom strategies:", err)
+      }
+    }
 
     // Small delay to show loading state smoothly
     await new Promise(resolve => setTimeout(resolve, 100))
-    
-    setAlgorithms(mapped)
+
+    setAlgorithms([...devRows, ...mapped])
     setTotalCount(total)
   } catch (err) {
     console.error("Error fetching:", err)
@@ -62,7 +123,7 @@ const refreshShortlistedAlgorithms = async (pageToFetch = shortlistPage) => {
   try {
     const response = await getShortlistedStrategies({ page: pageToFetch, page_size: shortlistPageSize })
 
-    const mapped = response.results.map((item: any, index: number): Algorithm => ({
+    const mapped = response.results.filter((item: any) => !isCustomStrategyStub(item)).map((item: any, index: number): Algorithm => ({
       ...item,
       id: item.id ? `${item.id}-${index}` : `strategy-${index}`,
       name: item.name || item.saveresult || "Unnamed Strategy",
@@ -110,25 +171,41 @@ const refreshShortlistedAlgorithms = async (pageToFetch = shortlistPage) => {
     }
   }
 
+  // Rows from the custom-strategies API carry a `-dev-` marker in their
+  // display id (see refreshAlgorithms) and must hit the custom endpoints.
+  const isDevRow = (id: string) => isCustomStrategyRow(id)
+
   const handleDeleteAlgorithm = async (id: string) => {
     try {
-      await deleteStatement(id.split("-")[0])
+      const numericId = id.split("-")[0]
+      if (isDevRow(id)) {
+        await deleteCustomStrategy(Number(numericId))
+        // Drop mode-memory references so no regular strategy tries to reopen
+        // the deleted custom strategy.
+        clearDevLinksTo(Number(numericId))
+      } else {
+        await deleteStatement(numericId)
+      }
       await refreshAlgorithms()
     } catch (err) {
       await refreshAlgorithms()
     }
   }
-  
+
   const handleEditAlgorithm = async (id: string, name: string) => {
     try {
       const numericId = id.split("-")[0]
-  
-      const payload = {
-        name: String(name),
+
+      if (isDevRow(id)) {
+        // PUT replaces the record, so resend the code alongside the new name.
+        const current = await getCustomStrategy(Number(numericId))
+        await updateCustomStrategy(Number(numericId), {
+          name: String(name),
+          code: current.code || current.compiled_code || "",
+        })
+      } else {
+        await editStrategy(numericId, { name: String(name) })
       }
-  
-  
-      await editStrategy(numericId, payload)
       await refreshAlgorithms()
     } catch (err) {
       console.error("Edit failed:", err)
@@ -141,6 +218,51 @@ const refreshShortlistedAlgorithms = async (pageToFetch = shortlistPage) => {
   
   const user_id = localStorage.getItem("user_id")
 
+
+  // Type is not a label: it decides which editor the strategy reopens in, so
+  // the choice is written to the builder-mode memory as well as the backend.
+  // Developer rows never reach here — they have no regular record to PATCH.
+  const handleChangeType = async (id: string, type: BuilderType) => {
+    if (isDevRow(id)) return
+    const numericId = id.split("-")[0]
+    setBuilderType(numericId, type)
+    setAlgorithms((prev) => prev.map((a) => (a.id === id ? { ...a, type } : a)))
+    try {
+      await updateStrategyType(numericId, type)
+    } catch (err) {
+      // The local mirror already holds the choice, so the badge and the routing
+      // stay correct; only cross-device persistence is lost.
+      console.error("Failed to persist strategy type:", err)
+    }
+  }
+
+  // Code-only strategies have no no-code side. Give them one: a regular
+  // strategy record with no statements yet, linked to the custom code, which
+  // together read as Hybrid (ANY-308).
+  const handleConvertToHybrid = async (id: string) => {
+    const customId = Number(id.split("-")[0])
+    try {
+      const custom = await getCustomStrategy(customId)
+      const name = custom.name || `custom_strategy_${customId}`
+      const created = await createStatement({
+        // saveresult is a 100-char column; name is 255.
+        statement: { name, side: "B", saveresult: name.slice(0, 100), strategy: [] },
+      })
+      const newId = created?.id
+      if (!newId) throw new Error("Create returned no strategy id")
+      setDevLink(newId, customId)
+      setBuilderType(newId, "hybrid")
+      try {
+        await updateStrategyType(newId, "hybrid", customId)
+      } catch (err) {
+        console.error("Failed to persist hybrid link:", err)
+      }
+      await refreshAlgorithms()
+    } catch (err) {
+      console.error("Convert to hybrid failed:", err)
+      alert("Could not convert this strategy to Hybrid.")
+    }
+  }
 
   const handleDuplicateAlgorithm = async (name: string, instrument: string) => {
     // Refresh the algorithms list after successful duplication
@@ -210,6 +332,18 @@ const refreshShortlistedAlgorithms = async (pageToFetch = shortlistPage) => {
     router.push("/strategy-builder?new=1")
   }
 
+  // Standalone Developer Mode entry (ANY-308): build custom components and
+  // code-based strategies without opening a no-code strategy first.
+  const handleOpenDeveloperMode = () => {
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem('strategy_id')
+        window.sessionStorage.removeItem('builder_saved')
+      }
+    } catch {}
+    router.push("/strategy-builder?mode=developer&new=1")
+  }
+
   return (
     <AuthGuard>
     <div className="flex min-h-screen bg-[#121420] text-white">
@@ -263,6 +397,14 @@ const refreshShortlistedAlgorithms = async (pageToFetch = shortlistPage) => {
                 </Button>
               </Link>
               <Button
+                onClick={handleOpenDeveloperMode}
+                variant="outline"
+                className="border-[#6BCAE2] text-[#6BCAE2] hover:bg-[#6BCAE2]/10 hover:text-white w-full sm:w-auto"
+              >
+                <Code className="h-4 w-4 mr-2" />
+                Developer Mode
+              </Button>
+              <Button
                 onClick={handleCreateAlgorithm}
                 className="bg-[#6BCAE2] hover:bg-[#5AB9D1] text-black rounded-full px-4 md:px-6 w-full sm:w-auto"
               >
@@ -285,6 +427,8 @@ const refreshShortlistedAlgorithms = async (pageToFetch = shortlistPage) => {
               onEdit={(id, name) => handleEditAlgorithm(id, name)}
               onDuplicate={handleDuplicateAlgorithm}
               onAddToShortlist={handleAddToShortlist}
+              onChangeType={handleChangeType}
+              onConvertToHybrid={handleConvertToHybrid}
             />
           </div>
               
