@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { ArrowLeft, Code, FileCode, AlertCircle, CheckCircle, Loader2, Save, Play, ChevronDown, FlaskConical, Trash2, Edit3, List } from "lucide-react"
+import { useState, useEffect, useRef } from "react"
+import { ArrowLeft, Code, FileCode, AlertCircle, CheckCircle, Loader2, Save, Play, ChevronDown, FlaskConical, Trash2, Edit3, List, Maximize2 } from "lucide-react"
 import dynamic from "next/dynamic"
+import { UnsavedChangesModal } from "./modals/unsaved-changes-modal"
 import {
   ParameterSchema,
   ParameterType,
@@ -36,12 +37,30 @@ interface EditingComponent {
 interface DeveloperModePageProps {
   onBack: () => void
   onCompile: (data: CompileData) => Promise<CompileResult>
-  onSave: (data: SaveData) => Promise<void>
+  /** Persists the record and returns the id the backend allotted it. */
+  onSave: (data: SaveData) => Promise<SaveResult | void>
   onGoToBacktest?: (strategyId: number) => void
   onLoadStrategies?: () => Promise<CustomStrategy[]>
   onDeleteStrategy?: (strategyId: number) => Promise<void>
   onLoadStrategy?: (strategyId: number) => Promise<{ code: string; name: string }>
   editingComponent?: EditingComponent | null
+  /** "inline" renders inside the strategy builder's statements area; "fullscreen" (default) fills the viewport. */
+  variant?: "fullscreen" | "inline"
+  /** Inline only: switch to the fullscreen view. */
+  onExpand?: () => void
+  /** Custom strategy to load on first mount (deep link / restored session, ANY-308). */
+  initialStrategyId?: number | null
+  initialCodeType?: "component" | "strategy"
+  /** Notifies the parent whenever an existing custom strategy is loaded into the editor. */
+  onStrategyLoaded?: (strategyId: number) => void
+  /** Fullscreen only: label of the back button — the destination depends on how the editor was opened. */
+  backLabel?: string
+  /**
+   * True when `onBack` navigates off the page, destroying this editor. Every
+   * other Back path only hides it (the instance stays mounted with its code),
+   * so only this one warrants the unsaved-changes prompt.
+   */
+  backLeavesPage?: boolean
 }
 
 interface CompileData {
@@ -53,10 +72,16 @@ interface CompileData {
   componentType?: "indicator" | "behavior" | "trade_management"
   parameters?: ParameterSchema[]
   componentId?: number  // For editing existing components
+  strategyId?: number   // For editing existing custom strategies
 }
 
 interface SaveData extends CompileData {
   isDraft: boolean
+}
+
+interface SaveResult {
+  strategyId?: number
+  componentId?: number
 }
 
 interface CompileResult {
@@ -691,7 +716,14 @@ plot(fastMA, "Fast MA", color=color.blue)
 plot(slowMA, "Slow MA", color=color.red)
 `
 
-export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, onLoadStrategies, onDeleteStrategy, onLoadStrategy, editingComponent }: DeveloperModePageProps) {
+// Custom strategy names become Python class/module identifiers on the backend.
+const PYTHON_IDENTIFIER_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/
+
+/** Coerces free typing into something the identifier check can accept. */
+const sanitizeStrategyName = (value: string) =>
+  value.replace(/[^a-zA-Z0-9_]/g, "_").replace(/^(\d)/, "_$1")
+
+export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, onLoadStrategies, onDeleteStrategy, onLoadStrategy, editingComponent, variant = "fullscreen", onExpand, initialStrategyId, initialCodeType, onStrategyLoaded, backLabel = "Back to Strategy Builder", backLeavesPage = false }: DeveloperModePageProps) {
   const [codeType, setCodeType] = useState<"component" | "strategy">("component")
   const [language, setLanguage] = useState<"python" | "pinescript">("python")
   const [componentName, setComponentName] = useState("")
@@ -710,7 +742,32 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
   const [showComponentTypeDropdown, setShowComponentTypeDropdown] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [compiledStrategyId, setCompiledStrategyId] = useState<number | null>(null)
-  
+
+  // Monaco caches its measured size as inline pixel widths on its own DOM, so
+  // collapsing back from fullscreen to the inline editor would otherwise leave
+  // the editor stuck at the wider fullscreen size (ANY-308). Force a re-measure
+  // whenever the variant changes: shrink to zero first so the flex parents can
+  // settle at the smaller width, then let Monaco measure the real container.
+  const editorRef = useRef<any>(null)
+  useEffect(() => {
+    const editor = editorRef.current
+    if (!editor) return
+    editor.layout({ width: 0, height: 0 })
+    const frame = requestAnimationFrame(() => editorRef.current?.layout())
+    return () => cancelAnimationFrame(frame)
+  }, [variant])
+
+  // Unsaved-work guard (ANY-308). `isDirty` is set by user edits only — loading
+  // a strategy/component or swapping in a template replaces the buffer wholesale
+  // and leaves nothing of the user's to lose, so those clear it instead.
+  const [isDirty, setIsDirty] = useState(false)
+  const [showUnsavedModal, setShowUnsavedModal] = useState(false)
+  // Captured when the dialog opens so the name field can't vanish mid-typing.
+  const [leaveNeedsName, setLeaveNeedsName] = useState(false)
+  const [leaveNameError, setLeaveNameError] = useState<string | null>(null)
+  const [leaveSaveError, setLeaveSaveError] = useState<string | null>(null)
+
+
   // Custom strategies list state
   const [customStrategies, setCustomStrategies] = useState<CustomStrategy[]>([])
   const [isLoadingStrategies, setIsLoadingStrategies] = useState(false)
@@ -747,14 +804,38 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
       setEditingStrategyId(strategyId)
       setCompiledStrategyId(strategyId)
       setShowStrategiesList(false)
+      setIsDirty(false)
       setCompileResult({
         success: true,
         message: `Loaded strategy "${strategy.name}". You can edit and recompile.`
       })
+      onStrategyLoaded?.(strategyId)
     } catch (error) {
       console.error("Failed to load strategy:", error)
+      // Deep links / restored sessions can point at a deleted strategy — fall
+      // back to a fresh template instead of leaving stale editor state.
+      setCodeType("strategy")
+      setCode(PYTHON_STRATEGY_TEMPLATE)
+      setStrategyName("")
+      setEditingStrategyId(null)
+      setCompiledStrategyId(null)
+      setIsDirty(false)
+      setCompileResult({
+        success: false,
+        message: "Could not load the strategy (it may have been deleted). Starting from the template.",
+        errors: [{ message: String(error), type: "error" }],
+      })
     }
   }
+
+  // Load the deep-linked / restored strategy once on mount (ANY-308).
+  const initialLoadDoneRef = useRef(false)
+  useEffect(() => {
+    if (initialLoadDoneRef.current) return
+    initialLoadDoneRef.current = true
+    if (initialCodeType) setCodeType(initialCodeType)
+    if (initialStrategyId) handleLoadStrategy(initialStrategyId)
+  }, [])
 
   const handleDeleteStrategy = async (strategyId: number) => {
     if (!onDeleteStrategy) return
@@ -789,6 +870,7 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
       setParameters(loaded.length > 0 ? loaded : [{ name: "period", type: "int", default: 14 }])
       setParameterRowErrors({})
       setServerParamErrors({})
+      setIsDirty(false)
     } else {
       // Reset editing state when no component is being edited
       setIsEditing(false)
@@ -816,15 +898,33 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
 
   // Update strategy template when language changes (only for strategy code)
   useEffect(() => {
-    // Don't load template if we're editing an existing component
-    if (!isEditing && !editingComponent && codeType === "strategy") {
+    // Don't load template if we're editing an existing component or an
+    // existing custom strategy — that would overwrite the loaded code.
+    if (!isEditing && !editingComponent && editingStrategyId === null && codeType === "strategy") {
       if (language === "python") {
         setCode(PYTHON_STRATEGY_TEMPLATE)
       } else {
         setCode(PINESCRIPT_STRATEGY_TEMPLATE)
       }
     }
-  }, [language, isEditing, codeType, editingComponent])
+  }, [language, isEditing, codeType, editingComponent, editingStrategyId])
+
+  /**
+   * One naming rule shared by compile, save and the leave dialog: a record is
+   * only ever persisted under a name the user chose (ANY-308).
+   */
+  const validateEditorName = (): string | null => {
+    if (codeType === "strategy") {
+      const name = strategyName.trim()
+      if (!name) return "Please enter a strategy name."
+      if (!PYTHON_IDENTIFIER_RE.test(name)) {
+        return "Strategy name must be a valid Python identifier (letters, numbers and underscores only, cannot start with a number)."
+      }
+      return null
+    }
+    if (!componentName.trim()) return "Please enter a component name."
+    return null
+  }
 
   const handleCompile = async () => {
     if (!code.trim()) {
@@ -836,35 +936,14 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
       return
     }
 
-    if (codeType === "component" && !componentName.trim()) {
+    const nameError = validateEditorName()
+    if (nameError) {
       setCompileResult({
         success: false,
-        message: "Please enter a component name.",
-        errors: [{ message: "Component name is required", type: "error" }]
+        message: nameError,
+        errors: [{ message: nameError, type: "error" }]
       })
       return
-    }
-
-    if (codeType === "strategy" && !strategyName.trim()) {
-      setCompileResult({
-        success: false,
-        message: "Please enter a strategy name.",
-        errors: [{ message: "Strategy name is required", type: "error" }]
-      })
-      return
-    }
-
-    // Validate strategy name is a valid Python identifier (no spaces, starts with letter/underscore)
-    if (codeType === "strategy" && strategyName.trim()) {
-      const pythonIdentifierRegex = /^[a-zA-Z_][a-zA-Z0-9_]*$/
-      if (!pythonIdentifierRegex.test(strategyName.trim())) {
-        setCompileResult({
-          success: false,
-          message: "Invalid strategy name format.",
-          errors: [{ message: "Strategy name must be a valid Python identifier (letters, numbers, underscores only, cannot start with a number)", type: "error" }]
-        })
-        return
-      }
     }
 
     // Local parameter-schema validation before we hit the backend.
@@ -895,7 +974,8 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
         strategyName: codeType === "strategy" ? strategyName : undefined,
         componentType: codeType === "component" ? componentType : undefined,
         parameters: codeType === "component" ? parameters : undefined,
-        componentId: isEditing && editingComponent ? editingComponent.id : undefined  // Pass ID when editing
+        componentId: isEditing && editingComponent ? editingComponent.id : undefined,  // Pass ID when editing
+        strategyId: codeType === "strategy" ? (editingStrategyId ?? compiledStrategyId ?? undefined) : undefined
       })
       setCompileResult(result)
       setServerParamErrors(result.parameterErrors || {})
@@ -915,7 +995,17 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
     }
   }
 
-  const handleSave = async (isDraft: boolean) => {
+  /** Returns whether the record actually reached the backend. */
+  const handleSave = async (isDraft: boolean): Promise<boolean> => {
+    const nameError = validateEditorName()
+    if (nameError) {
+      setCompileResult({
+        success: false,
+        message: nameError,
+        errors: [{ message: nameError, type: "error" }],
+      })
+      return false
+    }
     if (codeType === "component") {
       const { rowErrors } = validateSchemas(parameters)
       setParameterRowErrors(rowErrors)
@@ -925,48 +1015,98 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
           message: "Fix parameter errors before saving.",
           errors: Object.values(rowErrors).map((m) => ({ message: m, type: "error" })),
         })
-        return
+        return false
       }
     }
     setIsSaving(true)
     setServerParamErrors({})
     try {
-      await onSave({
+      const saved = await onSave({
         code,
         codeType,
         language,
-        componentName: codeType === "component" ? componentName : undefined,
-        strategyName: codeType === "strategy" ? strategyName : undefined,
+        componentName: codeType === "component" ? componentName.trim() : undefined,
+        strategyName: codeType === "strategy" ? strategyName.trim() : undefined,
         componentType: codeType === "component" ? componentType : undefined,
         parameters: codeType === "component" ? parameters : undefined,
         componentId: isEditing && editingComponent ? editingComponent.id : undefined,  // Pass ID when editing
+        strategyId: codeType === "strategy" ? (editingStrategyId ?? compiledStrategyId ?? undefined) : undefined,
         isDraft
       })
+      // Adopt the id the backend allotted so the next save updates this record
+      // instead of creating a duplicate. Deliberately not `compiledStrategyId`:
+      // a saved draft is persisted, not compiled, and must not unlock
+      // "Go to Backtesting".
+      if (codeType === "strategy" && saved?.strategyId) {
+        setEditingStrategyId(saved.strategyId)
+      }
+      setIsDirty(false)
       if (isDraft) {
         setCompileResult({
           success: true,
           message: isEditing ? "Component updated successfully!" : "Draft saved successfully!"
         })
       }
+      return true
     } catch (error) {
       setCompileResult({
         success: false,
         message: "Failed to save.",
         errors: [{ message: String(error), type: "error" }]
       })
+      return false
     } finally {
       setIsSaving(false)
     }
   }
 
+  // Back with unsaved work opens the save/discard dialog rather than silently
+  // dropping the edits (ANY-308).
+  const requestBack = () => {
+    if (!isDirty || !backLeavesPage) {
+      onBack()
+      return
+    }
+    setLeaveNeedsName(validateEditorName() !== null)
+    setLeaveNameError(null)
+    setLeaveSaveError(null)
+    setShowUnsavedModal(true)
+  }
+
+  const handleSaveAndLeave = async () => {
+    const nameError = validateEditorName()
+    if (nameError) {
+      setLeaveNameError(nameError)
+      return
+    }
+    setLeaveNameError(null)
+    setLeaveSaveError(null)
+    if (!(await handleSave(true))) {
+      // Stay put: the edits are still in the editor and the output panel has
+      // the reason.
+      setLeaveSaveError("Could not save — see the output panel for details. Your changes are still here.")
+      return
+    }
+    setShowUnsavedModal(false)
+    onBack()
+  }
+
+  const handleDiscardAndLeave = () => {
+    setIsDirty(false)
+    setShowUnsavedModal(false)
+    onBack()
+  }
+
   const addParameter = () => {
     setParameters([...parameters, { name: "", type: "int", default: 0 }])
+    setIsDirty(true)
   }
 
   const updateParameter = (index: number, patch: Partial<ParameterSchema>) => {
     const newParams = [...parameters]
     newParams[index] = { ...newParams[index], ...patch }
     setParameters(newParams)
+    setIsDirty(true)
     // Any local edit invalidates the previous server error for this row.
     if (serverParamErrors[index]) {
       const next = { ...serverParamErrors }
@@ -996,6 +1136,7 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
 
   const removeParameter = (index: number) => {
     setParameters(parameters.filter((_, i) => i !== index))
+    setIsDirty(true)
     const next: Record<number, string[]> = {}
     Object.entries(serverParamErrors).forEach(([k, v]) => {
       const i = parseInt(k, 10)
@@ -1011,18 +1152,29 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
   }
 
   return (
-    <div className="h-screen bg-[#141721] flex flex-col overflow-hidden">
+    <div className={`${variant === "inline" ? "h-full" : "h-screen"} bg-[#141721] flex flex-col overflow-hidden`}>
       {/* Header */}
       <div className="bg-[#1A1D24] border-b border-[#2A2D42] px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <button
-              onClick={onBack}
-              className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
-            >
-              <ArrowLeft className="w-5 h-5" />
-              <span>Back to Strategy Builder</span>
-            </button>
+            {variant === "inline" ? (
+              <button
+                onClick={onExpand}
+                className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
+                title="Expand to fullscreen"
+              >
+                <Maximize2 className="w-5 h-5" />
+                <span>Expand</span>
+              </button>
+            ) : (
+              <button
+                onClick={requestBack}
+                className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
+              >
+                <ArrowLeft className="w-5 h-5" />
+                <span>{backLabel}</span>
+              </button>
+            )}
             <div className="h-6 w-px bg-[#2A2D42]" />
             <div className="flex items-center gap-2">
               <Code className="w-6 h-6 text-[#85e1fe]" />
@@ -1139,9 +1291,8 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
                 type="text"
                 value={strategyName}
                 onChange={(e) => {
-                  // Auto-convert to valid Python identifier format
-                  const value = e.target.value.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^(\d)/, '_$1')
-                  setStrategyName(value)
+                  setStrategyName(sanitizeStrategyName(e.target.value))
+                  setIsDirty(true)
                 }}
                 placeholder="e.g., my_rsi_strategy"
                 className="w-full px-4 py-3 bg-[#151718] border border-[#2A2D42] rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-[#85e1fe] transition-colors"
@@ -1254,7 +1405,7 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
                 <input
                   type="text"
                   value={componentName}
-                  onChange={(e) => setComponentName(e.target.value)}
+                  onChange={(e) => { setComponentName(e.target.value); setIsDirty(true) }}
                   placeholder="e.g., My Custom RSI"
                   className="w-full px-4 py-3 bg-[#151718] border border-[#2A2D42] rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-[#85e1fe] transition-colors"
                 />
@@ -1510,8 +1661,10 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
           </div>
         </div>
 
-        {/* Right Side - Code Editor */}
-        <div className="flex-1 flex flex-col">
+        {/* Right Side - Code Editor. `min-w-0` keeps Monaco's inline pixel width
+            from setting this column's minimum size — without it the editor can
+            never shrink back after being laid out at fullscreen width. */}
+        <div className="flex-1 min-w-0 flex flex-col">
           {/* Editor Header */}
           <div className="bg-[#1A1D24] border-b border-[#2A2D42] px-4 py-2 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -1528,12 +1681,14 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
           </div>
 
           {/* Monaco Code Editor */}
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 min-w-0 overflow-hidden">
             <MonacoEditor
               height="100%"
+              width="100%"
+              onMount={(editor) => { editorRef.current = editor }}
               language={getMonacoLanguage()}
               value={code}
-              onChange={(value) => setCode(value || "")}
+              onChange={(value) => { setCode(value || ""); setIsDirty(true) }}
               theme="vs-dark"
               options={{
                 minimap: { enabled: false },
@@ -1613,6 +1768,25 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
           )}
         </div>
       </div>
+
+      {showUnsavedModal && (
+        <UnsavedChangesModal
+          kind={codeType === "strategy" ? "strategy" : "component"}
+          needsName={leaveNeedsName}
+          name={codeType === "strategy" ? strategyName : componentName}
+          onNameChange={(value) => {
+            if (codeType === "strategy") setStrategyName(sanitizeStrategyName(value))
+            else setComponentName(value)
+            setLeaveNameError(null)
+          }}
+          nameError={leaveNameError}
+          saveError={leaveSaveError}
+          isSaving={isSaving}
+          onSave={handleSaveAndLeave}
+          onDiscard={handleDiscardAndLeave}
+          onCancel={() => setShowUnsavedModal(false)}
+        />
+      )}
     </div>
   )
 }
