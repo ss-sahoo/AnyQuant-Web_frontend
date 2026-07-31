@@ -39,6 +39,8 @@
 //     the form endpoint.
 //   partialtp_*            -- opaque nested partial-take-profit list, no UI here.
 
+import { parseFormNumber } from "./optimisation-range-validation"
+
 export type FormRowType = "number" | "text"
 
 export interface PersistableRow {
@@ -210,13 +212,15 @@ export function validateRows(rows: PersistableRow[]): ValidationResult {
   const errors: Record<string, string> = {}
   for (const row of rows) {
     if (!(row.optimise && row.type === "number")) continue
-    const start = Number(row.start)
-    const step = Number(row.step)
-    const stop = Number(row.stop)
-    const value = Number(row.default)
+    // parseFormNumber, not Number: a blank cell must fail here rather than be
+    // saved as a silent 0 bound.
+    const start = parseFormNumber(row.start)
+    const step = parseFormNumber(row.step)
+    const stop = parseFormNumber(row.stop)
+    const value = parseFormNumber(row.default)
 
     if (![start, step, stop, value].every((n) => Number.isFinite(n))) {
-      errors[row.encoding] = "Start, step, stop and value must all be numbers."
+      errors[row.encoding] = "Start, step, stop and value must all be set to numbers."
       continue
     }
     if (start > stop) {
