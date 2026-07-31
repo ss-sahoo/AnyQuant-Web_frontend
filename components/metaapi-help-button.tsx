@@ -169,7 +169,7 @@ export function MetaAPIHelpButton({ onOpenDebugModal }: MetaAPIHelpButtonProps) 
                   <div className="bg-gray-800 rounded p-3">
                     <p className="text-white font-semibold text-sm mb-2">📈 Forex Major Pairs</p>
                     <div className="flex flex-wrap gap-2">
-                      {["1m", "5m", "15m", "30m", "1h", "4h", "1d"].map((tf) => (
+                      {["1min", "5min", "15min", "30min", "1h", "4h", "1d"].map((tf) => (
                         <span key={tf} className="bg-green-600 text-white px-2 py-1 rounded text-xs font-mono">
                           {tf}
                         </span>
@@ -181,13 +181,13 @@ export function MetaAPIHelpButton({ onOpenDebugModal }: MetaAPIHelpButtonProps) 
                   <div className="bg-gray-800 rounded p-3">
                     <p className="text-white font-semibold text-sm mb-2">🥇 Gold/Metals</p>
                     <div className="flex flex-wrap gap-2">
-                      {["15m", "30m", "1h", "4h", "1d"].map((tf) => (
+                      {["15min", "30min", "1h", "4h", "1d"].map((tf) => (
                         <span key={tf} className="bg-green-600 text-white px-2 py-1 rounded text-xs font-mono">
                           {tf}
                         </span>
                       ))}
                       <span className="bg-red-600/50 text-white px-2 py-1 rounded text-xs font-mono">
-                        1m ❌
+                        1min ❌
                       </span>
                     </div>
                     <p className="text-gray-400 text-xs mt-2">Often no 1-minute data (broker-dependent)</p>

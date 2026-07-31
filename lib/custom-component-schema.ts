@@ -4,6 +4,47 @@
 // parameter list for a component) and the runtime properties dialog (where
 // the user configures a component dropped into a strategy).
 
+/**
+ * The engine validates timeframes with `(\d+)(min|ms|s|d|h)`, so sub-hour units
+ * must be spelled `min` — a bare `15m` is rejected outright, and on the MetaAPI
+ * path it misses the timeframe map entirely and silently degrades to `1d`.
+ * Older strategies and component settings still hold `Nm` values, so everything
+ * that reads a stored timeframe runs it through here first.
+ */
+export function normalizeTimeframe<T extends string | undefined | null>(timeframe: T): T {
+  if (typeof timeframe !== "string") return timeframe
+  // `1m` → `1min`, but leave `15min`/`1h`/`1d`/`1w`/`500ms` alone.
+  return timeframe.replace(/^(\d+)m$/i, "$1min") as T
+}
+
+const TIMEFRAME_KEYS = new Set(["timeframe", "execution_timeframe"])
+
+/**
+ * Migrate every persisted timeframe in a strategy statement to the `min` form.
+ * Applied where a statement is loaded from storage or the API — a generic walk
+ * rather than a list of paths, because timeframes appear on conditions, on
+ * inp1/inp2, on Equity rules and inside Then/Accumulate wrappers.
+ */
+export function normalizeStatementTimeframes<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeStatementTimeframes(entry)) as unknown as T
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {}
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      if (TIMEFRAME_KEYS.has(key) && typeof entry === "string") {
+        out[key] = normalizeTimeframe(entry)
+      } else if (key === "timeframes_required" && Array.isArray(entry)) {
+        out[key] = entry.map((tf) => (typeof tf === "string" ? normalizeTimeframe(tf) : tf))
+      } else {
+        out[key] = normalizeStatementTimeframes(entry)
+      }
+    }
+    return out as T
+  }
+  return value
+}
+
 export type ParameterType = "int" | "float" | "bool" | "string" | "select" | "source"
 
 export interface ParameterSchema {
