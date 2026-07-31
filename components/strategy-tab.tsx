@@ -57,7 +57,7 @@ export function StrategyTab({
         ) : (
           <>
             <div className="flex justify-between items-center mb-3">
-              <h3 className="text-md font-medium">Upload data — one file per timeframe</h3>
+              <h3 className="text-md font-medium">Upload data (one file per timeframe)</h3>
               <span className="text-sm text-gray-400">
                 {filledCount}/{slotAssignments.length} files
               </span>
@@ -105,12 +105,12 @@ export function StrategyTab({
                             <span className="text-sm truncate">{slot.filename}</span>
                             {mismatch ? (
                               <span className="text-xs text-yellow-400">
-                                Looks like {minutesToLabel(slot.detectedMinutes)} data — submitting as {slot.timeframe}
+                                Looks like {minutesToLabel(slot.detectedMinutes)} data. Submitting as {slot.timeframe}
                               </span>
                             ) : verified ? (
                               <span className="text-xs text-green-400">Verified {slot.timeframe} data</span>
                             ) : (
-                              <span className="text-xs text-gray-400">Cadence not verified — trusting this slot</span>
+                              <span className="text-xs text-gray-400">Unable to determine the timeframe of file. Please verify it yourself.</span>
                             )}
                           </div>
                         ) : (
