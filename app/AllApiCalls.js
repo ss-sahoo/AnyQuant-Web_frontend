@@ -237,11 +237,51 @@ export const sendOtp = async (email) => {
 
 // src/api/runBacktest.js or .ts
 
-export const runBacktest = async ({ statement, files, run_id = null }) => {
+/**
+ * Start a backtest.
+ *
+ * `strategy_type` is declared explicitly ("no_code" | "dev_mode" | "hybrid");
+ * the backend trusts a declared value and only falls back to its own detection
+ * for older clients. "dev_mode" additionally requires `custom_strategy_id`.
+ *
+ * All three types answer 202 `{ status, run_id, strategy_type, components }`;
+ * poll GET /api/job-status/<run_id>/ for the result and cancel via
+ * POST /api/cancel-backtest/.
+ *
+ * `start_date`/`end_date` are ISO YYYY-MM-DD and all-or-nothing — a lone bound
+ * is a 400. They slice the uploaded file on the dev-mode path and are ignored
+ * for no-code CSV uploads.
+ */
+export const runBacktest = async ({
+  statement,
+  files,
+  run_id = null,
+  strategy_type = null,
+  custom_strategy_id = null,
+  start_date = null,
+  end_date = null,
+  generate_plot = null,
+  trading_type = null,
+}) => {
   const formData = new FormData()
 
   formData.append("statement", JSON.stringify(statement))
   if (run_id) formData.append("run_id", run_id)
+  if (strategy_type) formData.append("strategy_type", strategy_type)
+  if (custom_strategy_id != null) formData.append("custom_strategy_id", String(custom_strategy_id))
+  if (start_date && end_date) {
+    formData.append("start_date", start_date)
+    formData.append("end_date", end_date)
+  }
+  if (generate_plot != null) formData.append("generate_plot", String(generate_plot))
+  // Flat top-level execution settings (commission, slippage, lot_type,
+  // position_size, asset_type) — the dev-mode serializer takes them
+  // individually rather than as a TradingType object.
+  if (trading_type) {
+    for (const [key, value] of Object.entries(trading_type)) {
+      if (value != null && value !== "") formData.append(key, String(value))
+    }
+  }
 
   for (const [timeframe, file] of Object.entries(files)) {
     formData.append(timeframe, file)
@@ -264,7 +304,34 @@ export const runBacktest = async ({ statement, files, run_id = null }) => {
 // If you want to use the native fetch, replace all 'Fetch' with 'fetch'.
 
 // Add this new function for MetaAPI integration
-export const runBacktestWithMetaAPI = async (strategy, token, accountId, symbol, run_id = null) => {
+/**
+ * See runBacktest above for the strategy_type contract and the type-dependent
+ * response shape.
+ *
+ * @param {Object} strategy
+ * @param {string} token
+ * @param {string} accountId
+ * @param {string} symbol
+ * @param {string|null} [run_id]
+ * @param {{ strategy_type?: string|null, custom_strategy_id?: number|null,
+ *   start_date?: string|null, end_date?: string|null,
+ *   generate_plot?: boolean|null, trading_type?: Object|null }} [options]
+ */
+export const runBacktestWithMetaAPI = async (
+  strategy,
+  token,
+  accountId,
+  symbol,
+  run_id = null,
+  {
+    strategy_type = null,
+    custom_strategy_id = null,
+    start_date = null,
+    end_date = null,
+    generate_plot = null,
+    trading_type = null,
+  } = {},
+) => {
   console.log('🔍 MetaAPI Debug Info:', {
     tokenLength: token?.length || 0,
     accountId: accountId,
@@ -280,6 +347,19 @@ export const runBacktestWithMetaAPI = async (strategy, token, accountId, symbol,
   formData.append('metaapi_account_id', accountId);
   formData.append('symbol', symbol);
   if (run_id) formData.append('run_id', run_id);
+  if (strategy_type) formData.append('strategy_type', strategy_type);
+  if (custom_strategy_id != null) formData.append('custom_strategy_id', String(custom_strategy_id));
+  // All-or-nothing: a lone bound is a 400.
+  if (start_date && end_date) {
+    formData.append('start_date', start_date);
+    formData.append('end_date', end_date);
+  }
+  if (generate_plot != null) formData.append('generate_plot', String(generate_plot));
+  if (trading_type) {
+    for (const [key, value] of Object.entries(trading_type)) {
+      if (value != null && value !== '') formData.append(key, String(value));
+    }
+  }
 
   try {
     const response = await Fetch('/api/run-backtest/', {
@@ -514,7 +594,7 @@ export const cancelBacktest = async (runId) => {
   const headers = new Headers()
   if (authToken) headers.append("Authorization", `Bearer ${authToken}`)
   console.log("📡 cancel-backtest →", runId)
-  const response = await fetch("https://anyquant.co.uk/api/cancel-backtest/", { method: "POST", headers, body: formData })
+  const response = await fetch("http://127.0.0.1:8000/api/cancel-backtest/", { method: "POST", headers, body: formData })
   console.log("📡 cancel-backtest status:", response.status)
   return response.json().catch(() => ({}))
 }
@@ -526,7 +606,7 @@ export const cancelOptimisationRun = async (runId) => {
   const headers = new Headers()
   if (authToken) headers.append("Authorization", `Bearer ${authToken}`)
   console.log("📡 cancel-optimisation →", runId)
-  const response = await fetch("https://anyquant.co.uk/api/cancel-optimisation/", { method: "POST", headers, body: formData })
+  const response = await fetch("http://127.0.0.1:8000/api/cancel-optimisation/", { method: "POST", headers, body: formData })
   console.log("📡 cancel-optimisation status:", response.status)
   return response.json().catch(() => ({}))
 }
@@ -787,6 +867,27 @@ export async function editStrategy(id, data) {
     throw error
   }
 }
+/**
+ * Persists a strategy's builder type ("nocode" | "developer" | "hybrid") and,
+ * for hybrid strategies, the custom (code) strategy it is paired with.
+ *
+ * Both fields live on StrategyStatement; on backends that predate them DRF
+ * ignores the unknown keys and the call is a harmless no-op, leaving the
+ * localStorage mirror in lib/builder-mode.ts as the only source of truth.
+ *
+ * @param {string|number} id - Regular strategy ID
+ * @param {string} builderType - "nocode" | "developer" | "hybrid"
+ * @param {number|null} [linkedCustomStrategyId] - Custom strategy to pair with
+ * @returns {Promise} Promise with the updated strategy data
+ */
+export async function updateStrategyType(id, builderType, linkedCustomStrategyId) {
+  const body = { builder_type: builderType }
+  if (linkedCustomStrategyId !== undefined) {
+    body.linked_custom_strategy_id = linkedCustomStrategyId
+  }
+  return editStrategy(id, body)
+}
+
 /**
  * Duplicate an existing strategy with a new name
  * @param {string} id - The strategy ID to duplicate
