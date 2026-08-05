@@ -1,9 +1,11 @@
 "use client"
 
 import { useRef, useState } from "react"
+import Link from "next/link"
 import { MoreVertical } from "lucide-react"
 import type { Algorithm } from "@/lib/types"
 import { AlgorithmMenu } from "@/components/algorithm-menu"
+import { builderRouteForRow } from "@/lib/builder-mode"
 
 interface AlgorithmTableProps {
   algorithm: Algorithm[]
@@ -44,9 +46,7 @@ export function AlgorithmShortTable({ algorithm, onDelete, onDuplicate, onEdit, 
   return (
     <div className="bg-[#1E2132] rounded-lg overflow-hidden">
       <div className="grid grid-cols-12 p-4 border-b border-gray-800">
-        <div className="col-span-4 font-medium text-gray-300">Strategy name</div>
-        <div className="col-span-4 font-medium text-gray-300">Instruments</div>
-        <div className="col-span-3 font-medium text-gray-300">TFs</div>
+        <div className="col-span-11 font-medium text-gray-300">Strategy name</div>
         <div className="col-span-1"></div>
       </div>
 
@@ -57,9 +57,12 @@ export function AlgorithmShortTable({ algorithm, onDelete, onDuplicate, onEdit, 
       ) : (
         algorithm.map((algo) => (
         <div key={algo.id} className="grid grid-cols-12 p-4 border-b border-gray-800 last:border-0 items-center">
-          <div className="col-span-4">{algo.name}</div>
-          <div className="col-span-4">{algo.instrument}</div>
-          <div className="col-span-3">-----------</div>
+          <Link
+            href={builderRouteForRow(algo.id)}
+            className="col-span-11 truncate pr-4 hover:text-[#6BCAE2] hover:underline transition-colors"
+          >
+            {algo.name}
+          </Link>
           <div className="col-span-1 relative">
             <button
               ref={(el) => {

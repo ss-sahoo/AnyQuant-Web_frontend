@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { ArrowLeft, Code, FileCode, AlertCircle, CheckCircle, Loader2, Save, Play, ChevronDown, FlaskConical, Trash2, Edit3, List, Maximize2 } from "lucide-react"
+import { ArrowLeft, Code, FileCode, AlertCircle, CheckCircle, Loader2, Save, Play, ChevronDown, FlaskConical, Trash2, Edit3, List } from "lucide-react"
 import dynamic from "next/dynamic"
 import { UnsavedChangesModal } from "./modals/unsaved-changes-modal"
 import {
@@ -44,16 +44,12 @@ interface DeveloperModePageProps {
   onDeleteStrategy?: (strategyId: number) => Promise<void>
   onLoadStrategy?: (strategyId: number) => Promise<{ code: string; name: string }>
   editingComponent?: EditingComponent | null
-  /** "inline" renders inside the strategy builder's statements area; "fullscreen" (default) fills the viewport. */
-  variant?: "fullscreen" | "inline"
-  /** Inline only: switch to the fullscreen view. */
-  onExpand?: () => void
   /** Custom strategy to load on first mount (deep link / restored session, ANY-308). */
   initialStrategyId?: number | null
   initialCodeType?: "component" | "strategy"
   /** Notifies the parent whenever an existing custom strategy is loaded into the editor. */
   onStrategyLoaded?: (strategyId: number) => void
-  /** Fullscreen only: label of the back button — the destination depends on how the editor was opened. */
+  /** Label of the back button — the destination depends on how the editor was opened. */
   backLabel?: string
   /**
    * True when `onBack` navigates off the page, destroying this editor. Every
@@ -723,7 +719,7 @@ const PYTHON_IDENTIFIER_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 const sanitizeStrategyName = (value: string) =>
   value.replace(/[^a-zA-Z0-9_]/g, "_").replace(/^(\d)/, "_$1")
 
-export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, onLoadStrategies, onDeleteStrategy, onLoadStrategy, editingComponent, variant = "fullscreen", onExpand, initialStrategyId, initialCodeType, onStrategyLoaded, backLabel = "Back to Strategy Builder", backLeavesPage = false }: DeveloperModePageProps) {
+export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, onLoadStrategies, onDeleteStrategy, onLoadStrategy, editingComponent, initialStrategyId, initialCodeType, onStrategyLoaded, backLabel = "Back to Strategy Builder", backLeavesPage = false }: DeveloperModePageProps) {
   const [codeType, setCodeType] = useState<"component" | "strategy">("component")
   const [language, setLanguage] = useState<"python" | "pinescript">("python")
   const [componentName, setComponentName] = useState("")
@@ -742,20 +738,6 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
   const [showComponentTypeDropdown, setShowComponentTypeDropdown] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [compiledStrategyId, setCompiledStrategyId] = useState<number | null>(null)
-
-  // Monaco caches its measured size as inline pixel widths on its own DOM, so
-  // collapsing back from fullscreen to the inline editor would otherwise leave
-  // the editor stuck at the wider fullscreen size (ANY-308). Force a re-measure
-  // whenever the variant changes: shrink to zero first so the flex parents can
-  // settle at the smaller width, then let Monaco measure the real container.
-  const editorRef = useRef<any>(null)
-  useEffect(() => {
-    const editor = editorRef.current
-    if (!editor) return
-    editor.layout({ width: 0, height: 0 })
-    const frame = requestAnimationFrame(() => editorRef.current?.layout())
-    return () => cancelAnimationFrame(frame)
-  }, [variant])
 
   // Unsaved-work guard (ANY-308). `isDirty` is set by user edits only — loading
   // a strategy/component or swapping in a template replaces the buffer wholesale
@@ -1152,29 +1134,18 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
   }
 
   return (
-    <div className={`${variant === "inline" ? "h-full" : "h-screen"} bg-[#141721] flex flex-col overflow-hidden`}>
+    <div className="h-screen bg-[#141721] flex flex-col overflow-hidden">
       {/* Header */}
       <div className="bg-[#1A1D24] border-b border-[#2A2D42] px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            {variant === "inline" ? (
-              <button
-                onClick={onExpand}
-                className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
-                title="Expand to fullscreen"
-              >
-                <Maximize2 className="w-5 h-5" />
-                <span>Expand</span>
-              </button>
-            ) : (
-              <button
-                onClick={requestBack}
-                className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
-              >
-                <ArrowLeft className="w-5 h-5" />
-                <span>{backLabel}</span>
-              </button>
-            )}
+            <button
+              onClick={requestBack}
+              className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              <span>{backLabel}</span>
+            </button>
             <div className="h-6 w-px bg-[#2A2D42]" />
             <div className="flex items-center gap-2">
               <Code className="w-6 h-6 text-[#85e1fe]" />
@@ -1685,7 +1656,6 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
             <MonacoEditor
               height="100%"
               width="100%"
-              onMount={(editor) => { editorRef.current = editor }}
               language={getMonacoLanguage()}
               value={code}
               onChange={(value) => { setCode(value || ""); setIsDirty(true) }}

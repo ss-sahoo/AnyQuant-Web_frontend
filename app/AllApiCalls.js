@@ -868,27 +868,6 @@ export async function editStrategy(id, data) {
   }
 }
 /**
- * Persists a strategy's builder type ("nocode" | "developer" | "hybrid") and,
- * for hybrid strategies, the custom (code) strategy it is paired with.
- *
- * Both fields live on StrategyStatement; on backends that predate them DRF
- * ignores the unknown keys and the call is a harmless no-op, leaving the
- * localStorage mirror in lib/builder-mode.ts as the only source of truth.
- *
- * @param {string|number} id - Regular strategy ID
- * @param {string} builderType - "nocode" | "developer" | "hybrid"
- * @param {number|null} [linkedCustomStrategyId] - Custom strategy to pair with
- * @returns {Promise} Promise with the updated strategy data
- */
-export async function updateStrategyType(id, builderType, linkedCustomStrategyId) {
-  const body = { builder_type: builderType }
-  if (linkedCustomStrategyId !== undefined) {
-    body.linked_custom_strategy_id = linkedCustomStrategyId
-  }
-  return editStrategy(id, body)
-}
-
-/**
  * Duplicate an existing strategy with a new name
  * @param {string} id - The strategy ID to duplicate
  * @param {string} newName - The new name for the duplicated strategy

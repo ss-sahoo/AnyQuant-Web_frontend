@@ -57,7 +57,7 @@ import {
 } from "@/lib/timeframe-match"
 import { mergeOptimisationForm } from "@/lib/optimisation-form-merge"
 import { findMissingOptimisationRanges, formatMissingRangeMessage } from "@/lib/optimisation-range-validation"
-import { getLastMode, findRegularStrategyLinkedTo, detectStrategyType, resolveCustomStrategyId } from "@/lib/builder-mode"
+import { detectStrategyType, resolveCustomStrategyId } from "@/lib/builder-mode"
 import { StrategyTab } from "@/components/strategy-tab"
 import { BacktestTab } from "@/components/backtest-tab"
 import { OptimisationTab } from "@/components/optimisation-tab"
@@ -4320,22 +4320,14 @@ export default function StrategyTestingPage() {
                   <div className="sticky top-4 z-50 w-fit ml-5 mt-4 md:ml-10">
                     <button
                       onClick={() => {
-                        // Return to the editor view the user left from
-                        // (ANY-308): custom strategies reopen Developer Mode
-                        // (inside their linked regular strategy when one
-                        // exists), hybrids restore their last-used mode.
+                        // Return to the editor the strategy belongs to (ANY-308):
+                        // custom strategies reopen Developer Mode, regular
+                        // strategies the no-code builder.
                         const isCustom =
                           parsedStatement?.is_custom_strategy ||
                           localStorage.getItem("is_custom_strategy") === "true"
                         if (isCustom) {
-                          const linkedRegularId = findRegularStrategyLinkedTo(Number(strategy_id))
-                          if (linkedRegularId) {
-                            router.push(`/strategy-builder/${linkedRegularId}?mode=developer&custom=${strategy_id}`)
-                          } else {
-                            router.push(`/strategy-builder?mode=developer&custom=${strategy_id}`)
-                          }
-                        } else if (getLastMode(strategy_id) === "developer") {
-                          router.push(`/strategy-builder/${strategy_id}?mode=developer`)
+                          router.push(`/strategy-builder?mode=developer&custom=${strategy_id}`)
                         } else {
                           router.push(`/strategy-builder/${strategy_id}`)
                         }

@@ -55,7 +55,7 @@ import {
 import { EditStrategyModal } from "@/components/edit-strategy-modal"
 import { TradingSessionModal } from "./trading-session-modal"
 import type { Algorithm } from "@/lib/types"
-import { setLastMode, getLastMode, getDevLink, setDevLink, clearDevLinksTo, getPreferredMode, setPreferredMode } from "@/lib/builder-mode"
+import { getPreferredMode, setPreferredMode } from "@/lib/builder-mode"
 import { BuilderModePreferenceModal } from "@/components/modals/builder-mode-preference-modal"
 import { useToast } from "@/components/ui/use-toast"
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip"
@@ -298,24 +298,17 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const [showHistoricalPriceLevelModal, setShowHistoricalPriceLevelModal] = useState(false)
   const [showCandleSizeModal, setShowCandleSizeModal] = useState(false)
   const [showDerivativeModal, setShowDerivativeModal] = useState(false)
-  // Developer Mode view (ANY-308): "inline" swaps the statements area for the
-  // code editor, "fullscreen" overlays the whole page. `devModeMounted` stays
-  // true after the first open so one persistent DeveloperModePage instance
-  // keeps its state (code, compile results) across toggles.
-  const [devModeView, setDevModeView] = useState<"closed" | "inline" | "fullscreen">("closed")
+  // Developer Mode view (ANY-308): "fullscreen" overlays the whole page.
+  // `devModeMounted` stays true after the first open so one persistent
+  // DeveloperModePage instance keeps its state (code, compile results) while
+  // hidden.
+  const [devModeView, setDevModeView] = useState<"closed" | "fullscreen">("closed")
   const [devModeMounted, setDevModeMounted] = useState(false)
-  // Custom strategy the developer editor should load on first open (deep link
-  // or restored dev link for this strategy).
+  // Custom strategy the developer editor should load on first open (deep link).
   const [devModeInitialStrategyId, setDevModeInitialStrategyId] = useState<number | null>(null)
-  // True while fullscreen was entered by expanding the inline editor, so Back
-  // collapses to inline instead of closing Developer Mode.
-  const fullscreenFromInlineRef = useRef(false)
   // Deep link straight into Developer Mode (?mode=developer, with &custom=<id>
   // or &new=1) with no regular strategy behind it — closing the editor would
   // drop the user on a blank builder, so Back leaves for the home page instead.
-  // Opening an existing strategy in dev mode (/strategy-builder/<id>?mode=
-  // developer) does have a populated builder behind it, so it keeps collapsing
-  // back to the no-code view (ANY-308).
   const devModeStandalone = initialMode === "developer" && !strategyId
   // One-time "no-code or developer?" dialog for first-ever new strategy.
   const [showModePreferenceDialog, setShowModePreferenceDialog] = useState(false)
@@ -325,43 +318,33 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const [strategyName, setStrategyName] = useState(initialName || "")
   const [persistedId, setPersistedId] = useState<string | null>(strategyId || null)
 
-  const openDeveloperMode = (view: "inline" | "fullscreen") => {
+  const openDeveloperMode = () => {
     setDevModeMounted(true)
-    setDevModeView(view)
-    if (persistedId) setLastMode(persistedId, "developer")
+    setDevModeView("fullscreen")
   }
 
   const closeDeveloperMode = () => {
     setDevModeView("closed")
-    if (persistedId) setLastMode(persistedId, "nocode")
   }
 
-  // Restore Developer Mode on deep links (?mode=developer[&custom=]) and when
-  // this strategy was last edited in Developer Mode (ANY-308). One-shot so a
-  // deliberate close isn't fought by later prop/state changes. For brand-new
-  // strategies, apply the stored view preference or ask for it once.
+  // Open Developer Mode on deep links (?mode=developer[&custom=]) (ANY-308).
+  // One-shot so a deliberate close isn't fought by later prop/state changes.
+  // For brand-new strategies, apply the stored view preference or ask for it
+  // once.
   const devModeRestoredRef = useRef(false)
   useEffect(() => {
     if (devModeRestoredRef.current) return
     if (initialMode === "developer") {
       devModeRestoredRef.current = true
-      const linked = initialCustomStrategyId ?? (strategyId ? getDevLink(strategyId) : null)
-      if (linked) setDevModeInitialStrategyId(linked)
-      openDeveloperMode("fullscreen")
-      return
-    }
-    if (strategyId && getLastMode(strategyId) === "developer") {
-      devModeRestoredRef.current = true
-      const linked = getDevLink(strategyId)
-      if (linked) setDevModeInitialStrategyId(linked)
-      openDeveloperMode("fullscreen")
+      if (initialCustomStrategyId) setDevModeInitialStrategyId(initialCustomStrategyId)
+      openDeveloperMode()
       return
     }
     if (isNewStrategy && !strategyId) {
       const preferred = getPreferredMode()
       if (preferred === "developer") {
         devModeRestoredRef.current = true
-        openDeveloperMode("inline")
+        openDeveloperMode()
       } else if (preferred === null) {
         devModeRestoredRef.current = true
         setShowModePreferenceDialog(true)
@@ -949,11 +932,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const [editingCustomComponent, setEditingCustomComponent] = useState<any>(null)
 
   // The one condition behind Back leaving the page entirely: a standalone
-  // Developer Mode deep link, not expanded from the inline editor and not
-  // mid-component-edit. Every other Back path only hides the editor — it stays
-  // mounted with its code intact — so it needs no unsaved-work prompt (ANY-308).
-  const devModeBackLeavesPage =
-    devModeStandalone && !fullscreenFromInlineRef.current && !editingCustomComponent
+  // Developer Mode deep link, not mid-component-edit. Every other Back path only
+  // hides the editor — it stays mounted with its code intact — so it needs no
+  // unsaved-work prompt (ANY-308).
+  const devModeBackLeavesPage = devModeStandalone && !editingCustomComponent
 
   // Listen for edit-custom-component events from the sidebar
   useEffect(() => {
@@ -961,9 +943,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       const component = e.detail
       setEditingCustomComponent(component)
       setCurrentComponentId(component.id)
-      // Component editing always uses the fullscreen editor — it is a
-      // different task than working on this strategy's statements.
-      openDeveloperMode("fullscreen")
+      openDeveloperMode()
     }
 
     document.addEventListener("edit-custom-component", handleEditCustomComponent as EventListener)
@@ -3890,7 +3870,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         setCurrentStrategyId(strategyId)
         console.log("Created custom strategy:", createResult)
       }
-      if (persistedId && strategyId) setDevLink(persistedId, strategyId)
 
       // Validate the strategy code
       const validationResult = await validateCustomStrategyCode({
@@ -4240,7 +4219,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             } catch { }
           }
         }
-        if (persistedId && savedStrategyId) setDevLink(persistedId, savedStrategyId)
         return { strategyId: savedStrategyId ?? undefined }
       }
 
@@ -6134,11 +6112,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             <div className="flex gap-3">
               {/* Buy/Sell selector */}
               <button
-                onClick={() => (devModeView === "closed" ? openDeveloperMode("inline") : closeDeveloperMode())}
+                onClick={openDeveloperMode}
                 className="px-4 py-2 bg-[#151718] rounded-full text-white hover:bg-gray-700 flex items-center gap-2"
               >
                 <Code className="w-4 h-4" />
-                {devModeView === "closed" ? "Developer Mode" : "No-Code Mode"}
+                Developer Mode
               </button>
               <button
                 onClick={undoStatements}
@@ -6164,43 +6142,21 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           </div>
 
           {/* Developer Mode editor — one persistent instance so code, compile
-              results and the loaded strategy survive toggling between the
-              inline view, the fullscreen view and the no-code statements
+              results and the loaded strategy survive while it is hidden
               (ANY-308). Fullscreen relies on `fixed` escaping the scroll
               container, which holds as long as no ancestor is transformed. */}
           {devModeMounted && (
-            <div
-              className={
-                devModeView === "fullscreen"
-                  ? "fixed inset-0 z-50 bg-[#141721]"
-                  : devModeView === "inline"
-                    ? "h-[70vh] min-h-[560px] rounded-lg overflow-hidden border border-gray-700 mb-6"
-                    : "hidden"
-              }
-            >
+            <div className={devModeView === "fullscreen" ? "fixed inset-0 z-50 bg-[#141721]" : "hidden"}>
               <DeveloperModePage
-                variant={devModeView === "inline" ? "inline" : "fullscreen"}
-                onExpand={() => {
-                  fullscreenFromInlineRef.current = true
-                  setDevModeView("fullscreen")
-                }}
                 backLabel={devModeBackLeavesPage ? "Back to Home" : undefined}
                 backLeavesPage={devModeBackLeavesPage}
                 onBack={async () => {
-                  // Expanded from the inline editor: Back collapses to inline
-                  // instead of leaving Developer Mode entirely.
-                  if (fullscreenFromInlineRef.current && !editingCustomComponent) {
-                    fullscreenFromInlineRef.current = false
-                    setDevModeView("inline")
-                    return
-                  }
                   // Opened directly on a custom strategy: there is no builder
                   // behind this editor, so leave for the home page.
                   if (devModeBackLeavesPage) {
                     router.push("/home")
                     return
                   }
-                  fullscreenFromInlineRef.current = false
                   closeDeveloperMode()
                   setEditingCustomComponent(null)
                   setCurrentComponentId(null)
@@ -6216,8 +6172,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 onCompile={handleDeveloperModeCompile}
                 onSave={handleDeveloperModeSave}
                 onGoToBacktest={(strategyId) => {
-                  // Leaving the page: keep "developer" as the recorded last
-                  // mode so the tester's Back to Editor restores this view.
                   setDevModeView("closed")
                   setEditingCustomComponent(null)
                   setCurrentComponentId(null)
@@ -6230,9 +6184,6 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 }}
                 onDeleteStrategy={async (strategyId) => {
                   await deleteCustomStrategy(strategyId)
-                  // Drop mode-memory references so no regular strategy tries
-                  // to reopen the deleted custom strategy.
-                  clearDevLinksTo(strategyId)
                   if (currentStrategyId === strategyId) setCurrentStrategyId(null)
                 }}
                 onLoadStrategy={async (strategyId) => {
@@ -6245,14 +6196,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 initialCodeType={(devModeInitialStrategyId || initialMode === "developer") ? "strategy" : undefined}
                 onStrategyLoaded={(id) => {
                   setCurrentStrategyId(id)
-                  if (persistedId) setDevLink(persistedId, id)
                 }}
               />
             </div>
           )}
 
-          {/* Statements (hidden, not unmounted, while the inline editor is up) */}
-          <div className={devModeView === "inline" ? "hidden" : "space-y-6"}>
+          <div className="space-y-6">
             {statements.map((statement, index) => (
               <div
                 key={index}
@@ -9568,7 +9517,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             onSelect={(mode) => {
               setPreferredMode(mode)
               setShowModePreferenceDialog(false)
-              if (mode === "developer") openDeveloperMode("inline")
+              if (mode === "developer") openDeveloperMode()
             }}
           />
         )}

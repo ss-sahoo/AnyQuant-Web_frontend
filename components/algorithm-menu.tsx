@@ -5,10 +5,9 @@ import type React from "react"
 import { useEffect, useState } from "react"
 import { DuplicateStrategyModal } from "@/components/duplicate-strategy-modal"
 import { EditStrategyModal } from "@/components/edit-strategy-modal"
-import { ChangeStrategyTypeModal } from "@/components/modals/change-strategy-type-modal"
 import { MenuPortal } from "@/components/MenuPortal"
 import type { Algorithm } from "@/lib/types"
-import { isCustomStrategyRow, type BuilderType } from "@/lib/builder-mode"
+import { isCustomStrategyRow } from "@/lib/builder-mode"
 
 interface AlgorithmMenuProps {
   anchorRef: React.RefObject<HTMLElement>
@@ -20,17 +19,12 @@ interface AlgorithmMenuProps {
   onAddToShortlist?: (id: string) => void
   onRemoveFromShortlist?: (id: string) => void
   isShortlisted?: boolean
-  /** Omitted where types are not editable (e.g. the shortlist table). */
-  onChangeType?: (type: BuilderType) => void
-  /** Creates the missing no-code side of a code-only strategy (ANY-308). */
-  onConvertToHybrid?: () => void
 }
 
-export function AlgorithmMenu({ anchorRef, algorithm, onClose, onDelete, onDuplicate, onEdit, onAddToShortlist, onRemoveFromShortlist, isShortlisted = false, onChangeType, onConvertToHybrid }: AlgorithmMenuProps) {
+export function AlgorithmMenu({ anchorRef, algorithm, onClose, onDelete, onDuplicate, onEdit, onAddToShortlist, onRemoveFromShortlist, isShortlisted = false }: AlgorithmMenuProps) {
   const [position, setPosition] = useState<"top" | "bottom">("bottom")
   const [showDuplicateModal, setShowDuplicateModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
-  const [showTypeModal, setShowTypeModal] = useState(false)
   const [menuVisible, setMenuVisible] = useState(true)
 
   useEffect(() => {
@@ -56,16 +50,9 @@ export function AlgorithmMenu({ anchorRef, algorithm, onClose, onDelete, onDupli
     setMenuVisible(false) // Hide the menu when modal opens
   }
 
-  const handleChangeTypeClick = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    setShowTypeModal(true)
-    setMenuVisible(false)
-  }
-
   const handleModalClose = () => {
     setShowEditModal(false)
     setShowDuplicateModal(false)
-    setShowTypeModal(false)
     onClose() // Close the menu completely when modal is closed
   }
 
@@ -79,11 +66,6 @@ export function AlgorithmMenu({ anchorRef, algorithm, onClose, onDelete, onDupli
       <button className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={handleEditClick}>
         Edit strategy
       </button>
-      {(onChangeType || onConvertToHybrid) && (
-        <button className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={handleChangeTypeClick}>
-          Change type
-        </button>
-      )}
       {!isDeveloper && (
         <button className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={handleDuplicateClick}>
           Duplicate
@@ -152,23 +134,6 @@ export function AlgorithmMenu({ anchorRef, algorithm, onClose, onDelete, onDupli
           onClose={handleModalClose}
           onSave={(name, instrument) => {
             onDuplicate(name, instrument)
-            handleModalClose()
-          }}
-        />
-      )}
-
-      {showTypeModal && (
-        <ChangeStrategyTypeModal
-          strategyName={algorithm.name}
-          currentType={algorithm.type ?? "nocode"}
-          locked={isDeveloper}
-          onClose={handleModalClose}
-          onSave={(type) => {
-            onChangeType?.(type)
-            handleModalClose()
-          }}
-          onConvertToHybrid={() => {
-            onConvertToHybrid?.()
             handleModalClose()
           }}
         />
