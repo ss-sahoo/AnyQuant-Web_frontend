@@ -237,11 +237,51 @@ export const sendOtp = async (email) => {
 
 // src/api/runBacktest.js or .ts
 
-export const runBacktest = async ({ statement, files, run_id = null }) => {
+/**
+ * Start a backtest.
+ *
+ * `strategy_type` is declared explicitly ("no_code" | "dev_mode" | "hybrid");
+ * the backend trusts a declared value and only falls back to its own detection
+ * for older clients. "dev_mode" additionally requires `custom_strategy_id`.
+ *
+ * All three types answer 202 `{ status, run_id, strategy_type, components }`;
+ * poll GET /api/job-status/<run_id>/ for the result and cancel via
+ * POST /api/cancel-backtest/.
+ *
+ * `start_date`/`end_date` are ISO YYYY-MM-DD and all-or-nothing — a lone bound
+ * is a 400. They slice the uploaded file on the dev-mode path and are ignored
+ * for no-code CSV uploads.
+ */
+export const runBacktest = async ({
+  statement,
+  files,
+  run_id = null,
+  strategy_type = null,
+  custom_strategy_id = null,
+  start_date = null,
+  end_date = null,
+  generate_plot = null,
+  trading_type = null,
+}) => {
   const formData = new FormData()
 
   formData.append("statement", JSON.stringify(statement))
   if (run_id) formData.append("run_id", run_id)
+  if (strategy_type) formData.append("strategy_type", strategy_type)
+  if (custom_strategy_id != null) formData.append("custom_strategy_id", String(custom_strategy_id))
+  if (start_date && end_date) {
+    formData.append("start_date", start_date)
+    formData.append("end_date", end_date)
+  }
+  if (generate_plot != null) formData.append("generate_plot", String(generate_plot))
+  // Flat top-level execution settings (commission, slippage, lot_type,
+  // position_size, asset_type) — the dev-mode serializer takes them
+  // individually rather than as a TradingType object.
+  if (trading_type) {
+    for (const [key, value] of Object.entries(trading_type)) {
+      if (value != null && value !== "") formData.append(key, String(value))
+    }
+  }
 
   for (const [timeframe, file] of Object.entries(files)) {
     formData.append(timeframe, file)
@@ -264,7 +304,34 @@ export const runBacktest = async ({ statement, files, run_id = null }) => {
 // If you want to use the native fetch, replace all 'Fetch' with 'fetch'.
 
 // Add this new function for MetaAPI integration
-export const runBacktestWithMetaAPI = async (strategy, token, accountId, symbol, run_id = null) => {
+/**
+ * See runBacktest above for the strategy_type contract and the type-dependent
+ * response shape.
+ *
+ * @param {Object} strategy
+ * @param {string} token
+ * @param {string} accountId
+ * @param {string} symbol
+ * @param {string|null} [run_id]
+ * @param {{ strategy_type?: string|null, custom_strategy_id?: number|null,
+ *   start_date?: string|null, end_date?: string|null,
+ *   generate_plot?: boolean|null, trading_type?: Object|null }} [options]
+ */
+export const runBacktestWithMetaAPI = async (
+  strategy,
+  token,
+  accountId,
+  symbol,
+  run_id = null,
+  {
+    strategy_type = null,
+    custom_strategy_id = null,
+    start_date = null,
+    end_date = null,
+    generate_plot = null,
+    trading_type = null,
+  } = {},
+) => {
   console.log('🔍 MetaAPI Debug Info:', {
     tokenLength: token?.length || 0,
     accountId: accountId,
@@ -280,6 +347,19 @@ export const runBacktestWithMetaAPI = async (strategy, token, accountId, symbol,
   formData.append('metaapi_account_id', accountId);
   formData.append('symbol', symbol);
   if (run_id) formData.append('run_id', run_id);
+  if (strategy_type) formData.append('strategy_type', strategy_type);
+  if (custom_strategy_id != null) formData.append('custom_strategy_id', String(custom_strategy_id));
+  // All-or-nothing: a lone bound is a 400.
+  if (start_date && end_date) {
+    formData.append('start_date', start_date);
+    formData.append('end_date', end_date);
+  }
+  if (generate_plot != null) formData.append('generate_plot', String(generate_plot));
+  if (trading_type) {
+    for (const [key, value] of Object.entries(trading_type)) {
+      if (value != null && value !== '') formData.append(key, String(value));
+    }
+  }
 
   try {
     const response = await Fetch('/api/run-backtest/', {

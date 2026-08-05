@@ -44,6 +44,14 @@ interface BacktestTabProps {
   // Trade Execution Timing integration
   tradeTiming?: TradeTimingSettings
   onTradeTimingSave?: (settings: TradeTimingSettings) => void
+  /**
+   * Developer-Mode (custom Python) strategy. The engine honours a different
+   * subset of these settings, so the tab hides what it would ignore rather
+   * than showing controls that do nothing.
+   */
+  isDevMode?: boolean
+  slippage: string
+  setSlippage: React.Dispatch<React.SetStateAction<string>>
 }
 
 export function BacktestTab({
@@ -75,6 +83,9 @@ export function BacktestTab({
 
   assetType,
   setAssetType,
+  isDevMode = false,
+  slippage,
+  setSlippage,
   showTradesSummary = false,
   onShowTradesSummary,
   initialTradingSession,
@@ -139,34 +150,52 @@ export function BacktestTab({
 
   return (
     <div className="p-6 ml-[63px]">
-      {/* Trading Session Panel */}
-      <div className="mb-6 p-4 bg-[#141721] rounded-md border border-[#2b2e38]">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-white font-medium">Trading Session</div>
-            <div className="text-xs text-gray-400 mt-1">{tradingSessionSummary || "Not configured"}</div>
+      {/* Developer-Mode strategies run their own entry/exit logic in Python, so
+          the engine takes execution settings but not session windows, position
+          limits or bar-vs-tick timing. Those panels are hidden rather than
+          shown inert. */}
+      {isDevMode && (
+        <div className="mb-6 p-4 bg-[#85e1fe]/10 rounded-md border border-[#85e1fe]/30">
+          <div className="text-white font-medium">Developer-Mode strategy</div>
+          <div className="text-xs text-gray-300 mt-1">
+            Commission, slippage, lot definition, position size and asset type now affect the
+            simulation. Runs saved before this change ignored them, so results will differ.
           </div>
-          <button className="px-4 py-2 bg-[#2b2e38] text-white rounded-md hover:bg-[#3a3e4a]" onClick={() => setShowTradingSessionModal(true)}>
-            Configure
-          </button>
         </div>
-      </div>
+      )}
+
+      {/* Trading Session Panel */}
+      {!isDevMode && (
+        <div className="mb-6 p-4 bg-[#141721] rounded-md border border-[#2b2e38]">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-white font-medium">Trading Session</div>
+              <div className="text-xs text-gray-400 mt-1">{tradingSessionSummary || "Not configured"}</div>
+            </div>
+            <button className="px-4 py-2 bg-[#2b2e38] text-white rounded-md hover:bg-[#3a3e4a]" onClick={() => setShowTradingSessionModal(true)}>
+              Configure
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Trade Execution Timing Panel */}
-      <div className="mb-6 p-4 bg-[#141721] rounded-md border border-[#2b2e38]">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-white font-medium">Trade Execution Timing</div>
-            <div className="text-xs text-gray-400 mt-1">{tradeTimingSummary}</div>
+      {!isDevMode && (
+        <div className="mb-6 p-4 bg-[#141721] rounded-md border border-[#2b2e38]">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-white font-medium">Trade Execution Timing</div>
+              <div className="text-xs text-gray-400 mt-1">{tradeTimingSummary}</div>
+            </div>
+            <button
+              className="px-4 py-2 bg-[#2b2e38] text-white rounded-md hover:bg-[#3a3e4a]"
+              onClick={() => setShowTradeTimingModal(true)}
+            >
+              Configure
+            </button>
           </div>
-          <button
-            className="px-4 py-2 bg-[#2b2e38] text-white rounded-md hover:bg-[#3a3e4a]"
-            onClick={() => setShowTradeTimingModal(true)}
-          >
-            Configure
-          </button>
         </div>
-      </div>
+      )}
       <div className="flex justify-between items-start mb-6">
         {/* Left side - Dates */}
         <div className="w-[30%]">
@@ -264,15 +293,20 @@ export function BacktestTab({
           </div>
         </div>
 
-        {/* Leverage/Margin Assumptions */}
+        {/* Leverage/Margin Assumptions — accepted by the dev-mode serializer
+            but still inert in the engine, so it stays disabled there. */}
         <div className="w-[35%]">
-          <label className="block text-sm text-gray-400 mb-2">Leverage/Margin Assumptions</label>
-          <div className="space-y-2">
+          <label className="block text-sm text-gray-400 mb-2">
+            Leverage/Margin Assumptions
+            {isDevMode && <span className="ml-2 text-xs text-gray-500">(not yet applied in Developer Mode)</span>}
+          </label>
+          <div className={`space-y-2 ${isDevMode ? "opacity-50" : ""}`}>
             <div className="relative">
               <select
                 value={leverage}
                 onChange={handleLeverageChange}
-                className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white appearance-none cursor-pointer"
+                disabled={isDevMode}
+                className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white appearance-none cursor-pointer disabled:cursor-not-allowed"
               >
                 <option value="1:1">1:1</option>
                 <option value="1:2">1:2</option>
@@ -326,10 +360,11 @@ export function BacktestTab({
         </div>
       </div>
 
-      <div className="border-t border-[#2b2e38] my-6"></div>
+      {!isDevMode && <div className="border-t border-[#2b2e38] my-6"></div>}
 
-      {/* Trading Mode Section */}
-      <div className="mb-6">
+      {/* Trading Mode Section — hidden for Developer Mode until the engine
+          supports multiple concurrent positions for custom strategies. */}
+      <div className={`mb-6 ${isDevMode ? "hidden" : ""}`}>
         <label className="block text-sm text-gray-400 mb-4">Trading Mode</label>
         <div className="flex flex-wrap gap-3 mb-4">
           {[
@@ -408,6 +443,22 @@ export function BacktestTab({
               className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
             />
           </div>
+
+          {/* Slippage — only reaches the engine on the Developer-Mode path. */}
+          {isDevMode && (
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">Slippage</label>
+              <input
+                type="number"
+                step="0.0001"
+                min="0"
+                value={slippage}
+                onChange={(e) => setSlippage(e.target.value)}
+                placeholder="Default: 0"
+                className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
+              />
+            </div>
+          )}
 
           {/* Lot Definition */}
           <div>

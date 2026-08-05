@@ -40,7 +40,6 @@ import {
   pollJobStatus,
   // Custom strategy API
   getCustomStrategy,
-  runCustomStrategyBacktest,
   runCustomStrategyOptimisation,
   // Backtest result API
   getBacktestResultDetail,
@@ -51,8 +50,14 @@ import { X, ArrowLeft, Layout, Maximize2 } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
 import { extractErrorMessage, formatErrorForDisplay } from "@/lib/error-utils"
 import { validateStrategyStatement } from "@/lib/indicator-contract"
-import { matchesTimeframe as matchesTimeframeShared } from "@/lib/timeframe-match"
+import {
+  matchesTimeframe as matchesTimeframeShared,
+  resolveTimeframeFiles,
+  timeframeToMinutes,
+} from "@/lib/timeframe-match"
 import { mergeOptimisationForm } from "@/lib/optimisation-form-merge"
+import { findMissingOptimisationRanges, formatMissingRangeMessage } from "@/lib/optimisation-range-validation"
+import { detectStrategyType, resolveCustomStrategyId } from "@/lib/builder-mode"
 import { StrategyTab } from "@/components/strategy-tab"
 import { BacktestTab } from "@/components/backtest-tab"
 import { OptimisationTab } from "@/components/optimisation-tab"
@@ -62,6 +67,7 @@ import {
   buildCustomStrategyRows,
   mergeOptimisationRows,
 } from "@/lib/custom-component-params-sync"
+import { normalizeTimeframe, normalizeStatementTimeframes } from "@/lib/custom-component-schema"
 import { AdvancedSettingsModalContent } from "@/components/advanced-settings-modal-content"
 import { PreviousOptimisationView } from '@/components/PreviousOptimisationView'
 import { OptimisationHistoryList } from '@/components/OptimisationHistoryList'
@@ -97,6 +103,109 @@ function ComingSoonPanel({ title, subtitle }: { title: string; subtitle?: string
   )
 }
 
+/** The `YYYY.MM.DD` the date-range input and picker exchange. */
+function formatDateDots(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${date.getFullYear()}.${month}.${day}`
+}
+
+/**
+ * The last three months, ending today. Built from local date parts rather than
+ * toISOString(), which would shift the day for users behind UTC.
+ */
+function defaultDateRange(): string {
+  const end = new Date()
+  const start = new Date(end)
+  start.setMonth(start.getMonth() - 3)
+  return `${formatDateDots(start)} - ${formatDateDots(end)}`
+}
+
+/**
+ * "2026.04.30 - 2026.07.30" → ISO bounds for the API. All-or-nothing: the
+ * backend 400s on a lone bound or a non-ISO value, so a range we can't parse
+ * cleanly is sent as nothing at all rather than half a window.
+ */
+function toIsoDateRange(dateRange: string): { start_date: string; end_date: string } | null {
+  const [start, end] = String(dateRange || "")
+    .split(" - ")
+    .map((part) => part.trim().replace(/\./g, "-"))
+  const iso = /^\d{4}-\d{2}-\d{2}$/
+  if (!iso.test(start ?? "") || !iso.test(end ?? "")) return null
+  return { start_date: start, end_date: end }
+}
+
+/** Minutes per bar for the bar-count estimate; null for units we don't size. */
+function timeframeMinutes(timeframe: string): number | null {
+  const match = /^(\d+)(min|h|d|w)$/i.exec(String(timeframe || "").trim())
+  if (!match) return null
+  const size = Number(match[1])
+  const unit = match[2].toLowerCase()
+  if (unit === "min") return size
+  if (unit === "h") return size * 60
+  if (unit === "d") return size * 1440
+  return size * 10080
+}
+
+/**
+ * Rough bar count for the requested window on the finest timeframe. Calendar
+ * days, no weekend discount — deliberately the same arithmetic the backend's
+ * paging note uses, so the warning threshold means the same thing on both sides.
+ */
+function estimateBarCount(
+  requested: { start_date: string; end_date: string } | null,
+  timeframes: string[],
+): { bars: number; timeframe: string } | null {
+  if (!requested) return null
+  const sized = timeframes
+    .map((tf) => ({ tf, minutes: timeframeMinutes(tf) }))
+    .filter((entry): entry is { tf: string; minutes: number } => entry.minutes != null && entry.minutes > 0)
+  if (sized.length === 0) return null
+
+  const finest = sized.reduce((a, b) => (b.minutes < a.minutes ? b : a))
+  const days = (Date.parse(requested.end_date) - Date.parse(requested.start_date)) / 86_400_000
+  if (!Number.isFinite(days) || days <= 0) return null
+  return { bars: Math.round(days * (1440 / finest.minutes)), timeframe: finest.tf }
+}
+
+/**
+ * What the run actually covered vs what was asked for. A MetaAPI fetch can fall
+ * short — broker history, the page ceiling or a timeout all truncate a wide
+ * range — and the run still proceeds on whatever arrived, so staying silent
+ * would let a partial window read as a full one.
+ */
+function coverageShortfallMessage(
+  job: any,
+  payload: any,
+  requested: { start_date: string; end_date: string } | null,
+): string | null {
+  const window = job?.requested_window
+  const askedStart = String(window?.start ?? window?.start_date ?? requested?.start_date ?? "").slice(0, 10)
+  const askedEnd = String(window?.end ?? window?.end_date ?? requested?.end_date ?? "").slice(0, 10)
+  if (!askedStart || !askedEnd) return null
+
+  // MetaAPI runs report per-timeframe coverage; dev-mode reports one window.
+  const coverage = job?.data_coverage
+  const spans: { label: string; start: string; end: string }[] =
+    coverage && typeof coverage === "object"
+      ? Object.entries(coverage).map(([tf, span]: [string, any]) => ({
+        label: tf,
+        start: String(span?.start ?? "").slice(0, 10),
+        end: String(span?.end ?? "").slice(0, 10),
+      }))
+      : [{
+        label: "",
+        start: String(payload?.metadata?.start_date ?? "").slice(0, 10),
+        end: String(payload?.metadata?.end_date ?? "").slice(0, 10),
+      }]
+
+  const short = spans.filter((s) => s.start && s.end && (s.start > askedStart || s.end < askedEnd))
+  if (short.length === 0) return null
+
+  const detail = short.map((s) => `${s.label ? `${s.label}: ` : ""}${s.start} → ${s.end}`).join("; ")
+  return `Only ${detail} was available — short of the requested ${askedStart} → ${askedEnd}. Results cover the shorter window.`
+}
+
 export default function StrategyTestingPage() {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState("strategy")
@@ -109,6 +218,17 @@ export default function StrategyTestingPage() {
   // Legacy file upload states (kept for backward compatibility)
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([])
   const [fileObjects, setFileObjects] = useState<Record<string, File>>({})
+  // Bar cadence in minutes measured from each uploaded CSV, keyed by filename.
+  // Used only to cross-check an explicit slot assignment and warn on mismatch —
+  // never to reassign, since raw MT4/MT5 exports don't cadence-detect reliably.
+  const [fileTimeframeMinutes, setFileTimeframeMinutes] = useState<Record<string, number>>({})
+  // Explicit binding of a required timeframe slot to the file the user dropped
+  // into it: timeframe -> filename. This is the source of truth for which file
+  // is submitted under which slot; it removes the old upload-order guessing.
+  const [slotFiles, setSlotFiles] = useState<Record<string, string>>({})
+  // Which slot's upload control is currently open, so the shared hidden <input>
+  // knows where a picked file belongs.
+  const [activeUploadSlot, setActiveUploadSlot] = useState<string | null>(null)
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [currentFile, setCurrentFile] = useState("")
   const [inputFile, setInputFile] = useState<File | null>(null)
@@ -146,6 +266,9 @@ export default function StrategyTestingPage() {
 
   const [lot, setLot] = useState("mini")
   const [parsedStatement, setParsedStatement] = useState<any>(null)
+  // Drives which backtest settings the tab offers: the Developer-Mode engine
+  // honours a different subset from the visual pipeline.
+  const isDevModeStrategy = detectStrategyType(parsedStatement) === "dev_mode"
 
   // Add a state for tracking if the chart is expanded
   const [isChartExpanded, setIsChartExpanded] = useState(false)
@@ -169,6 +292,8 @@ export default function StrategyTestingPage() {
   const [commission, setCommission] = useState(0.00007)
   const [assetType, setAssetType] = useState("gold")
   const [positionSize, setPositionSize] = useState("1") // Default value is 1
+  // Developer-Mode only: the visual pipeline has no slippage field.
+  const [slippage, setSlippage] = useState("0")
 
   // New states for OptimisationTab
   const [selectedMaximiseOption, setSelectedMaximiseOption] = useState<string>("")
@@ -584,7 +709,9 @@ export default function StrategyTestingPage() {
 
       if (savedStrategy) {
         try {
-          const parsed = JSON.parse(savedStrategy)
+          // Migrated on read — strategies saved before the `min` fix carry
+          // `15m`, which the engine rejects and MetaAPI reads as 1d.
+          const parsed = normalizeStatementTimeframes(JSON.parse(savedStrategy))
           console.log("🔍 DEBUG: Loaded strategy from localStorage:", parsed)
           console.log("🔍 DEBUG: TradingSession in loaded strategy:", parsed.TradingSession)
           setParsedStatement(parsed)
@@ -849,7 +976,8 @@ export default function StrategyTestingPage() {
               setStrategyId(resolvedId)
             }
 
-            // Update component state
+            // Update component state. Migrated on read — see normalizeTimeframe().
+            strategyData = normalizeStatementTimeframes(strategyData)
             setStrID(JSON.stringify(strategyData))
             setStrategy(JSON.stringify(strategyData))
             setParsedStatement(strategyData)
@@ -967,35 +1095,103 @@ export default function StrategyTestingPage() {
     }, 3000);
   };
 
-  // Helper function to detect timeframe from CSV timestamps
+  // Parse one CSV cell into epoch seconds. Handles unix seconds, unix
+  // milliseconds, and the datetime strings broker exports use
+  // ("2024-07-19 10:00:00", "2024.07.19 10:00"). Returns null if it isn't a time.
+  const parseTimestampCell = (raw: string): number | null => {
+    const val = raw.trim().replace(/^"|"$/g, "")
+    if (!val) return null
+
+    if (/^\d+$/.test(val)) {
+      const n = parseInt(val, 10)
+      if (n > 1e12) return Math.round(n / 1000) // milliseconds
+      if (n > 1e9) return n // seconds
+      return null
+    }
+
+    // MT4/MT5 write "YYYY.MM.DD"; Date.parse only understands dashes/slashes.
+    const iso = val.replace(/^(\d{4})\.(\d{2})\.(\d{2})/, "$1-$2-$3").replace(" ", "T")
+    const ms = Date.parse(iso)
+    return Number.isNaN(ms) ? null : Math.round(ms / 1000)
+  }
+
+  // Helper function to detect timeframe from CSV timestamps.
+  // Handles the shapes broker exports actually ship:
+  //   - normal CSV with a time/datetime/unix header column
+  //   - MT5: TAB-separated, "<DATE> <TIME>" header tokens, dot-dated
+  //   - MT4: comma-separated, NO header, "2024.07.19,10:00,O,H,L,C,V"
   const detectTimeframeFromTimestamps = (csvContent: string): { detected: boolean; timeframeMinutes: number; timeframeLabel: string; matchesRequired: boolean } => {
-    const lines = csvContent.split('\n')
+    const lines = csvContent.split(/\r?\n/).filter((l) => l.trim() !== '')
     if (lines.length < 3) {
       return { detected: false, timeframeMinutes: 0, timeframeLabel: '', matchesRequired: false }
     }
 
-    // Get headers to find the time/timestamp column
-    const headers = lines[0].toLowerCase().split(',').map(col => col.trim())
-    const timeColumnIndex = headers.findIndex(h =>
-      h === 'time' || h === 'timestamp' || h === 'datetime' || h === 'date' || h === 'unix' || h === 'epoch'
-    )
+    // Sniff the delimiter: MT5 uses tabs, MT4/most use commas, some EU exports
+    // use semicolons. Pick whichever splits the first line into the most fields.
+    const delimiter = [',', '\t', ';']
+      .map((d) => ({ d, n: lines[0].split(d).length }))
+      .reduce((best, c) => (c.n > best.n ? c : best), { d: ',', n: 0 }).d
 
-    // If no time column header found, assume first column is timestamp
-    const colIndex = timeColumnIndex >= 0 ? timeColumnIndex : 0
-    console.log("🔍 Using column index for timestamps:", colIndex, "Header:", headers[colIndex])
+    const rows = lines.map((l) => l.split(delimiter))
 
-    // Get timestamps from first few rows (skip header)
-    const timestamps: number[] = []
-    for (let i = 1; i < Math.min(5, lines.length); i++) {
-      const row = lines[i].split(',')
-      if (row[colIndex]) {
-        const val = row[colIndex].trim()
-        // Check if it's a Unix timestamp (number)
-        const timestamp = parseInt(val, 10)
-        if (!isNaN(timestamp) && timestamp > 1000000000) { // Valid Unix timestamp
-          timestamps.push(timestamp)
-        }
+    // Normalise the first row so header tokens like "<DATE>" read as "date".
+    const header = rows[0].map((c) => c.trim().toLowerCase().replace(/^[<"]+|[">]+$/g, ''))
+    const HEADER_WORDS = ['time', 'timestamp', 'datetime', 'date', 'unix', 'epoch',
+      'open', 'high', 'low', 'close', 'volume', 'tickvol', 'vol', 'spread']
+    const hasHeader = header.some((h) => HEADER_WORDS.includes(h))
+
+    // Resolve which column(s) carry the timestamp.
+    //   dateIdx + timeIdx : combine two columns ("2024.07.19" + "10:00:00")
+    //   singleIdx         : one column holds the whole stamp (datetime or unix)
+    let dateIdx = -1
+    let timeIdx = -1
+    let singleIdx = -1
+
+    if (hasHeader) {
+      dateIdx = header.findIndex((h) => h === 'date')
+      timeIdx = header.findIndex((h) => h === 'time')
+      singleIdx = header.findIndex((h) => h === 'datetime' || h === 'timestamp' || h === 'unix' || h === 'epoch')
+      if (dateIdx >= 0 && timeIdx >= 0) {
+        singleIdx = -1 // prefer combining the split columns
+      } else if (singleIdx < 0) {
+        // A lone "time" (or "date") column here holds the full stamp.
+        if (timeIdx >= 0) { singleIdx = timeIdx; timeIdx = -1 }
+        else if (dateIdx >= 0) { singleIdx = dateIdx; dateIdx = -1 }
+        else { singleIdx = 0 } // unknown headers: assume the first column
       }
+    } else {
+      // Headerless MT4 export: infer date/time columns positionally from the
+      // first data row, and count that row as data (there is no header to skip).
+      const first = rows[0]
+      dateIdx = first.findIndex((c) => /^\d{4}[.\-/]\d{2}[.\-/]\d{2}$/.test(c.trim()))
+      timeIdx = first.findIndex((c) => /^\d{1,2}:\d{2}(:\d{2})?$/.test(c.trim()))
+      if (dateIdx < 0 || timeIdx < 0) {
+        dateIdx = -1
+        timeIdx = -1
+        singleIdx = 0 // a single datetime or unix column
+      }
+    }
+
+    const dataStart = hasHeader ? 1 : 0
+    console.log("🔍 Timestamp columns:", { delimiter: JSON.stringify(delimiter), hasHeader, dateIdx, timeIdx, singleIdx })
+
+    // Sample a window of rows — enough to survive a session/weekend gap.
+    const timestamps: number[] = []
+    for (let i = dataStart; i < Math.min(dataStart + 50, rows.length); i++) {
+      const row = rows[i]
+      if (!row) continue
+      let cell: string | undefined
+      if (dateIdx >= 0 && timeIdx >= 0) {
+        const d = row[dateIdx]?.trim()
+        const t = row[timeIdx]?.trim()
+        if (!d) continue
+        cell = t ? `${d} ${t}` : d
+      } else if (singleIdx >= 0) {
+        cell = row[singleIdx]
+      }
+      if (!cell) continue
+      const timestamp = parseTimestampCell(cell)
+      if (timestamp !== null) timestamps.push(timestamp)
     }
 
     console.log("🔍 Extracted timestamps:", timestamps)
@@ -1010,13 +1206,21 @@ export default function StrategyTestingPage() {
       differences.push(timestamps[i] - timestamps[i - 1])
     }
 
-    // Get the most common difference (in case of gaps)
-    const avgDiff = differences.reduce((a, b) => a + b, 0) / differences.length
-    const timeframeSeconds = Math.round(avgDiff)
+    // Median, not mean: one weekend or session gap drags an average far past
+    // the real bar size, which would mislabel the file's timeframe.
+    const positive = differences.filter((d) => d > 0).sort((a, b) => a - b)
+    if (positive.length === 0) {
+      return { detected: false, timeframeMinutes: 0, timeframeLabel: '', matchesRequired: false }
+    }
+    const timeframeSeconds = positive[Math.floor(positive.length / 2)]
     const timeframeMinutes = Math.round(timeframeSeconds / 60)
 
     console.log("🔍 Timestamp differences (seconds):", differences)
-    console.log("🔍 Average difference:", avgDiff, "seconds =", timeframeMinutes, "minutes")
+    console.log("🔍 Median difference:", timeframeSeconds, "seconds =", timeframeMinutes, "minutes")
+
+    if (timeframeMinutes <= 0) {
+      return { detected: false, timeframeMinutes: 0, timeframeLabel: '', matchesRequired: false }
+    }
 
     // Convert minutes to human-readable label
     let timeframeLabel = ''
@@ -1030,15 +1234,11 @@ export default function StrategyTestingPage() {
 
     console.log("🔍 Detected timeframe:", timeframeLabel, `(${timeframeMinutes} minutes)`)
 
-    // Check if detected timeframe matches any required timeframe
-    const timeframeToMinutes: { [key: string]: number } = {
-      "1min": 1, "5min": 5, "15min": 15, "20min": 20, "30min": 30, "36min": 36, "45min": 45,
-      "1h": 60, "2h": 120, "3h": 180, "4h": 240, "6h": 360, "8h": 480, "12h": 720,
-      "1d": 1440, "1 day": 1440, "1w": 10080, "1 week": 10080
-    }
-
+    // Check if detected timeframe matches any required timeframe. Uses the
+    // shared parser rather than a hardcoded table, which silently failed for
+    // any timeframe not in the list (6min, 36min, 2min, ...).
     const matchesRequired = requiredTimeframes.some(tf => {
-      const requiredMinutes = timeframeToMinutes[tf.toLowerCase()]
+      const requiredMinutes = timeframeToMinutes(tf)
       if (requiredMinutes) {
         // Allow some tolerance (±5% or ±1 minute for small timeframes)
         const tolerance = Math.max(1, requiredMinutes * 0.05)
@@ -1090,13 +1290,17 @@ export default function StrategyTestingPage() {
     return hasTimeframeColumn
   }
 
-  const handleFile = (file: File) => {
+  // `targetSlot` is the required-timeframe slot the file was dropped into. When
+  // present, the file is bound to that slot explicitly (the source of truth for
+  // submission) and its cadence is only cross-checked against the slot, warning
+  // on a mismatch rather than moving the file.
+  const handleFile = (file: File, targetSlot?: string) => {
     // Only allow .py and .csv files. Update here if you want to support more types.
     const fileExtension = file.name.split(".").pop()?.toLowerCase()
     if (fileExtension === "py" || fileExtension === "csv") {
       setInputFile(file)
       setCurrentFile(file.name)
-      setUploadedFiles([...uploadedFiles, file.name])
+      setUploadedFiles((prev) => (prev.includes(file.name) ? prev : [...prev, file.name]))
 
       // Store the actual File object
       setFileObjects((prev) => ({
@@ -1104,52 +1308,86 @@ export default function StrategyTestingPage() {
         [file.name]: file,
       }))
 
+      // Bind this file to the slot it was dropped into, replacing whatever was
+      // there. Re-uploading the same file into a second slot moves it.
+      if (targetSlot) {
+        setSlotFiles((prev) => {
+          const next: Record<string, string> = {}
+          for (const [tf, fname] of Object.entries(prev)) {
+            if (tf !== targetSlot && fname !== file.name) next[tf] = fname
+          }
+          next[targetSlot] = file.name
+          return next
+        })
+      }
+
       // For CSV files, check timestamps to detect timeframe
       if (fileExtension === "csv") {
         const reader = new FileReader()
         reader.onload = (e) => {
           const content = e.target?.result as string
           if (content) {
-            console.log("🔍 File upload validation:", {
-              filename: file.name,
-              requiredTimeframes,
-              fileExtension
-            })
-
-            // Primary check: detect timeframe from timestamps
+            // Detect bar cadence from the file's own timestamps.
             const timestampResult = detectTimeframeFromTimestamps(content)
 
-            // Fallback checks
+            // Remember the measured cadence for the slot cross-check display.
+            if (timestampResult.detected && timestampResult.timeframeMinutes > 0) {
+              setFileTimeframeMinutes((prev) => ({
+                ...prev,
+                [file.name]: timestampResult.timeframeMinutes,
+              }))
+            }
+
+            // With an explicit slot, the user's choice wins. Cadence only
+            // confirms or warns — it never reassigns.
+            if (targetSlot) {
+              const target = timeframeToMinutes(targetSlot)
+              if (
+                timestampResult.detected &&
+                target != null &&
+                Math.abs(timestampResult.timeframeMinutes - target) > Math.max(1, target * 0.05)
+              ) {
+                showToast(
+                  `Heads up: this file looks like ${timestampResult.timeframeLabel} data but you placed it in the ${targetSlot} slot. Submitting as ${targetSlot} — replace it if that's wrong.`,
+                  'warning',
+                )
+              } else if (timestampResult.detected) {
+                setShowSuccessModal(true)
+                showToast(`${targetSlot} file added (verified ${timestampResult.timeframeLabel} data).`, 'success')
+              } else {
+                // Couldn't read cadence (e.g. tab-separated MT5 export). Accept
+                // the user's assignment; we can't contradict it.
+                setShowSuccessModal(true)
+                showToast(`${targetSlot} file added. Couldn't auto-verify cadence — trusting your slot choice.`, 'success')
+              }
+              return
+            }
+
+            // No explicit slot (legacy path): fall back to the old best-effort
+            // messaging based on cadence / filename.
             const hasValidTimeframeColumn = checkCsvColumnsForTimeframe(content)
             const matchesFilename = requiredTimeframes.some(timeframe =>
               matchesTimeframe(file.name, timeframe)
             )
-
-            console.log("🔍 Validation results:", {
-              timestampResult,
-              hasValidTimeframeColumn,
-              matchesFilename
-            })
-
             if (timestampResult.detected && timestampResult.matchesRequired) {
-              // Best case: timestamp analysis confirms matching timeframe
               setShowSuccessModal(true)
               showToast(`File uploaded successfully! Detected ${timestampResult.timeframeLabel} timeframe data.`, 'success')
             } else if (timestampResult.detected && !timestampResult.matchesRequired) {
-              // Timestamp detected but doesn't match required
               showToast(`File contains ${timestampResult.timeframeLabel} data but required timeframes are: ${requiredTimeframes.join(', ')}. You may get incorrect results.`, 'warning')
             } else if (hasValidTimeframeColumn || matchesFilename) {
-              // Fallback: column names or filename match
               setShowSuccessModal(true)
               showToast(`File uploaded successfully! Valid timeframe pattern found.`, 'success')
             } else {
-              // No valid timeframe detected
               showToast(`File uploaded but couldn't detect timeframe. Required: ${requiredTimeframes.join(', ')}. You may get incorrect results.`, 'warning')
             }
           }
         }
         reader.onerror = () => {
-          // If we can't read the file, fall back to filename matching
+          if (targetSlot) {
+            setShowSuccessModal(true)
+            showToast(`${targetSlot} file added. Couldn't read it to verify cadence.`, 'warning')
+            return
+          }
           const matchesAnyTimeframe = requiredTimeframes.some(timeframe =>
             matchesTimeframe(file.name, timeframe)
           )
@@ -1188,14 +1426,47 @@ export default function StrategyTestingPage() {
     const file = event.target.files?.[0]
     if (file) {
       setInputFile(file)
-      handleFile(file)
+      handleFile(file, activeUploadSlot ?? undefined)
+    }
+    setActiveUploadSlot(null)
+    // Allow re-picking the same filename into another slot.
+    event.target.value = ""
+  }
+
+  // Open the shared file picker for a specific timeframe slot.
+  const handleSlotUploadClick = (timeframe: string) => {
+    setActiveUploadSlot(timeframe)
+    fileInputRef.current?.click()
+  }
+
+  // Drop a file directly onto a timeframe slot.
+  const handleSlotDrop = (e: React.DragEvent<HTMLDivElement>, timeframe: string) => {
+    e.preventDefault()
+    const file = e.dataTransfer.files?.[0]
+    if (file) handleFile(file, timeframe)
+  }
+
+  // Clear a timeframe slot: unbind it and drop the file if nothing else uses it.
+  const handleClearSlot = (timeframe: string) => {
+    const filename = slotFiles[timeframe]
+    setSlotFiles((prev) => {
+      const next = { ...prev }
+      delete next[timeframe]
+      return next
+    })
+    // Only remove the underlying file if no other slot still references it.
+    if (filename && !Object.entries(slotFiles).some(([tf, f]) => tf !== timeframe && f === filename)) {
+      handleDeleteFile(filename)
     }
   }
 
   const [requiredTimeframes, setRequiredTimeframes] = useState<string[]>([])
 
   useEffect(() => {
-    const tf: string[] = JSON.parse(localStorage.getItem("timeframes_required") || "[]")
+    // Migrated on read: strategies saved before the `min` fix still hold `15m`,
+    // which the engine rejects and MetaAPI silently reads as 1d.
+    const tf: string[] = (JSON.parse(localStorage.getItem("timeframes_required") || "[]") as string[])
+      .map(normalizeTimeframe)
     // Tick-level entry or exit needs a finer-timeframe dataset (execution_timeframe).
     const usesTick =
       parsedStatement?.entry_at === "tick" || parsedStatement?.exit_at === "tick"
@@ -1211,6 +1482,64 @@ export default function StrategyTestingPage() {
   // shared canonical-minute matcher so finer timeframes (e.g. "6min" vs
   // "EURUSD_M6.csv") match across naming conventions.
   const matchesTimeframe = matchesTimeframeShared
+
+  // Build the timeframe -> File map submitted to the backend.
+  //
+  // Source of truth is the explicit slot binding the user made in the upload UI
+  // (slotFiles). Any slot left unbound falls back to the content/filename/order
+  // resolver over the still-unclaimed files, so a partially-filled form or a
+  // legacy flow still produces a best-effort mapping.
+  const buildTimeframeFiles = (): Record<string, File> => {
+    const files: Record<string, File> = {}
+    const usedFilenames = new Set<string>()
+
+    for (const tf of requiredTimeframes) {
+      const filename = slotFiles[tf]
+      if (filename && fileObjects[filename]) {
+        files[tf] = fileObjects[filename]
+        usedFilenames.add(filename)
+      }
+    }
+
+    const unresolved = requiredTimeframes.filter((tf) => !files[tf])
+    if (unresolved.length > 0) {
+      const remaining = uploadedFiles.filter((f) => !usedFilenames.has(f))
+      const { files: fallback, guessed } = resolveTimeframeFiles(
+        unresolved,
+        remaining,
+        fileObjects,
+        fileTimeframeMinutes,
+      )
+      Object.assign(files, fallback)
+      if (guessed.length > 1) {
+        showToast(
+          `Couldn't tell which file belongs to ${guessed.join(", ")} — assigning by upload order. Upload a file into each slot to be sure.`,
+          'warning',
+        )
+      }
+    }
+
+    console.log(
+      "📁 Timeframe slot assignment:",
+      Object.fromEntries(Object.entries(files).map(([tf, f]) => [tf, f.name])),
+    )
+
+    return files
+  }
+
+  // Per-slot view model for the upload UI: the file bound to each required
+  // timeframe and whether its measured cadence agrees with that slot.
+  const slotAssignments = requiredTimeframes.map((timeframe) => {
+    const filename = slotFiles[timeframe]
+    const detectedMinutes = filename ? fileTimeframeMinutes[filename] : undefined
+    const target = timeframeToMinutes(timeframe)
+    // undefined = couldn't measure (accept silently); true/false = match result.
+    const cadenceOk =
+      filename == null || detectedMinutes == null || target == null
+        ? undefined
+        : Math.abs(detectedMinutes - target) <= Math.max(1, target * 0.05)
+    return { timeframe, filename, detectedMinutes, cadenceOk }
+  })
 
   // Updated handleRunBacktest function to support both MetaAPI and file upload
   const handleRunBacktest = async () => {
@@ -1240,179 +1569,152 @@ export default function StrategyTestingPage() {
     try {
       setIsLoading(true)
 
-      let result: any
+      // One endpoint, one flow. All three strategy kinds go to
+      // POST /api/run-backtest/, which always answers 202 { run_id } and
+      // delivers the run through job-status; the dev-mode-only synchronous
+      // /api/custom-strategies/backtest/ path is gone.
+      const strategyType = detectStrategyType(parsedStatement)
+      const customStrategyIdForRun = resolveCustomStrategyId(parsedStatement)
+      const isoRange = toIsoDateRange(dateRange)
 
-      // Check if this is a custom strategy
-      const isCustomStrategy = parsedStatement?.is_custom_strategy ||
-        localStorage.getItem("is_custom_strategy") === "true"
-
-      if (isCustomStrategy) {
-        // Use custom strategy backtest API
-        const customStrategyId = parsedStatement?.custom_strategy_id || parsedStatement?.id
-        const symbol = metaAPIConfig?.symbol || "XAUUSD"
-
-        console.log("🔍 Running custom strategy backtest:", {
-          customStrategyId,
-          symbol,
-          isCustomStrategy
-        })
-
-        result = await runCustomStrategyBacktest({
-          strategy_id: customStrategyId,
-          params: parsedStatement?.parameters || {},
-          initial_equity: Number(accountDeposit.replace(/,/g, "")) || 10000,
-          symbol: symbol
-        })
-
-        console.log("Custom strategy backtest result:", result)
-
-        // Handle custom strategy backtest result
-        if (result) {
-          // Normalize the response to match expected format
-          const normalizedResult = {
-            message: result.message || "Custom strategy backtest completed.",
-            custom_strategy_id: result.custom_strategy_id || customStrategyId,
-            custom_strategy_name: result.custom_strategy_name || parsedStatement?.name || "Custom Strategy",
-            data_source: result.data_source || result.metadata?.data_source || "custom",
-            symbol: result.symbol || result.metadata?.symbol || symbol,
-            initial_equity: result.initial_equity || Number(accountDeposit.replace(/,/g, "")) || 10000,
-            final_equity: result.final_equity || 0,
-            return_percent: result.return_percent ?? result.total_return ?? 0,
-            num_trades: result.num_trades || 0,
-            win_rate_percent: result.win_rate_percent ?? result.win_rate ?? 0,
-            max_drawdown_percent: result.max_drawdown_percent ?? result.max_drawdown ?? 0,
-            sharpe_ratio: result.sharpe_ratio || 0,
-            equity_curve: result.equity_curve || [],
-            trades: result.trades || [],
-            statistics: result.statistics || {
-              win_rate: result.win_rate ?? result.win_rate_percent ?? 0,
-              max_drawdown: result.max_drawdown ?? result.max_drawdown_percent ?? 0,
-              sharpe_ratio: result.sharpe_ratio || 0,
-              total_trades: result.num_trades || 0,
-              total_return: result.total_return ?? result.return_percent ?? 0,
-              profit_factor: result.profit_factor || 0
-            },
-            plot_html: result.plot_html || null,
-            csv_url: result.csv_url || null,
-            summary_stats: extractSummaryStats(result),
-            metadata: result.metadata || {}
+      // Execution settings the Developer-Mode engine honours. The visual
+      // pipeline carries these inside the statement's TradingType instead, so
+      // sending them flat would duplicate — hence dev_mode only.
+      const devTradingType =
+        strategyType === "dev_mode"
+          ? {
+            commission,
+            slippage: Number(slippage) || 0,
+            lot_type: lot,
+            position_size: Number(positionSize) || 1,
+            asset_type: assetType,
           }
+          : null
 
-          // Store the result in sessionStorage for the results page
-          sessionStorage.setItem('customBacktestResult', JSON.stringify(normalizedResult))
+      // Pre-flight size check. MetaAPI pages at ~1000 bars per round trip with
+      // a 0.4s pause and a hard page ceiling, so a wide window on a fine
+      // timeframe is both slow and liable to come back truncated.
+      const estimate = estimateBarCount(isoRange, requiredTimeframes)
+      if (estimate && estimate.bars > 20_000) {
+        showToast(
+          `This window is about ${estimate.bars.toLocaleString()} ${estimate.timeframe} bars. ` +
+          `Expect a slow run, and data may come back truncated — narrow the dates or use a coarser timeframe.`,
+          'warning',
+        )
+      }
 
-          // Set backtest detail for in-page display
-          setBacktestDetail(normalizeBacktestResult(normalizedResult))
-          setBacktestResultTab('chart_data')
-
-          // Also set plot HTML if available
-          if (normalizedResult.plot_html) {
-            setPlotHtml(normalizedResult.plot_html)
-          }
-
-          showToast("Custom strategy backtest completed!", 'success')
-        }
-      } else if (useMetaAPI) {
+      let startData: any
+      if (useMetaAPI) {
         const symbol = metaAPIConfig?.symbol || "XAUUSD"
         const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
         const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
 
         console.log("🔍 Using trading symbol for MetaAPI backtest:", symbol)
-        console.log("🔍 MetaAPI Token available:", !!token)
-        console.log("🔍 MetaAPI Account ID available:", !!accountId)
 
         if (!token || !accountId) {
           throw new Error("MetaAPI credentials not configured. Please check environment variables.")
         }
 
-        // Fire the request — if backend is async it returns {run_id} immediately,
-        // if sync it blocks until done. Either way we handle both.
-        const backtestPromise = runBacktestWithMetaAPI(
-          parsedStatement,
-          token,
-          accountId,
-          symbol,
-          null as any
+        startData = await runBacktestWithMetaAPI(parsedStatement, token, accountId, symbol, null as any, {
+          strategy_type: strategyType,
+          custom_strategy_id: customStrategyIdForRun,
+          // Spread, not two fields: toIsoDateRange returns null unless both
+          // bounds parse, and a lone bound is a 400.
+          ...(isoRange ?? {}),
+          generate_plot: true,
+          trading_type: devTradingType,
+        })
+      } else {
+        startData = await (runBacktest as any)({
+          statement: parsedStatement,
+          files: buildTimeframeFiles(),
+          strategy_type: strategyType,
+          custom_strategy_id: customStrategyIdForRun,
+          // Dev-mode slices the uploaded file to this window; for no-code CSV
+          // the backend ignores dates, so sending them would imply a guarantee
+          // that isn't there.
+          ...(strategyType === "dev_mode" && isoRange ? isoRange : {}),
+          generate_plot: true,
+          trading_type: devTradingType,
+        })
+      }
+
+      console.log("Backtest started:", startData)
+      // The backend echoes its own classification. Disagreement means our
+      // detector is wrong and the run is not what the user thinks it is.
+      if (startData?.strategy_type && startData.strategy_type !== strategyType) {
+        console.warn(
+          `strategy_type mismatch — declared '${strategyType}', backend ran '${startData.strategy_type}'`,
+          startData?.components,
         )
+      }
 
-        // Wait for response — async backend resolves fast with run_id, sync backend blocks
-        const startData = await backtestPromise
-        console.log("Backtest response:", startData)
-        console.log("run_id:", startData?.run_id, "| status:", startData?.status)
+      if (!startData?.run_id) {
+        throw new Error(startData?.error || "Backtest did not start — no run_id returned.")
+      }
 
-        if (startData?.run_id && startData?.status === 'started') {
-          backtestRunIdRef.current = startData.run_id
-          console.log("✅ Async mode — stored run_id:", startData.run_id)
-          const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000 })
-          backtestPollerRef.current = stop
-          try {
-            result = await promise
-          } catch (e: any) {
-            if (e?.message === 'cancelled') return // user cancelled — stop processing
-            throw e
-          }
-          backtestPollerRef.current = null
-        } else {
-          console.log("ℹ️ Sync mode — full result returned directly (cancel not supported in sync mode)")
-          result = startData
+      backtestRunIdRef.current = startData.run_id
+      const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000 })
+      backtestPollerRef.current = stop
+      let job: any
+      try {
+        job = await promise
+      } catch (e: any) {
+        if (e?.message === 'cancelled') return // user cancelled — stop processing
+        throw e
+      }
+      backtestPollerRef.current = null
+
+      // job-status nests the run body under `result`.
+      const result: any = job?.result ?? job
+
+      const shortfall = coverageShortfallMessage(job, result, isoRange)
+      if (shortfall) showToast(shortfall, 'warning')
+
+      if (result?.plot_html) setPlotHtml(result.plot_html)
+
+      if (strategyType === "dev_mode") {
+        // No backtest_result_id to re-fetch for dev-mode: the polled body is
+        // the whole result, shown in-page and cached for the results page.
+        const normalizedResult = {
+          message: result.message || "Custom strategy backtest completed.",
+          custom_strategy_id: result.custom_strategy_id || customStrategyIdForRun,
+          custom_strategy_name: result.custom_strategy_name || parsedStatement?.name || "Custom Strategy",
+          data_source: result.data_source || result.metadata?.data_source || "custom",
+          symbol: result.symbol || result.metadata?.symbol || metaAPIConfig?.symbol || "XAUUSD",
+          initial_equity: result.initial_equity || Number(accountDeposit.replace(/,/g, "")) || 10000,
+          final_equity: result.final_equity || 0,
+          return_percent: result.return_percent ?? result.total_return ?? 0,
+          num_trades: result.num_trades || 0,
+          win_rate_percent: result.win_rate_percent ?? result.win_rate ?? 0,
+          max_drawdown_percent: result.max_drawdown_percent ?? result.max_drawdown ?? 0,
+          sharpe_ratio: result.sharpe_ratio || 0,
+          equity_curve: result.equity_curve || [],
+          trades: result.trades || [],
+          statistics: result.statistics || {
+            win_rate: result.win_rate ?? result.win_rate_percent ?? 0,
+            max_drawdown: result.max_drawdown ?? result.max_drawdown_percent ?? 0,
+            sharpe_ratio: result.sharpe_ratio || 0,
+            total_trades: result.num_trades || 0,
+            total_return: result.total_return ?? result.return_percent ?? 0,
+            profit_factor: result.profit_factor || 0
+          },
+          indicators: result.indicators || {},
+          plot_html: result.plot_html || null,
+          csv_url: result.csv_url || null,
+          summary_stats: extractSummaryStats(result),
+          metadata: result.metadata || {}
         }
 
-        // Handle plot HTML
-        if (result?.plot_html) {
-          setPlotHtml(result.plot_html)
-        }
-
-        // Handle trades CSV data — redirect to results page
-        const resultId = result?.backtest_result_id || result?.backtest_id || result?.result?.backtest_result_id
+        sessionStorage.setItem('customBacktestResult', JSON.stringify(normalizedResult))
+        setBacktestDetail(normalizeBacktestResult(normalizedResult))
+        setBacktestResultTab('chart_data')
+        showToast("Custom strategy backtest completed!", 'success')
+      } else {
+        const resultId = result?.backtest_result_id || result?.backtest_id || job?.backtest_result_id
         if (resultId) {
           showToast("Backtest completed!", 'success')
           loadBacktestResult(resultId, result)
-        } else if (result?.trades_csv) {
-          showToast("Backtest completed but no result ID returned.", 'warning')
-        } else if (!result?.plot_html) {
-          showToast("Backtest completed but no data returned", 'error')
-        }
-      } else {
-        // File upload method
-        const timeframeFiles: Record<string, File> = {}
-        requiredTimeframes.forEach((timeframe, index) => {
-          const filename = uploadedFiles[index]
-          if (filename && fileObjects[filename]) timeframeFiles[timeframe] = fileObjects[filename]
-        })
-        uploadedFiles.forEach((filename) => {
-          if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
-            timeframeFiles[filename.split(".")[0]] = fileObjects[filename]
-          }
-        })
-
-        // Step 1: start the job
-        const startData = await (runBacktest as any)({ statement: parsedStatement, files: timeframeFiles })
-        console.log("Backtest response:", startData)
-        console.log("run_id:", startData?.run_id, "| status:", startData?.status)
-
-        if (startData?.run_id && startData?.status === 'started') {
-          backtestRunIdRef.current = startData.run_id
-          console.log("✅ Async mode — stored run_id:", startData.run_id)
-          const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000 })
-          backtestPollerRef.current = stop
-          try {
-            result = await promise
-          } catch (e: any) {
-            if (e?.message === 'cancelled') return
-            throw e
-          }
-          backtestPollerRef.current = null
-        } else {
-          console.log("ℹ️ Sync mode — full result returned directly")
-          result = startData
-        }
-
-        if (result?.plot_html) setPlotHtml(result.plot_html)
-
-        const resultId2 = result?.backtest_result_id || result?.backtest_id || result?.result?.backtest_result_id
-        if (resultId2) {
-          showToast("Backtest completed!", 'success')
-          loadBacktestResult(resultId2, result)
         } else if (result?.trades_csv) {
           showToast("Backtest completed but no result ID returned.", 'warning')
         } else if (!result?.plot_html) {
@@ -1506,6 +1808,27 @@ export default function StrategyTestingPage() {
     })
   }
 
+  // Guard every optimisation entry point: a row flagged Optimise but missing
+  // start/stop/step reaches the backend without bounds and comes back with
+  // that parameter never optimised, so prompt for the values instead of
+  // running. `rows` narrows the check to a subset of the form (custom
+  // strategies validate only their own rows); omit it to check the whole form.
+  const hasCompleteOptimisationRanges = (rows?: any[]): boolean => {
+    let form: any = rows ?? null
+    if (!form) {
+      try {
+        const raw = localStorage.getItem("optimisation_form")
+        form = raw ? JSON.parse(raw) : null
+      } catch {
+        form = null
+      }
+    }
+    const missing = findMissingOptimisationRanges(form)
+    if (missing.length === 0) return true
+    showToast(formatMissingRangeMessage(missing), 'error')
+    return false
+  }
+
   // Optimisation for Developer-Mode (custom Python) strategies. Talks to the
   // dedicated POST /api/custom-strategies/optimise/ endpoint — the visual
   // pipeline (run-optimisation + strategies/<pk>/edit) is keyed to the
@@ -1552,6 +1875,8 @@ export default function StrategyTestingPage() {
       showToast("Mark at least one parameter as Optimise in the Properties tab.", 'error')
       return
     }
+
+    if (!hasCompleteOptimisationRanges(strategyRows)) return
 
     try {
       setIsLoading2(true)
@@ -1631,6 +1956,8 @@ export default function StrategyTestingPage() {
       return
     }
 
+    if (!hasCompleteOptimisationRanges()) return
+
     // Only check for files if NOT using MetaAPI
     if (!useMetaAPI && requiredTimeframes.length > uploadedFiles.length) {
       showToast("Not enough files uploaded for the required timeframes", 'error')
@@ -1643,21 +1970,7 @@ export default function StrategyTestingPage() {
 
       // Only process files if NOT using MetaAPI
       if (!useMetaAPI) {
-        // Directly map each required timeframe to the uploaded file in order
-        requiredTimeframes.forEach((timeframe, index) => {
-          const filename = uploadedFiles[index]
-          if (filename && fileObjects[filename]) {
-            timeframeFiles[timeframe] = fileObjects[filename]
-          }
-        })
-
-        // Add unmatched remaining files to the form with filename as key (optional fallback)
-        uploadedFiles.forEach((filename) => {
-          if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
-            const key = filename.split(".")[0]
-            timeframeFiles[key] = fileObjects[filename]
-          }
-        })
+        timeframeFiles = buildTimeframeFiles()
       }
 
       // Get optimisation form from localStorage to extract Parameters and Constraints
@@ -1891,6 +2204,8 @@ export default function StrategyTestingPage() {
       return
     }
 
+    if (!hasCompleteOptimisationRanges()) return
+
     // Only check for files if NOT using MetaAPI
     if (!useMetaAPI && requiredTimeframes.length > uploadedFiles.length) {
       showToast("Not enough files uploaded for the required timeframes", 'error')
@@ -1903,21 +2218,7 @@ export default function StrategyTestingPage() {
 
       // Only process files if NOT using MetaAPI
       if (!useMetaAPI) {
-        // Directly map each required timeframe to the uploaded file in order
-        requiredTimeframes.forEach((timeframe, index) => {
-          const filename = uploadedFiles[index]
-          if (filename && fileObjects[filename]) {
-            timeframeFiles[timeframe] = fileObjects[filename]
-          }
-        })
-
-        // Add unmatched remaining files to the form with filename as key (optional fallback)
-        uploadedFiles.forEach((filename) => {
-          if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
-            const key = filename.split(".")[0]
-            timeframeFiles[key] = fileObjects[filename]
-          }
-        })
+        timeframeFiles = buildTimeframeFiles()
       }
 
       // Get walk forward settings from localStorage
@@ -2325,6 +2626,21 @@ export default function StrategyTestingPage() {
     delete newFileObjects[fileName]
     setFileObjects(newFileObjects)
 
+    setFileTimeframeMinutes((prev) => {
+      const next = { ...prev }
+      delete next[fileName]
+      return next
+    })
+
+    // Unbind any slot that pointed at this file.
+    setSlotFiles((prev) => {
+      const next: Record<string, string> = {}
+      for (const [tf, fname] of Object.entries(prev)) {
+        if (fname !== fileName) next[tf] = fname
+      }
+      return next
+    })
+
     if (currentFile === fileName) {
       setCurrentFile("")
       setInputFile(null)
@@ -2344,7 +2660,19 @@ export default function StrategyTestingPage() {
     }
   }
 
-  const [dateRange, setDateRange] = useState("2024.02.01 - 2024.08.01")
+  // Empty until the mount effect below fills it in — this page is statically
+  // prerendered, so computing "today" during render would bake the build date
+  // into the HTML and mismatch on hydration.
+  const [dateRange, setDateRange] = useState("")
+
+  // Default the backtest window to the last three months, matching the date
+  // picker's "3 months" preset. The functional update is what makes this safe
+  // to declare after the loaders above: it yields to a date_range they already
+  // restored instead of overwriting it.
+  useEffect(() => {
+    setDateRange((current) => current || defaultDateRange())
+  }, [])
+
   const [selectedInstruments, setSelectedInstruments] = useState<string[]>(["XAUUSD"])
   const [accountDeposit, setAccountDeposit] = useState("1,000")
   const [currency, setCurrency] = useState("USD")
@@ -2944,6 +3272,9 @@ export default function StrategyTestingPage() {
    * Step 1: Handle optimization with droplets - show cost dialog
    */
   const handleOptimizationWithDroplets = async (type: 'regular' | 'walk_forward') => {
+    // Check before the cost dialog — a droplet run is billed, so an incomplete
+    // search space should never get as far as the confirmation prompt.
+    if (!hasCompleteOptimisationRanges()) return
     setOptimizationType(type)
     setShowCostDialog(true)
   }
@@ -3027,20 +3358,7 @@ export default function StrategyTestingPage() {
       let timeframeFiles: Record<string, File> = {}
 
       if (!useMetaAPI) {
-        requiredTimeframes.forEach((timeframe, index) => {
-          const filename = uploadedFiles[index]
-          if (filename && fileObjects[filename]) {
-            timeframeFiles[timeframe] = fileObjects[filename]
-          }
-        })
-
-        // Add unmatched remaining files
-        uploadedFiles.forEach((filename) => {
-          if (!Object.values(timeframeFiles).includes(fileObjects[filename])) {
-            const key = filename.split(".")[0]
-            timeframeFiles[key] = fileObjects[filename]
-          }
-        })
+        timeframeFiles = buildTimeframeFiles()
       }
 
       // Get optimisation form settings
@@ -4002,7 +4320,17 @@ export default function StrategyTestingPage() {
                   <div className="sticky top-4 z-50 w-fit ml-5 mt-4 md:ml-10">
                     <button
                       onClick={() => {
-                        router.push(`/strategy-builder/${strategy_id}`)
+                        // Return to the editor the strategy belongs to (ANY-308):
+                        // custom strategies reopen Developer Mode, regular
+                        // strategies the no-code builder.
+                        const isCustom =
+                          parsedStatement?.is_custom_strategy ||
+                          localStorage.getItem("is_custom_strategy") === "true"
+                        if (isCustom) {
+                          router.push(`/strategy-builder?mode=developer&custom=${strategy_id}`)
+                        } else {
+                          router.push(`/strategy-builder/${strategy_id}`)
+                        }
                       }}
                       className="flex items-center gap-2 bg-[#1A1D2D] hover:bg-[#2B2E38] text-white px-4 py-2 rounded-full transition-colors border border-gray-700 shadow-lg"
                       title="Back to Strategy Editor"
@@ -4094,21 +4422,13 @@ export default function StrategyTestingPage() {
                       </div>
                     ) : (
                       <StrategyTab
-                        selectedStrategy={selectedStrategy}
-                        setSelectedStrategy={setSelectedStrategy}
                         requiredTimeframes={requiredTimeframes}
-                        uploadedFiles={uploadedFiles}
-                        matchesTimeframe={matchesTimeframe}
-                        handleFileChange={handleFileChange}
-                        handleDeleteFile={handleDeleteFile}
+                        slotAssignments={slotAssignments}
                         fileInputRef={fileInputRef}
-                        handleClick={handleClick}
-                        isDragging={isDragging}
-                        handleDragOver={handleDragOver}
-                        handleDragLeave={handleDragLeave}
-                        handleDrop={handleDrop}
-                        setShowSuccessModal={setShowSuccessModal}
-                        currentFile={currentFile}
+                        handleFileChange={handleFileChange}
+                        onSlotUpload={handleSlotUploadClick}
+                        onSlotDrop={handleSlotDrop}
+                        onClearSlot={handleClearSlot}
                       />
                     )}
                   </div>
@@ -4143,6 +4463,9 @@ export default function StrategyTestingPage() {
                     setPositionSize={setPositionSize}
                     assetType={assetType}
                     setAssetType={setAssetType}
+                    isDevMode={isDevModeStrategy}
+                    slippage={slippage}
+                    setSlippage={setSlippage}
                     showTradesSummary={showTradesSummary}
                     onShowTradesSummary={() => setShowTradesSummary(true)}
                     initialTradingSession={parsedStatement?.TradingSession}

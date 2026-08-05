@@ -8,6 +8,7 @@ import {
   isOptimizableValue,
   OHLCV_SOURCES,
   schemaToDefaults,
+  normalizeTimeframe,
 } from "@/lib/custom-component-schema"
 import { getCustomComponent } from "@/app/AllApiCalls"
 import { normalizeStoredParameters } from "@/lib/custom-component-schema"
@@ -33,11 +34,13 @@ interface Props {
   }) => void
 }
 
+// `min`, not `m` — see normalizeTimeframe(); bare-m values are rejected by the
+// engine's validator and mis-route to 1d on MetaAPI.
 const TIMEFRAME_OPTIONS = [
-  { value: "1m", label: "1 Minute" },
-  { value: "5m", label: "5 Minutes" },
-  { value: "15m", label: "15 Minutes" },
-  { value: "30m", label: "30 Minutes" },
+  { value: "1min", label: "1 Minute" },
+  { value: "5min", label: "5 Minutes" },
+  { value: "15min", label: "15 Minutes" },
+  { value: "30min", label: "30 Minutes" },
   { value: "1h", label: "1 Hour" },
   { value: "4h", label: "4 Hours" },
   { value: "1d", label: "1 Day" },
@@ -61,7 +64,8 @@ export function CustomComponentPropertiesDialog({
   const [schemaError, setSchemaError] = useState<string | null>(null)
 
   const [values, setValues] = useState<Record<string, ParamRuntimeValue>>({})
-  const [timeframe, setTimeframe] = useState<string>(initialTimeframe || "1h")
+  // Migrated on read: values saved before the `min` fix still hold `15m`.
+  const [timeframe, setTimeframe] = useState<string>(normalizeTimeframe(initialTimeframe) || "1h")
   const [source, setSource] = useState<string>(initialInput || "Close")
   const isPresetTimeframe = TIMEFRAME_OPTIONS.some((o) => o.value === timeframe)
   const [useCustomTimeframe, setUseCustomTimeframe] = useState<boolean>(!!initialTimeframe && !isPresetTimeframe)
@@ -250,7 +254,7 @@ export function CustomComponentPropertiesDialog({
                     type="text"
                     value={timeframe}
                     onChange={(e) => setTimeframe(e.target.value)}
-                    placeholder="e.g. 3m, 45m, 2h, 12h"
+                    placeholder="e.g. 3min, 45min, 2h, 12h"
                     className="flex-1 min-w-0 px-3 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
                   />
                   <button

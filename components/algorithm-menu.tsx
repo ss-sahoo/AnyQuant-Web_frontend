@@ -7,6 +7,7 @@ import { DuplicateStrategyModal } from "@/components/duplicate-strategy-modal"
 import { EditStrategyModal } from "@/components/edit-strategy-modal"
 import { MenuPortal } from "@/components/MenuPortal"
 import type { Algorithm } from "@/lib/types"
+import { isCustomStrategyRow } from "@/lib/builder-mode"
 
 interface AlgorithmMenuProps {
   anchorRef: React.RefObject<HTMLElement>
@@ -55,15 +56,22 @@ export function AlgorithmMenu({ anchorRef, algorithm, onClose, onDelete, onDupli
     onClose() // Close the menu completely when modal is closed
   }
 
+  // Rows from the custom-strategies API: no duplicate or shortlist support
+  // there, and the tester needs the `custom=true` flag. Keyed off the row's
+  // origin, not the badge — a regular strategy can be labelled Developer too.
+  const isDeveloper = isCustomStrategyRow(algorithm.id)
+
   const MenuContent = (
     <div className="w-48 bg-white rounded-md shadow-lg z-[9999] text-sm text-gray-900">
       <button className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={handleEditClick}>
         Edit strategy
       </button>
-      <button className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={handleDuplicateClick}>
-        Duplicate
-      </button>
-      {!isShortlisted && onAddToShortlist && (
+      {!isDeveloper && (
+        <button className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={handleDuplicateClick}>
+          Duplicate
+        </button>
+      )}
+      {!isDeveloper && !isShortlisted && onAddToShortlist && (
         <button
           className="w-full text-left px-4 py-2 hover:bg-gray-100"
           onClick={(e) => {
@@ -79,7 +87,9 @@ export function AlgorithmMenu({ anchorRef, algorithm, onClose, onDelete, onDupli
         className="w-full text-left px-4 py-2 hover:bg-gray-100"
         onClick={(e) => {
           e.stopPropagation()
-          window.location.href = `/strategy-testing?id=${getNumericId()}`
+          window.location.href = isDeveloper
+            ? `/strategy-testing?id=${getNumericId()}&custom=true`
+            : `/strategy-testing?id=${getNumericId()}`
           onClose()
         }}
       >

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { X } from "lucide-react"
 import { DraggableModal } from "./draggable-modal"
 import { CustomTimeframeModal } from "./custom-timeframe-modal"
+import { normalizeTimeframe } from "@/lib/custom-component-schema"
 
 interface CustomIndicatorSettingsModalProps {
   onClose: () => void
@@ -19,11 +20,13 @@ export interface CustomIndicatorSettings {
   input_params: Record<string, any>
 }
 
+// `min`, not `m` — see normalizeTimeframe(); bare-m values are rejected by the
+// engine's validator and mis-route to 1d on MetaAPI.
 const TIMEFRAME_OPTIONS = [
-  { value: "1m", label: "1 Minute" },
-  { value: "5m", label: "5 Minutes" },
-  { value: "15m", label: "15 Minutes" },
-  { value: "30m", label: "30 Minutes" },
+  { value: "1min", label: "1 Minute" },
+  { value: "5min", label: "5 Minutes" },
+  { value: "15min", label: "15 Minutes" },
+  { value: "30min", label: "30 Minutes" },
   { value: "1h", label: "1 Hour" },
   { value: "4h", label: "4 Hours" },
   { value: "1d", label: "1 Day" },
@@ -39,7 +42,8 @@ export function CustomIndicatorSettingsModal({
   componentParameters = {},
   initialSettings,
 }: CustomIndicatorSettingsModalProps) {
-  const [timeframe, setTimeframe] = useState(initialSettings?.timeframe || "1h")
+  // Migrated on read: settings saved before the `min` fix still hold `15m`.
+  const [timeframe, setTimeframe] = useState(normalizeTimeframe(initialSettings?.timeframe) || "1h")
   const [showCustomTimeframeModal, setShowCustomTimeframeModal] = useState(false)
   const [params, setParams] = useState<Record<string, any>>(
     initialSettings?.input_params || componentParameters || {}

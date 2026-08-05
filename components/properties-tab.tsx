@@ -5,6 +5,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Plus, X, Trash2 } from "lucide-react"
 import { applyEdits, validateRows, type PersistableRow } from "@/lib/optimisation-form-persistence"
+import { parseFormNumber } from "@/lib/optimisation-range-validation"
 import { editStrategy } from "@/app/AllApiCalls"
 
 interface Parameter {
@@ -396,10 +397,13 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
           defaultValue = param.default === "" ? (originalParam.default !== undefined ? originalParam.default : "") : param.default
         }
 
+        // parseFormNumber, not Number: a blank cell has to stay absent instead
+        // of collapsing to 0, otherwise an unset bound looks set on reload and
+        // the pre-run range check can't tell the difference.
         let rangeValue: [number, number] | undefined = originalParam.range
         if (param.editable) {
-          const startNum = Number(param.start)
-          const stopNum = Number(param.stop)
+          const startNum = parseFormNumber(param.start)
+          const stopNum = parseFormNumber(param.stop)
           if (!isNaN(startNum) && !isNaN(stopNum)) {
             rangeValue = [startNum, stopNum]
           } else {
@@ -409,7 +413,7 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
 
         let stepValue: number | undefined = originalParam.step
         if (param.editable) {
-          const stepNum = Number(param.step)
+          const stepNum = parseFormNumber(param.step)
           if (!isNaN(stepNum)) {
             stepValue = stepNum
           } else {

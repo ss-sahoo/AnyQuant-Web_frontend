@@ -16,6 +16,10 @@ export default function StrategyBuilderPage() {
 
   const [strategyData, setStrategyData] = useState<any>(null)
   const [strategyId, setStrategyId] = useState<string | null>(null)
+  // True only once the route logic has decided this is a brand-new blank
+  // strategy (vs. an existing one still being fetched) — gates the one-time
+  // mode-preference dialog (ANY-308).
+  const [isNewStrategy, setIsNewStrategy] = useState(false)
   const [activeTab, setActiveTab] = useState("create")
   const [error, setError] = useState<string | null>(null)
   const [strategyName, setStrategyName] = useState("")
@@ -40,6 +44,7 @@ export default function StrategyBuilderPage() {
     const name = searchParams.get("name")
     const inst = searchParams.get("instrument")
     const isNew = searchParams.get("new") === '1' || searchParams.get('new') === 'true'
+    const customId = searchParams.get("custom")
 
     if (name) setStrategyName(name)
     if (inst) setInstrument(inst)
@@ -53,6 +58,20 @@ export default function StrategyBuilderPage() {
         window.localStorage.setItem('strategy_id', id)
       }
       fetchStrategyData(id)
+      return
+    }
+
+    if (customId) {
+      // Deep link straight into Developer Mode with a custom (code-based)
+      // strategy and no regular strategy attached. Clear any stored id —
+      // custom ids collide numerically with regular strategy ids, and the
+      // tester writes the custom id into `strategy_id` (ANY-308).
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem('strategy_id')
+        window.sessionStorage.removeItem('builder_return')
+      }
+      setStrategyId(null)
+      setStrategyData(null)
       return
     }
 
@@ -79,6 +98,7 @@ export default function StrategyBuilderPage() {
         }
         setStrategyId(null)
         setStrategyData(null)
+        setIsNewStrategy(true)
         return
       }
 
@@ -90,6 +110,7 @@ export default function StrategyBuilderPage() {
       } else {
         setStrategyId(null)
         setStrategyData(null)
+        setIsNewStrategy(true)
       }
     } catch {
       // On any error, fall back to blank
@@ -138,7 +159,9 @@ export default function StrategyBuilderPage() {
         <MobileSidebar currentPage="home" />
 
         <div className="flex flex-1 pl-16">
-          <div className="flex-1 flex flex-col">
+          {/* `min-w-0` so wide builder content (e.g. the Developer Mode code
+              editor) can never push the components sidebar off-screen. */}
+          <div className="flex-1 min-w-0 flex flex-col">
             <div className="flex">
               <div
                 className={`relative flex-1 py-3 text-center font-medium cursor-pointer ${activeTab === "create" ? "bg-[#c7c7c7] text-black" : "bg-[#9d9d9d] text-white"
@@ -161,7 +184,14 @@ export default function StrategyBuilderPage() {
 
 
             <StrategyBuilder initialName={strategyName || ""} initialInstrument={instrument || "XAU/USD"}
-              strategyData={strategyData} strategyId={strategyId} />
+              strategyData={strategyData} strategyId={strategyId}
+              isNewStrategy={isNewStrategy}
+              initialMode={searchParams.get("mode") === "developer" ? "developer" : null}
+              initialCustomStrategyId={
+                searchParams.get("custom") && Number.isFinite(Number(searchParams.get("custom")))
+                  ? Number(searchParams.get("custom"))
+                  : null
+              } />
 
           </div>
 

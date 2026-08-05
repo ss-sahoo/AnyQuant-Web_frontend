@@ -4,6 +4,7 @@ import type React from "react"
 import { useEffect, useState } from "react"
 import { X } from "lucide-react"
 import type { Algorithm } from "@/lib/types"
+import { builderRouteForRow } from "@/lib/builder-mode"
 import { useRouter } from "next/navigation"
 import { DraggableModal } from "./modals/draggable-modal"
 
@@ -32,8 +33,7 @@ export function EditStrategyModal({ strategy, onClose, onSave, isEdit = false }:
   const handleProceedToBuilder = (e: React.MouseEvent) => {
     e.stopPropagation()
     onSave(strategyName)
-    const id = strategy.id.toString().split("-")[0]
-    router.push(`/strategy-builder/${id}/`)
+    router.push(builderRouteForRow(strategy.id))
     onClose()
   }
 

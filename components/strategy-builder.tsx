@@ -55,6 +55,8 @@ import {
 import { EditStrategyModal } from "@/components/edit-strategy-modal"
 import { TradingSessionModal } from "./trading-session-modal"
 import type { Algorithm } from "@/lib/types"
+import { getPreferredMode, setPreferredMode } from "@/lib/builder-mode"
+import { BuilderModePreferenceModal } from "@/components/modals/builder-mode-preference-modal"
 import { useToast } from "@/components/ui/use-toast"
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip"
 
@@ -63,6 +65,12 @@ interface StrategyBuilderProps {
   initialInstrument?: string
   strategyData?: any
   strategyId?: string | null
+  /** Open Developer Mode immediately (deep link `?mode=developer`, ANY-308). */
+  initialMode?: "developer" | null
+  /** Custom strategy to load into Developer Mode (deep link `?custom={id}`). */
+  initialCustomStrategyId?: number | null
+  /** True once the route decided this is a brand-new blank strategy — gates the one-time mode-preference dialog. */
+  isNewStrategy?: boolean
 }
 
 // Define the structure for our strategy statements
@@ -254,7 +262,7 @@ function isMacdOperand(operand: any): boolean {
   return !!(operand && typeof operand === "object" && operand.name === "MACD")
 }
 
-export function StrategyBuilder({ initialName, initialInstrument, strategyData, strategyId }: StrategyBuilderProps) {
+export function StrategyBuilder({ initialName, initialInstrument, strategyData, strategyId, initialMode, initialCustomStrategyId, isNewStrategy }: StrategyBuilderProps) {
   const router = useRouter()
   const { toast } = useToast()
   const [activeTab, setActiveTab] = useState("create")
@@ -290,12 +298,60 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const [showHistoricalPriceLevelModal, setShowHistoricalPriceLevelModal] = useState(false)
   const [showCandleSizeModal, setShowCandleSizeModal] = useState(false)
   const [showDerivativeModal, setShowDerivativeModal] = useState(false)
-  const [showDeveloperModeModal, setShowDeveloperModeModal] = useState(false)
+  // Developer Mode view (ANY-308): "fullscreen" overlays the whole page.
+  // `devModeMounted` stays true after the first open so one persistent
+  // DeveloperModePage instance keeps its state (code, compile results) while
+  // hidden.
+  const [devModeView, setDevModeView] = useState<"closed" | "fullscreen">("closed")
+  const [devModeMounted, setDevModeMounted] = useState(false)
+  // Custom strategy the developer editor should load on first open (deep link).
+  const [devModeInitialStrategyId, setDevModeInitialStrategyId] = useState<number | null>(null)
+  // Deep link straight into Developer Mode (?mode=developer, with &custom=<id>
+  // or &new=1) with no regular strategy behind it — closing the editor would
+  // drop the user on a blank builder, so Back leaves for the home page instead.
+  const devModeStandalone = initialMode === "developer" && !strategyId
+  // One-time "no-code or developer?" dialog for first-ever new strategy.
+  const [showModePreferenceDialog, setShowModePreferenceDialog] = useState(false)
   const [showTradingSessionModal, setShowTradingSessionModal] = useState(false)
 
   const [showSaveStrategyModal, setShowSaveStrategyModal] = useState(false)
   const [strategyName, setStrategyName] = useState(initialName || "")
   const [persistedId, setPersistedId] = useState<string | null>(strategyId || null)
+
+  const openDeveloperMode = () => {
+    setDevModeMounted(true)
+    setDevModeView("fullscreen")
+  }
+
+  const closeDeveloperMode = () => {
+    setDevModeView("closed")
+  }
+
+  // Open Developer Mode on deep links (?mode=developer[&custom=]) (ANY-308).
+  // One-shot so a deliberate close isn't fought by later prop/state changes.
+  // For brand-new strategies, apply the stored view preference or ask for it
+  // once.
+  const devModeRestoredRef = useRef(false)
+  useEffect(() => {
+    if (devModeRestoredRef.current) return
+    if (initialMode === "developer") {
+      devModeRestoredRef.current = true
+      if (initialCustomStrategyId) setDevModeInitialStrategyId(initialCustomStrategyId)
+      openDeveloperMode()
+      return
+    }
+    if (isNewStrategy && !strategyId) {
+      const preferred = getPreferredMode()
+      if (preferred === "developer") {
+        devModeRestoredRef.current = true
+        openDeveloperMode()
+      } else if (preferred === null) {
+        devModeRestoredRef.current = true
+        setShowModePreferenceDialog(true)
+      }
+    }
+  }, [initialMode, initialCustomStrategyId, strategyId, isNewStrategy])
+
   const [showPriceSettingsModal, setShowPriceSettingsModal] = useState(false)
   const [showAtCandleModal, setShowAtCandleModal] = useState(false)
   const [selectedCandleNumber, setSelectedCandleNumber] = useState<number | null>(null)
@@ -359,6 +415,21 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     return issues
   }, [statements])
   const isStrategyValid = strategyValidationIssues.length === 0
+
+  // A strategy with no real conditions and no equity rules (mirrors the
+  // signal/global statement filters in buildUnifiedPayload, so the two never
+  // disagree). Dev-mode-focused users keep the no-code side blank on purpose
+  // (ANY-308), so an empty strategy is saveable — it just skips the backend
+  // preflight, which would reject an empty payload.
+  const isEffectivelyEmptyStrategy = useMemo(
+    () =>
+      statements.every(
+        (s) =>
+          !(s.strategy || []).some((cond: any) => cond.inp1 || cond.operator_name) &&
+          (s.Equity || []).length === 0,
+      ),
+    [statements],
+  )
 
   const [activeStatementIndex, setActiveStatementIndex] = useState(0)
   const [selectedTimeframe, setSelectedTimeframe] = useState("3h")
@@ -860,13 +931,19 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   // State for editing custom component in developer mode
   const [editingCustomComponent, setEditingCustomComponent] = useState<any>(null)
 
+  // The one condition behind Back leaving the page entirely: a standalone
+  // Developer Mode deep link, not mid-component-edit. Every other Back path only
+  // hides the editor — it stays mounted with its code intact — so it needs no
+  // unsaved-work prompt (ANY-308).
+  const devModeBackLeavesPage = devModeStandalone && !editingCustomComponent
+
   // Listen for edit-custom-component events from the sidebar
   useEffect(() => {
     const handleEditCustomComponent = (e: CustomEvent) => {
       const component = e.detail
       setEditingCustomComponent(component)
       setCurrentComponentId(component.id)
-      setShowDeveloperModeModal(true)
+      openDeveloperMode()
     }
 
     document.addEventListener("edit-custom-component", handleEditCustomComponent as EventListener)
@@ -3632,8 +3709,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       // Backend preflight — single source of truth. Blocks the save if the
       // backend reports `valid: false` (includes missing/inactive CUSTOM_I,
       // CUSTOM_B:, CUSTOM_TM: references once backend enforces those).
-      const ok = await preflightValidate(unifiedPayload, "save")
-      if (!ok) return
+      // Exception: an effectively empty strategy (ANY-308) skips the preflight
+      // — the validator rejects empty payloads, but users working purely in
+      // Developer Mode need to save with a blank no-code side.
+      if (!isEffectivelyEmptyStrategy) {
+        const ok = await preflightValidate(unifiedPayload, "save")
+        if (!ok) return
+      }
 
       setIsSavingDraft(true)
 
@@ -3654,6 +3736,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
       // Update local state immediately for better UX
       setStrategyName(name)
+
+      if (isEffectivelyEmptyStrategy) {
+        toast({
+          title: "Saved with no entry conditions",
+          description: "Add statements here or build the strategy in Developer Mode.",
+        })
+      }
 
       // Update localStorage with the first statement ID for subsequent edits
       if (firstStatementId) {
@@ -3729,6 +3818,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     componentType?: "indicator" | "behavior" | "trade_management"
     parameters?: ParameterSchema[]
     componentId?: number  // For editing existing components
+    strategyId?: number   // For editing existing custom strategies
   }
 
   interface CompileError {
@@ -3756,10 +3846,20 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   // Helper function to handle Complete Strategy compilation
   const handleStrategyCompile = async (data: CompileData): Promise<CompileResult> => {
     try {
-      // Create or update the strategy
-      let strategyId = currentStrategyId
+      // Create or update the strategy. The editor passes the id of a loaded
+      // strategy in data.strategyId — without it, recompiling a loaded
+      // strategy silently created a duplicate instead of updating it.
+      let strategyId = data.strategyId ?? currentStrategyId
 
-      if (!strategyId) {
+      if (strategyId) {
+        // Persist the edited code before validating, otherwise the compile
+        // validates code the backend never stored.
+        await updateCustomStrategy(strategyId, {
+          code: data.code,
+          ...(data.strategyName ? { name: data.strategyName } : {}),
+        })
+        setCurrentStrategyId(strategyId)
+      } else {
         // Create a new strategy - use provided name or generate one
         const strategyName = data.strategyName || `custom_strategy_${Date.now()}`
         const createResult = await createCustomStrategy({
@@ -4082,52 +4182,72 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   }
 
   // Handler for Developer Mode save (draft)
-  const handleDeveloperModeSave = async (data: CompileData & { isDraft: boolean }): Promise<void> => {
+  const handleDeveloperModeSave = async (
+    data: CompileData & { isDraft: boolean },
+  ): Promise<{ strategyId?: number; componentId?: number }> => {
     try {
       // Handle Complete Strategy save separately
       if (data.codeType === "strategy") {
-        if (currentStrategyId) {
-          // Update existing strategy
-          await updateCustomStrategy(currentStrategyId, {
+        // Prefer the editor's loaded-strategy id — saving a strategy loaded
+        // from the list must update it, not create a duplicate.
+        const existingStrategyId = data.strategyId ?? currentStrategyId
+        let savedStrategyId = existingStrategyId
+        if (existingStrategyId) {
+          await updateCustomStrategy(existingStrategyId, {
             code: data.code,
           })
-          console.log("Updated custom strategy:", currentStrategyId)
+          setCurrentStrategyId(existingStrategyId)
+          console.log("Updated custom strategy:", existingStrategyId)
         } else {
-          // Create a new strategy as draft - use provided name or generate one
-          const strategyName = data.strategyName || `custom_strategy_${Date.now()}`
+          // A saved strategy is a real backend record named by the user — no
+          // generated `custom_strategy_<timestamp>` fallback (ANY-308). The
+          // editor validates first; this guards direct callers.
+          const strategyName = data.strategyName?.trim()
+          if (!strategyName) throw new Error("Strategy name is required")
           const createResult = await createCustomStrategy({
             name: strategyName,
             code: data.code,
           })
+          savedStrategyId = createResult.id
           setCurrentStrategyId(createResult.id)
           console.log("Created custom strategy draft:", createResult)
+          // Put the newly allotted id in the URL so a refresh (or Back to Home
+          // then forward) reopens the saved strategy instead of a blank editor.
+          if (devModeStandalone) {
+            try {
+              router.replace(`/strategy-builder/?mode=developer&custom=${createResult.id}` as any)
+            } catch { }
+          }
         }
-        console.log("Saved developer mode strategy:", data)
-        return
+        return { strategyId: savedStrategyId ?? undefined }
       }
 
       // Handle Component save — send the full schema.
       const parametersPayload = { parameters: (data.parameters as ParameterSchema[] | undefined) ?? [] }
 
+      const componentName = data.componentName?.trim()
+      if (!componentName) throw new Error("Component name is required")
+
       const componentId = data.componentId || currentComponentId
       if (componentId) {
         await updateCustomComponent(componentId, {
-          name: data.componentName || "Custom Component",
+          name: componentName,
           type: data.componentType || "indicator",
           language: data.language,
           code: data.code,
           parameters: parametersPayload,
         })
-      } else {
-        const createResult = await createCustomComponent({
-          name: data.componentName || "Custom Component",
-          type: data.componentType || "indicator",
-          language: data.language,
-          code: data.code,
-          parameters: parametersPayload,
-        })
-        setCurrentComponentId(createResult.id)
+        return { componentId }
       }
+      const createResult = await createCustomComponent({
+        name: componentName,
+        type: data.componentType || "indicator",
+        language: data.language,
+        code: data.code,
+        parameters: parametersPayload,
+      })
+      setCurrentComponentId(createResult.id)
+      return { componentId: createResult.id }
     } catch (error: any) {
       // Try to surface DRF parameter errors so the editor can highlight rows.
       const { rowErrors, globalErrors } = parseDrfParameterErrors(error?.response)
@@ -5970,9 +6090,9 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
   return (
     <TooltipProvider>
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col">
         {/* Main content area with scrolling */}
-        <div className="flex-1 p-6 overflow-auto">
+        <div className="flex-1 min-w-0 p-6 overflow-auto">
           {/* Header */}
           <div className="flex justify-between items-center mb-6">
             <div className="flex items-center">
@@ -5992,7 +6112,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             <div className="flex gap-3">
               {/* Buy/Sell selector */}
               <button
-                onClick={() => setShowDeveloperModeModal(true)}
+                onClick={openDeveloperMode}
                 className="px-4 py-2 bg-[#151718] rounded-full text-white hover:bg-gray-700 flex items-center gap-2"
               >
                 <Code className="w-4 h-4" />
@@ -6021,7 +6141,66 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             </div>
           </div>
 
-          {/* Statements */}
+          {/* Developer Mode editor — one persistent instance so code, compile
+              results and the loaded strategy survive while it is hidden
+              (ANY-308). Fullscreen relies on `fixed` escaping the scroll
+              container, which holds as long as no ancestor is transformed. */}
+          {devModeMounted && (
+            <div className={devModeView === "fullscreen" ? "fixed inset-0 z-50 bg-[#141721]" : "hidden"}>
+              <DeveloperModePage
+                backLabel={devModeBackLeavesPage ? "Back to Home" : undefined}
+                backLeavesPage={devModeBackLeavesPage}
+                onBack={async () => {
+                  // Opened directly on a custom strategy: there is no builder
+                  // behind this editor, so leave for the home page.
+                  if (devModeBackLeavesPage) {
+                    router.push("/home")
+                    return
+                  }
+                  closeDeveloperMode()
+                  setEditingCustomComponent(null)
+                  setCurrentComponentId(null)
+                  // Refresh custom components list when returning from developer mode
+                  try {
+                    const components = await listCustomComponents()
+                    // Dispatch event to notify sidebar to refresh
+                    window.dispatchEvent(new CustomEvent('refresh-custom-components', { detail: components }))
+                  } catch (error) {
+                    console.error('Failed to refresh custom components:', error)
+                  }
+                }}
+                onCompile={handleDeveloperModeCompile}
+                onSave={handleDeveloperModeSave}
+                onGoToBacktest={(strategyId) => {
+                  setDevModeView("closed")
+                  setEditingCustomComponent(null)
+                  setCurrentComponentId(null)
+                  router.push(`/strategy-testing?id=${strategyId}&custom=true`)
+                }}
+                onLoadStrategies={async () => {
+                  // Load custom strategies list
+                  const strategies = await listCustomStrategies()
+                  return strategies
+                }}
+                onDeleteStrategy={async (strategyId) => {
+                  await deleteCustomStrategy(strategyId)
+                  if (currentStrategyId === strategyId) setCurrentStrategyId(null)
+                }}
+                onLoadStrategy={async (strategyId) => {
+                  // Load a specific custom strategy for editing
+                  const strategy = await getCustomStrategy(strategyId)
+                  return { code: strategy.code || strategy.compiled_code || "", name: strategy.name }
+                }}
+                editingComponent={editingCustomComponent}
+                initialStrategyId={devModeInitialStrategyId}
+                initialCodeType={(devModeInitialStrategyId || initialMode === "developer") ? "strategy" : undefined}
+                onStrategyLoaded={(id) => {
+                  setCurrentStrategyId(id)
+                }}
+              />
+            </div>
+          )}
+
           <div className="space-y-6">
             {statements.map((statement, index) => (
               <div
@@ -9332,50 +9511,15 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           />
         )}
 
-        {/* Developer Mode Full Page */}
-        {showDeveloperModeModal && (
-          <div className="fixed inset-0 z-50 bg-[#141721]">
-            <DeveloperModePage
-              onBack={async () => {
-                setShowDeveloperModeModal(false)
-                setEditingCustomComponent(null)
-                setCurrentComponentId(null)
-                // Refresh custom components list when returning from developer mode
-                try {
-                  const components = await listCustomComponents()
-                  // Dispatch event to notify sidebar to refresh
-                  window.dispatchEvent(new CustomEvent('refresh-custom-components', { detail: components }))
-                } catch (error) {
-                  console.error('Failed to refresh custom components:', error)
-                }
-              }}
-              onCompile={handleDeveloperModeCompile}
-              onSave={handleDeveloperModeSave}
-              onGoToBacktest={(strategyId) => {
-                // Close developer mode and navigate to backtesting
-                setShowDeveloperModeModal(false)
-                setEditingCustomComponent(null)
-                setCurrentComponentId(null)
-                // Navigate to strategy testing page with the custom strategy ID
-                router.push(`/strategy-testing?id=${strategyId}&custom=true`)
-              }}
-              onLoadStrategies={async () => {
-                // Load custom strategies list
-                const strategies = await listCustomStrategies()
-                return strategies
-              }}
-              onDeleteStrategy={async (strategyId) => {
-                // Delete a custom strategy
-                await deleteCustomStrategy(strategyId)
-              }}
-              onLoadStrategy={async (strategyId) => {
-                // Load a specific custom strategy for editing
-                const strategy = await getCustomStrategy(strategyId)
-                return { code: strategy.code || strategy.compiled_code || "", name: strategy.name }
-              }}
-              editingComponent={editingCustomComponent}
-            />
-          </div>
+        {showModePreferenceDialog && (
+          <BuilderModePreferenceModal
+            onClose={() => setShowModePreferenceDialog(false)}
+            onSelect={(mode) => {
+              setPreferredMode(mode)
+              setShowModePreferenceDialog(false)
+              if (mode === "developer") openDeveloperMode()
+            }}
+          />
         )}
 
         {pendingCustomInsert && (
