@@ -56,7 +56,7 @@ import { EditStrategyModal } from "@/components/edit-strategy-modal"
 import { TradingSessionModal } from "./trading-session-modal"
 import type { Algorithm } from "@/lib/types"
 import { getPreferredMode, setPreferredMode } from "@/lib/builder-mode"
-import { BuilderModePreferenceModal } from "@/components/modals/builder-mode-preference-modal"
+import { BuilderModeChoiceModal } from "@/components/modals/builder-mode-choice-modal"
 import { useToast } from "@/components/ui/use-toast"
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip"
 
@@ -65,8 +65,12 @@ interface StrategyBuilderProps {
   initialInstrument?: string
   strategyData?: any
   strategyId?: string | null
-  /** Open Developer Mode immediately (deep link `?mode=developer`, ANY-308). */
-  initialMode?: "developer" | null
+  /**
+   * The builder the caller already picked for this strategy (`?mode=`, ANY-308).
+   * `developer` opens Developer Mode immediately; `nocode` stays on the visual
+   * builder. Either way the choice is settled, so the mode dialog is skipped.
+   */
+  initialMode?: "developer" | "nocode" | null
   /** Custom strategy to load into Developer Mode (deep link `?custom={id}`). */
   initialCustomStrategyId?: number | null
   /** True once the route decided this is a brand-new blank strategy — gates the one-time mode-preference dialog. */
@@ -338,6 +342,12 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       devModeRestoredRef.current = true
       if (initialCustomStrategyId) setDevModeInitialStrategyId(initialCustomStrategyId)
       openDeveloperMode()
+      return
+    }
+    // The caller already asked (Home → Create Algorithm): don't ask again, and
+    // don't let a stored default override the choice made for this strategy.
+    if (initialMode === "nocode") {
+      devModeRestoredRef.current = true
       return
     }
     if (isNewStrategy && !strategyId) {
@@ -9512,7 +9522,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         )}
 
         {showModePreferenceDialog && (
-          <BuilderModePreferenceModal
+          <BuilderModeChoiceModal
             onClose={() => setShowModePreferenceDialog(false)}
             onSelect={(mode) => {
               setPreferredMode(mode)

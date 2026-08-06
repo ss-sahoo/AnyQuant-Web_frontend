@@ -14,7 +14,8 @@ import { Search, X, Code } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { mockAlgorithms, mockShortlistedAlgorithms } from "@/lib/mock-data"
 import type { Algorithm } from "@/lib/types"
-import { isCustomStrategyRow } from "@/lib/builder-mode"
+import { isCustomStrategyRow, type BuilderMode } from "@/lib/builder-mode"
+import { BuilderModeChoiceModal } from "@/components/modals/builder-mode-choice-modal"
 import AuthGuard from "@/hooks/useAuthGuard"
 
 export function ResponsiveTradingPlatform() {
@@ -32,6 +33,7 @@ export function ResponsiveTradingPlatform() {
   const shortlistPageSize = 10
   const [searchQuery, setSearchQuery] = useState("")
   const [isSearchOpen, setIsSearchOpen] = useState(false)
+  const [showTypeDialog, setShowTypeDialog] = useState(false)
 
 // When a Developer-Mode strategy is backtested, the backend creates a
 // placeholder StrategyStatement to hang the BacktestResult off, with
@@ -42,6 +44,30 @@ export function ResponsiveTradingPlatform() {
 // as a list. Keep these rows out of the table.
 const isCustomStrategyStub = (item: any) =>
   !!item?.strategy && !Array.isArray(item.strategy) && item.strategy.custom_strategy_id != null
+
+// Epoch ms of a row's last edit, or 0 when the row carries no usable timestamp.
+// The two list APIs are separate services and do not agree on a field name, so
+// accept the usual aliases and fall back to creation time.
+const lastEditedAt = (item: any): number => {
+  const raw = item?.updated_at ?? item?.modified_at ?? item?.last_modified ?? item?.created_at
+  const t = raw ? new Date(raw).getTime() : NaN
+  return Number.isNaN(t) ? 0 : t
+}
+
+// The numeric id behind a display id (`12-3`, `12-dev-0`), used only to break
+// ties between rows with no timestamp — a higher id means a later insert.
+const rawId = (item: any): number => Number(String(item?.id ?? "").split("-")[0]) || 0
+
+// Most recently edited first, so the list reflects what the user last worked on
+// rather than which API a row came from. Rows the backend gave no timestamp for
+// sink to the bottom, newest id first, instead of claiming the epoch.
+const byLastEdited = (a: Algorithm, b: Algorithm): number => {
+  const ta = lastEditedAt(a)
+  const tb = lastEditedAt(b)
+  if (ta && tb) return tb - ta
+  if (ta || tb) return ta ? -1 : 1
+  return rawId(b) - rawId(a)
+}
 
 const refreshAlgorithms = async (pageToFetch = page, search = searchQuery) => {
   setLoading(true)
@@ -87,7 +113,7 @@ const refreshAlgorithms = async (pageToFetch = page, search = searchQuery) => {
     // Small delay to show loading state smoothly
     await new Promise(resolve => setTimeout(resolve, 100))
 
-    setAlgorithms([...devRows, ...mapped])
+    setAlgorithms([...devRows, ...mapped].sort(byLastEdited))
     setTotalCount(total)
   } catch (err) {
     console.error("Error fetching:", err)
@@ -252,26 +278,32 @@ const refreshShortlistedAlgorithms = async (pageToFetch = shortlistPage) => {
     }
   }
 
- 
-  const handleCreateAlgorithm = () => {
+  // A new strategy must not inherit the last one's id, or the builder reopens
+  // that strategy instead of starting blank.
+  const clearBuilderResidue = () => {
     try {
       if (typeof window !== 'undefined') {
         window.localStorage.removeItem('strategy_id')
         window.sessionStorage.removeItem('builder_saved')
       }
     } catch {}
-    router.push("/strategy-builder?new=1")
+  }
+
+  // Type is fixed at creation and the two builders are different editors, so
+  // Create Algorithm asks first rather than guessing (ANY-308). `mode` travels
+  // in the URL, which also tells the builder the question is already answered.
+  const handleCreateAlgorithm = () => setShowTypeDialog(true)
+
+  const handleSelectNewStrategyType = (mode: BuilderMode) => {
+    setShowTypeDialog(false)
+    clearBuilderResidue()
+    router.push(`/strategy-builder?mode=${mode}&new=1`)
   }
 
   // Standalone Developer Mode entry (ANY-308): build custom components and
   // code-based strategies without opening a no-code strategy first.
   const handleOpenDeveloperMode = () => {
-    try {
-      if (typeof window !== 'undefined') {
-        window.localStorage.removeItem('strategy_id')
-        window.sessionStorage.removeItem('builder_saved')
-      }
-    } catch {}
+    clearBuilderResidue()
     router.push("/strategy-builder?mode=developer&new=1")
   }
 
@@ -479,6 +511,15 @@ const refreshShortlistedAlgorithms = async (pageToFetch = shortlistPage) => {
           )}
         </div>
       </main>
+
+      {showTypeDialog && (
+        <BuilderModeChoiceModal
+          title="What type of strategy?"
+          description="This picks the editor you build in. A strategy's type is set at creation and can't be changed later."
+          onClose={() => setShowTypeDialog(false)}
+          onSelect={handleSelectNewStrategyType}
+        />
+      )}
     </div>
     </AuthGuard>
   )

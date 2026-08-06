@@ -4,30 +4,37 @@ import { X, Code, Blocks } from "lucide-react"
 import { DraggableModal } from "./draggable-modal"
 import type { BuilderMode } from "@/lib/builder-mode"
 
-interface BuilderModePreferenceModalProps {
+interface BuilderModeChoiceModalProps {
+  title?: string
+  description?: string
   onClose: () => void
   onSelect: (mode: BuilderMode) => void
 }
 
 /**
- * One-time dialog shown the first time the strategy creator opens for a new
- * strategy (ANY-308): lets the user pick their default view. The choice is
- * stored as `preferred_builder_mode` and can be changed anytime with the
- * Developer Mode toggle.
+ * Asks which builder a strategy belongs in (ANY-308). Two callers, two meanings,
+ * hence the caller-supplied copy:
+ *
+ * - Home → Create Algorithm asks per strategy, because type is fixed at creation.
+ * - The builder asks once, on the first blank strategy opened without a mode in
+ *   the URL, to record a default view (`preferred_builder_mode`).
  */
-export function BuilderModePreferenceModal({ onClose, onSelect }: BuilderModePreferenceModalProps) {
+export function BuilderModeChoiceModal({
+  title = "How do you build strategies?",
+  description = "Pick your default view. You can switch anytime with the Developer Mode button.",
+  onClose,
+  onSelect,
+}: BuilderModeChoiceModalProps) {
   return (
     <DraggableModal onClose={onClose} className="bg-[#f5f5f5] rounded-lg w-full max-w-md p-6">
       <div>
         <div className="flex justify-between items-center mb-2">
-          <h2 className="text-2xl font-bold text-black">How do you build strategies?</h2>
+          <h2 className="text-2xl font-bold text-black">{title}</h2>
           <button onClick={onClose} className="text-black hover:text-gray-700">
             <X className="w-6 h-6" />
           </button>
         </div>
-        <p className="text-sm text-gray-600 mb-6">
-          Pick your default view. You can switch anytime with the Developer Mode button.
-        </p>
+        <p className="text-sm text-gray-600 mb-6">{description}</p>
 
         <div className="space-y-4">
           <button

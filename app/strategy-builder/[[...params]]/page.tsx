@@ -186,7 +186,13 @@ export default function StrategyBuilderPage() {
             <StrategyBuilder initialName={strategyName || ""} initialInstrument={instrument || "XAU/USD"}
               strategyData={strategyData} strategyId={strategyId}
               isNewStrategy={isNewStrategy}
-              initialMode={searchParams.get("mode") === "developer" ? "developer" : null}
+              initialMode={
+                searchParams.get("mode") === "developer"
+                  ? "developer"
+                  : searchParams.get("mode") === "nocode"
+                    ? "nocode"
+                    : null
+              }
               initialCustomStrategyId={
                 searchParams.get("custom") && Number.isFinite(Number(searchParams.get("custom")))
                   ? Number(searchParams.get("custom"))
