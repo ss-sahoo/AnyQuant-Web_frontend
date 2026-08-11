@@ -9,6 +9,8 @@ export interface SlotAssignment {
   detectedMinutes?: number
   // true = cadence matches slot, false = mismatch, undefined = not measured.
   cadenceOk?: boolean
+  // Code strategies only: the data variables this file is loaded into.
+  variables?: string[]
 }
 
 interface StrategyTabProps {
@@ -100,6 +102,11 @@ export function StrategyTab({
                         <span className="text-xs font-semibold bg-[#85e1fe] text-black rounded-full px-2 py-1 mr-3 shrink-0">
                           {slot.timeframe}
                         </span>
+                        {slot.variables && slot.variables.length > 0 && (
+                          <span className="text-xs font-mono text-[#85e1fe] mr-3 shrink-0">
+                            {slot.variables.join(", ")}
+                          </span>
+                        )}
                         {filled ? (
                           <div className="flex flex-col min-w-0">
                             <span className="text-sm truncate">{slot.filename}</span>

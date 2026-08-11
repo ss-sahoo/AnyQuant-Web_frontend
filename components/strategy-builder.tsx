@@ -52,6 +52,7 @@ import {
   normalizeStoredParameters,
   parseDrfParameterErrors,
 } from "@/lib/custom-component-schema"
+import { type DataBinding, saveDataMapping } from "@/lib/dev-data-mapping"
 import { EditStrategyModal } from "@/components/edit-strategy-modal"
 import { TradingSessionModal } from "./trading-session-modal"
 import type { Algorithm } from "@/lib/types"
@@ -313,7 +314,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   // Deep link straight into Developer Mode (?mode=developer, with &custom=<id>
   // or &new=1) with no regular strategy behind it — closing the editor would
   // drop the user on a blank builder, so Back leaves for the home page instead.
-  const devModeStandalone = initialMode === "developer" && !strategyId
+  // A `custom` id counts on its own: it names a code-only strategy, which has
+  // no no-code side at all, so the intent holds even without `mode`.
+  const devModeStandalone =
+    (initialMode === "developer" || initialCustomStrategyId != null) && !strategyId
   // One-time "no-code or developer?" dialog for first-ever new strategy.
   const [showModePreferenceDialog, setShowModePreferenceDialog] = useState(false)
   const [showTradingSessionModal, setShowTradingSessionModal] = useState(false)
@@ -356,10 +360,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const devModeRestoredRef = useRef(false)
   useEffect(() => {
     if (devModeRestoredRef.current) return
-    if (initialMode === "developer") {
+    if (initialMode === "developer" || initialCustomStrategyId != null) {
       devModeRestoredRef.current = true
       if (initialCustomStrategyId) setDevModeInitialStrategyId(initialCustomStrategyId)
-      openDeveloperMode()
+      // A code-only strategy has no statements behind the editor, so the inline
+      // view would frame it with a no-code builder that can never apply to it —
+      // and inline shows Expand where the user needs Back. Open it full-page.
+      openDeveloperMode(devModeStandalone ? "fullscreen" : "inline")
       return
     }
     // The caller already asked (Home → Create Algorithm): don't ask again, and
@@ -3847,6 +3854,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     parameters?: ParameterSchema[]
     componentId?: number  // For editing existing components
     strategyId?: number   // For editing existing custom strategies
+    dataMapping?: DataBinding[]  // Complete strategies: data variable -> timeframe
   }
 
   interface CompileError {
@@ -3898,6 +3906,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         setCurrentStrategyId(strategyId)
         console.log("Created custom strategy:", createResult)
       }
+
+      // Keyed by the id the record ended up with, so the Strategy Tester can
+      // find the mapping when the strategy is opened for backtesting.
+      if (strategyId && data.dataMapping) saveDataMapping(strategyId, data.dataMapping)
 
       // Validate the strategy code
       const validationResult = await validateCustomStrategyCode({
@@ -4247,6 +4259,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             } catch { }
           }
         }
+        if (savedStrategyId && data.dataMapping) saveDataMapping(savedStrategyId, data.dataMapping)
         return { strategyId: savedStrategyId ?? undefined }
       }
 
@@ -6191,21 +6204,24 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 // above the editor, so Back is only worth showing when it goes
                 // somewhere that toggle can't — off the page.
                 showBack={devModeBackLeavesPage}
-                backLabel={devModeView === "inline" && devModeBackLeavesPage ? "Back to Home" : undefined}
-                // Only the standalone inline Back destroys this editor; collapse
-                // and close both keep it mounted with its code.
-                backLeavesPage={devModeView === "inline" && devModeBackLeavesPage}
+                backLabel={devModeBackLeavesPage ? "Back to Home" : undefined}
+                // Standalone Back navigates away and destroys this editor, from
+                // either view; collapse and close both keep it mounted.
+                backLeavesPage={devModeBackLeavesPage}
                 onBack={async () => {
-                  // Fullscreen is only ever reached by expanding, so Back
+                  // Opened directly on a custom strategy: there is no no-code
+                  // builder behind this editor to fall back to, so Back leaves
+                  // for the home page from either view. Checked before the
+                  // collapse below, which would otherwise strand a code-only
+                  // strategy in the inline no-code frame.
+                  if (devModeBackLeavesPage) {
+                    router.push("/home")
+                    return
+                  }
+                  // Otherwise fullscreen was reached by expanding, so Back
                   // collapses to the inline editor.
                   if (devModeView === "fullscreen") {
                     setDevModeView("inline")
-                    return
-                  }
-                  // Opened directly on a custom strategy: there is no no-code
-                  // builder behind this editor, so leave for the home page.
-                  if (devModeBackLeavesPage) {
-                    router.push("/home")
                     return
                   }
                   await exitDeveloperMode()

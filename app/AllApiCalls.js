@@ -251,6 +251,12 @@ export const sendOtp = async (email) => {
  * `start_date`/`end_date` are ISO YYYY-MM-DD and all-or-nothing — a lone bound
  * is a 400. They slice the uploaded file on the dev-mode path and are ignored
  * for no-code CSV uploads.
+ *
+ * `data_mapping` is dev-mode only: `[{ name, timeframe }]` declaring which data
+ * variable the strategy code reads each uploaded file from. The files are
+ * keyed by timeframe in this same form body, so a row binds `name` to the file
+ * sent under `timeframe`. A no-code statement declares its timeframes on its
+ * conditions and needs none of this.
  */
 export const runBacktest = async ({
   statement,
@@ -262,6 +268,7 @@ export const runBacktest = async ({
   end_date = null,
   generate_plot = null,
   trading_type = null,
+  data_mapping = null,
 }) => {
   const formData = new FormData()
 
@@ -269,6 +276,9 @@ export const runBacktest = async ({
   if (run_id) formData.append("run_id", run_id)
   if (strategy_type) formData.append("strategy_type", strategy_type)
   if (custom_strategy_id != null) formData.append("custom_strategy_id", String(custom_strategy_id))
+  if (data_mapping && data_mapping.length > 0) {
+    formData.append("data_mapping", JSON.stringify(data_mapping))
+  }
   if (start_date && end_date) {
     formData.append("start_date", start_date)
     formData.append("end_date", end_date)
@@ -315,7 +325,8 @@ export const runBacktest = async ({
  * @param {string|null} [run_id]
  * @param {{ strategy_type?: string|null, custom_strategy_id?: number|null,
  *   start_date?: string|null, end_date?: string|null,
- *   generate_plot?: boolean|null, trading_type?: Object|null }} [options]
+ *   generate_plot?: boolean|null, trading_type?: Object|null,
+ *   data_mapping?: Array<{name: string, timeframe: string}>|null }} [options]
  */
 export const runBacktestWithMetaAPI = async (
   strategy,
@@ -330,6 +341,7 @@ export const runBacktestWithMetaAPI = async (
     end_date = null,
     generate_plot = null,
     trading_type = null,
+    data_mapping = null,
   } = {},
 ) => {
   console.log('🔍 MetaAPI Debug Info:', {
@@ -349,6 +361,10 @@ export const runBacktestWithMetaAPI = async (
   if (run_id) formData.append('run_id', run_id);
   if (strategy_type) formData.append('strategy_type', strategy_type);
   if (custom_strategy_id != null) formData.append('custom_strategy_id', String(custom_strategy_id));
+  // See runBacktest: dev-mode only, binds data variables to timeframes.
+  if (data_mapping && data_mapping.length > 0) {
+    formData.append('data_mapping', JSON.stringify(data_mapping));
+  }
   // All-or-nothing: a lone bound is a 400.
   if (start_date && end_date) {
     formData.append('start_date', start_date);

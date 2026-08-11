@@ -297,14 +297,14 @@ const refreshShortlistedAlgorithms = async (pageToFetch = shortlistPage) => {
   const handleSelectNewStrategyType = (mode: BuilderMode) => {
     setShowTypeDialog(false)
     clearBuilderResidue()
-    router.push(`/strategy-builder?mode=${mode}&new=1`)
+    router.push(`/strategy-builder/?mode=${mode}&new=1`)
   }
 
   // Standalone Developer Mode entry (ANY-308): build custom components and
   // code-based strategies without opening a no-code strategy first.
   const handleOpenDeveloperMode = () => {
     clearBuilderResidue()
-    router.push("/strategy-builder?mode=developer&new=1")
+    router.push("/strategy-builder/?mode=developer&new=1")
   }
 
   return (

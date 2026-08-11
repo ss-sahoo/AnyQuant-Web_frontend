@@ -85,8 +85,11 @@ export function isCustomStrategyRow(displayId: string | number): boolean {
  */
 export function builderRouteForRow(displayId: string | number): string {
   const id = String(displayId).split("-")[0]
+  // Trailing slash before the query: next.config has `trailingSlash: true`, so
+  // `/strategy-builder?…` takes a redirect on the way in — and the query is
+  // what carries the Developer-Mode intent.
   return isCustomStrategyRow(displayId)
-    ? `/strategy-builder?mode=developer&custom=${id}`
+    ? `/strategy-builder/?mode=developer&custom=${id}`
     : `/strategy-builder/${id}/`
 }
 

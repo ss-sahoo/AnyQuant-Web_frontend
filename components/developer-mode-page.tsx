@@ -13,6 +13,15 @@ import {
   normalizeStoredParameters,
   validateSchemas,
 } from "@/lib/custom-component-schema"
+import {
+  DataBinding,
+  DATA_TIMEFRAME_OPTIONS,
+  dataMappingTimeframes,
+  defaultDataMapping,
+  isPresetTimeframe,
+  loadDataMapping,
+  validateDataMapping,
+} from "@/lib/dev-data-mapping"
 
 // Dynamically import Monaco Editor to avoid SSR issues
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false })
@@ -83,6 +92,8 @@ interface CompileData {
   parameters?: ParameterSchema[]
   componentId?: number  // For editing existing components
   strategyId?: number   // For editing existing custom strategies
+  /** Complete strategies only: which data variable is fed by which timeframe. */
+  dataMapping?: DataBinding[]
 }
 
 interface SaveData extends CompileData {
@@ -744,6 +755,11 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
   ])
   const [parameterRowErrors, setParameterRowErrors] = useState<Record<number, string>>({})
   const [serverParamErrors, setServerParamErrors] = useState<Record<number, string[]>>({})
+  // Complete-strategy data files: variable name -> timeframe of the file that
+  // fills it. Code strategies declare nothing about their data, so this is what
+  // the Strategy Tester turns into upload slots and sends with the backtest.
+  const [dataMapping, setDataMapping] = useState<DataBinding[]>(defaultDataMapping)
+  const [dataMappingRowErrors, setDataMappingRowErrors] = useState<Record<number, string>>({})
   const [code, setCode] = useState(PYTHON_COMPONENT_TEMPLATE)
   const [isCompiling, setIsCompiling] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -811,6 +827,8 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
       setCodeType("strategy")  // Set code type to strategy
       setCode(strategy.code)
       setStrategyName(strategy.name)
+      setDataMapping(loadDataMapping(strategyId) ?? defaultDataMapping())
+      setDataMappingRowErrors({})
       setEditingStrategyId(strategyId)
       setCompiledStrategyId(strategyId)
       setShowStrategiesList(false)
@@ -827,6 +845,8 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
       setCodeType("strategy")
       setCode(PYTHON_STRATEGY_TEMPLATE)
       setStrategyName("")
+      setDataMapping(defaultDataMapping())
+      setDataMappingRowErrors({})
       setEditingStrategyId(null)
       setCompiledStrategyId(null)
       setIsDirty(false)
@@ -840,11 +860,20 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
 
   // Load the deep-linked / restored strategy once on mount (ANY-308).
   const initialLoadDoneRef = useRef(false)
+  // True while the deep-linked strategy is still in flight. Switching codeType
+  // to "strategy" retriggers the template effect below, which would otherwise
+  // stamp a blank template into the editor for the length of the fetch.
+  const initialStrategyPendingRef = useRef(false)
   useEffect(() => {
     if (initialLoadDoneRef.current) return
     initialLoadDoneRef.current = true
     if (initialCodeType) setCodeType(initialCodeType)
-    if (initialStrategyId) handleLoadStrategy(initialStrategyId)
+    if (initialStrategyId) {
+      initialStrategyPendingRef.current = true
+      handleLoadStrategy(initialStrategyId).finally(() => {
+        initialStrategyPendingRef.current = false
+      })
+    }
   }, [])
 
   const handleDeleteStrategy = async (strategyId: number) => {
@@ -858,6 +887,8 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
         setCompiledStrategyId(null)
         setCode(PYTHON_STRATEGY_TEMPLATE)
         setStrategyName("")
+        setDataMapping(defaultDataMapping())
+        setDataMappingRowErrors({})
       }
     } catch (error) {
       console.error("Failed to delete strategy:", error)
@@ -909,8 +940,16 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
   // Update strategy template when language changes (only for strategy code)
   useEffect(() => {
     // Don't load template if we're editing an existing component or an
-    // existing custom strategy — that would overwrite the loaded code.
-    if (!isEditing && !editingComponent && editingStrategyId === null && codeType === "strategy") {
+    // existing custom strategy — that would overwrite the loaded code. The
+    // pending check covers the gap before a deep-linked strategy arrives, when
+    // editingStrategyId is still null but the code is on its way.
+    if (
+      !isEditing &&
+      !editingComponent &&
+      editingStrategyId === null &&
+      codeType === "strategy" &&
+      !initialStrategyPendingRef.current
+    ) {
       if (language === "python") {
         setCode(PYTHON_STRATEGY_TEMPLATE)
       } else {
@@ -968,6 +1007,8 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
         })
         return
       }
+    } else if (!validateDataMappingRows()) {
+      return
     }
 
     setIsCompiling(true)
@@ -985,7 +1026,8 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
         componentType: codeType === "component" ? componentType : undefined,
         parameters: codeType === "component" ? parameters : undefined,
         componentId: isEditing && editingComponent ? editingComponent.id : undefined,  // Pass ID when editing
-        strategyId: codeType === "strategy" ? (editingStrategyId ?? compiledStrategyId ?? undefined) : undefined
+        strategyId: codeType === "strategy" ? (editingStrategyId ?? compiledStrategyId ?? undefined) : undefined,
+        dataMapping: codeType === "strategy" ? dataMapping : undefined
       })
       setCompileResult(result)
       setServerParamErrors(result.parameterErrors || {})
@@ -1027,6 +1069,8 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
         })
         return false
       }
+    } else if (!validateDataMappingRows("saving")) {
+      return false
     }
     setIsSaving(true)
     setServerParamErrors({})
@@ -1041,6 +1085,7 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
         parameters: codeType === "component" ? parameters : undefined,
         componentId: isEditing && editingComponent ? editingComponent.id : undefined,  // Pass ID when editing
         strategyId: codeType === "strategy" ? (editingStrategyId ?? compiledStrategyId ?? undefined) : undefined,
+        dataMapping: codeType === "strategy" ? dataMapping : undefined,
         isDraft
       })
       // Adopt the id the backend allotted so the next save updates this record
@@ -1105,6 +1150,47 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
     setIsDirty(false)
     setShowUnsavedModal(false)
     onBack()
+  }
+
+  /**
+   * Blocks compile/save on a malformed mapping — a bad row would otherwise
+   * only surface as a missing dataset once the backtest is already running.
+   */
+  const validateDataMappingRows = (action: "compiling" | "saving" = "compiling"): boolean => {
+    const { rowErrors, globalErrors } = validateDataMapping(dataMapping)
+    setDataMappingRowErrors(rowErrors)
+    const messages = [...Object.values(rowErrors), ...globalErrors]
+    if (messages.length === 0) return true
+    setCompileResult({
+      success: false,
+      message: `Fix the data files before ${action}.`,
+      errors: messages.map((m) => ({ message: m, type: "error" })),
+    })
+    return false
+  }
+
+  const addDataBinding = () => {
+    // Next unused preset, so a second row doesn't silently duplicate the first.
+    const used = new Set(dataMapping.map((row) => row.timeframe))
+    const timeframe = DATA_TIMEFRAME_OPTIONS.find((o) => !used.has(o.value))?.value ?? "1h"
+    setDataMapping([...dataMapping, { name: "", timeframe }])
+    setIsDirty(true)
+  }
+
+  const updateDataBinding = (index: number, patch: Partial<DataBinding>) => {
+    setDataMapping(dataMapping.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+    setIsDirty(true)
+    if (dataMappingRowErrors[index]) {
+      const next = { ...dataMappingRowErrors }
+      delete next[index]
+      setDataMappingRowErrors(next)
+    }
+  }
+
+  const removeDataBinding = (index: number) => {
+    setDataMapping(dataMapping.filter((_, i) => i !== index))
+    setIsDirty(true)
+    setDataMappingRowErrors({})
   }
 
   const addParameter = () => {
@@ -1661,6 +1747,112 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
                 </div>
               </div>
             </>
+          )}
+
+          {/* Data Files (only for strategy type) — the declaration the code
+              can't make for itself: which dataset the backtest loads into which
+              variable. Sent with the backtest so the backend fills each one
+              from the file uploaded for that timeframe. */}
+          {codeType === "strategy" && (
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm text-gray-400">Data Files</label>
+                <button
+                  onClick={addDataBinding}
+                  className="text-xs text-[#85e1fe] hover:text-[#5AB9D1] transition-colors"
+                >
+                  + Add File
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mb-3">
+                Name each dataset your code reads and pick the timeframe of the file that fills it.
+              </p>
+
+              <div className="p-3 bg-[#151718] rounded-lg border border-[#2A2D42]">
+                <div className="grid grid-cols-[1fr_1fr_auto] gap-2 mb-1.5 text-[10px] uppercase tracking-wide text-gray-500">
+                  <span>Variable</span>
+                  <span>Timeframe</span>
+                  <span className="w-5" />
+                </div>
+
+                <div className="space-y-2">
+                  {dataMapping.map((row, index) => {
+                    const rowError = dataMappingRowErrors[index]
+                    // Also true for an empty timeframe: that is the state
+                    // "Custom…" leaves the row in, waiting for the text input.
+                    const custom = !isPresetTimeframe(row.timeframe)
+                    return (
+                      <div key={index}>
+                        <div className="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
+                          <input
+                            type="text"
+                            value={row.name}
+                            onChange={(e) => updateDataBinding(index, { name: e.target.value.trim() })}
+                            placeholder="data"
+                            className={`min-w-0 px-2 py-2 bg-[#0D0F12] border rounded text-white text-xs placeholder-gray-500 focus:outline-none focus:border-[#85e1fe] ${
+                              rowError ? "border-red-500/60" : "border-[#2A2D42]"
+                            }`}
+                          />
+                          <select
+                            value={custom ? "__custom__" : row.timeframe}
+                            onChange={(e) => {
+                              const value = e.target.value
+                              // "Custom…" empties the row so the text input
+                              // below takes over; anything else is a preset.
+                              updateDataBinding(index, {
+                                timeframe: value === "__custom__" ? "" : value,
+                              })
+                            }}
+                            className={`min-w-0 px-2 py-2 bg-[#0D0F12] border rounded text-white text-xs focus:outline-none focus:border-[#85e1fe] ${
+                              rowError ? "border-red-500/60" : "border-[#2A2D42]"
+                            }`}
+                          >
+                            {DATA_TIMEFRAME_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.value}</option>
+                            ))}
+                            <option value="__custom__">Custom…</option>
+                          </select>
+                          <button
+                            onClick={() => removeDataBinding(index)}
+                            className="text-gray-500 hover:text-red-400 transition-colors p-0.5"
+                            title="Remove data file"
+                            aria-label={`Remove data file ${index + 1}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        {custom && (
+                          <input
+                            type="text"
+                            value={row.timeframe}
+                            onChange={(e) => updateDataBinding(index, { timeframe: e.target.value.trim() })}
+                            placeholder="e.g. 36min"
+                            className="w-full mt-2 px-2 py-2 bg-[#0D0F12] border border-[#2A2D42] rounded text-white text-xs placeholder-gray-500 focus:outline-none focus:border-[#85e1fe]"
+                          />
+                        )}
+
+                        {rowError && <p className="mt-1 text-xs text-red-400">{rowError}</p>}
+                      </div>
+                    )
+                  })}
+
+                  {dataMapping.length === 0 && (
+                    <p className="text-xs text-gray-500 py-1">
+                      No data files yet — add one so the backtest knows what to load.
+                    </p>
+                  )}
+                </div>
+
+                {dataMapping.length > 0 && (
+                  <p className="mt-3 pt-3 border-t border-[#2A2D42] text-[11px] text-gray-500">
+                    The Strategy Tester will ask for {dataMappingTimeframes(dataMapping).length} file
+                    {dataMappingTimeframes(dataMapping).length === 1 ? "" : "s"}:{" "}
+                    {dataMappingTimeframes(dataMapping).join(", ")}
+                  </p>
+                )}
+              </div>
+            </div>
           )}
 
           {/* Help Text */}

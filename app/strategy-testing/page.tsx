@@ -68,6 +68,14 @@ import {
   mergeOptimisationRows,
 } from "@/lib/custom-component-params-sync"
 import { normalizeTimeframe, normalizeStatementTimeframes } from "@/lib/custom-component-schema"
+import {
+  type DataBinding,
+  dataMappingTimeframes,
+  defaultDataMapping,
+  loadDataMapping,
+  normalizeDataMapping,
+  variablesForTimeframe,
+} from "@/lib/dev-data-mapping"
 import { AdvancedSettingsModalContent } from "@/components/advanced-settings-modal-content"
 import { PreviousOptimisationView } from '@/components/PreviousOptimisationView'
 import { OptimisationHistoryList } from '@/components/OptimisationHistoryList'
@@ -173,12 +181,19 @@ function estimateBarCount(
  * short — broker history, the page ceiling or a timeout all truncate a wide
  * range — and the run still proceeds on whatever arrived, so staying silent
  * would let a partial window read as a full one.
+ *
+ * Uploaded CSVs are exempt: the backend deliberately ignores the date pickers
+ * for a file and runs it in full, so the file's own range is the answer, not a
+ * shortfall. Comparing it against the picker's default flagged every upload
+ * whose data predates the last few months as truncated, which it never was.
  */
 function coverageShortfallMessage(
   job: any,
   payload: any,
   requested: { start_date: string; end_date: string } | null,
 ): string | null {
+  if (payload?.metadata?.data_source === "file_upload") return null
+
   const window = job?.requested_window
   const askedStart = String(window?.start ?? window?.start_date ?? requested?.start_date ?? "").slice(0, 10)
   const askedEnd = String(window?.end ?? window?.end_date ?? requested?.end_date ?? "").slice(0, 10)
@@ -843,6 +858,16 @@ export default function StrategyTestingPage() {
               const customStrategy = await getCustomStrategy(Number(id))
               console.log("🔍 Loaded custom strategy:", customStrategy)
 
+              // Which data variable the code reads each timeframe from. The
+              // record has no field for it, so Developer Mode leaves it on this
+              // device; a strategy saved before the mapping existed falls back
+              // to the single `data` series the template uses.
+              const storedMapping = normalizeDataMapping(customStrategy.data_mapping)
+              const customDataMapping =
+                storedMapping.length > 0
+                  ? storedMapping
+                  : loadDataMapping(customStrategy.id) ?? defaultDataMapping()
+
               // Transform custom strategy data to match expected format
               strategyData = {
                 id: customStrategy.id,
@@ -868,6 +893,10 @@ export default function StrategyTestingPage() {
                 // Mark as custom strategy for backtest handling
                 is_custom_strategy: true,
                 custom_strategy_id: customStrategy.id,
+                data_mapping: customDataMapping,
+                // Code strategies declare no timeframes on their statements, so
+                // the mapping is what tells the tester which files to ask for.
+                timeframes_required: dataMappingTimeframes(customDataMapping),
               }
             } else {
               // Fetch regular strategy
@@ -1080,19 +1109,37 @@ export default function StrategyTestingPage() {
     }
   }
 
-  // Simple toast notification system
+  // Simple toast notification system.
+  // Toasts sit above the fixed 90px action footer (z-[100]) — anything lower or
+  // closer to the bottom edge renders behind the Run Backtest bar and is
+  // unreadable. They stack in a shared container so several warnings from one
+  // run don't pile up on top of each other.
   const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => {
-    const toast = document.createElement('div');
+    let stack = document.getElementById('aq-toast-stack');
+    if (!stack) {
+      stack = document.createElement('div');
+      stack.id = 'aq-toast-stack';
+      stack.className =
+        'fixed bottom-[106px] left-1/2 transform -translate-x-1/2 z-[300] w-[min(90vw,560px)] flex flex-col-reverse items-center gap-2 pointer-events-none';
+      document.body.appendChild(stack);
+    }
+    const container = stack;
+
     let bgColor = 'bg-[#85e1fe]';
     if (type === 'error') bgColor = 'bg-red-600';
     if (type === 'warning') bgColor = 'bg-yellow-500';
 
-    toast.className = `fixed bottom-10 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded shadow-lg z-50 text-black ${bgColor}`;
+    const toast = document.createElement('div');
+    toast.className = `max-w-full px-5 py-3 rounded shadow-lg text-black text-sm leading-snug text-center whitespace-pre-wrap break-words ${bgColor}`;
     toast.textContent = message;
-    document.body.appendChild(toast);
+    container.appendChild(toast);
+
+    // Coverage/validation warnings run long; 3s isn't enough to read a sentence.
+    const duration = Math.min(12000, 3000 + message.length * 45);
     setTimeout(() => {
-      document.body.removeChild(toast);
-    }, 3000);
+      toast.remove();
+      if (!container.childElementCount) container.remove();
+    }, duration);
   };
 
   // Parse one CSV cell into epoch seconds. Handles unix seconds, unix
@@ -1528,7 +1575,10 @@ export default function StrategyTestingPage() {
   }
 
   // Per-slot view model for the upload UI: the file bound to each required
-  // timeframe and whether its measured cadence agrees with that slot.
+  // timeframe and whether its measured cadence agrees with that slot. For a
+  // code strategy each slot also names the variables it feeds, so the user can
+  // see which dataset in their code they are filling.
+  const dataMapping: DataBinding[] = normalizeDataMapping(parsedStatement?.data_mapping)
   const slotAssignments = requiredTimeframes.map((timeframe) => {
     const filename = slotFiles[timeframe]
     const detectedMinutes = filename ? fileTimeframeMinutes[filename] : undefined
@@ -1538,7 +1588,13 @@ export default function StrategyTestingPage() {
       filename == null || detectedMinutes == null || target == null
         ? undefined
         : Math.abs(detectedMinutes - target) <= Math.max(1, target * 0.05)
-    return { timeframe, filename, detectedMinutes, cadenceOk }
+    return {
+      timeframe,
+      filename,
+      detectedMinutes,
+      cadenceOk,
+      variables: variablesForTimeframe(dataMapping, timeframe),
+    }
   })
 
   // Updated handleRunBacktest function to support both MetaAPI and file upload
@@ -1576,6 +1632,12 @@ export default function StrategyTestingPage() {
       const strategyType = detectStrategyType(parsedStatement)
       const customStrategyIdForRun = resolveCustomStrategyId(parsedStatement)
       const isoRange = toIsoDateRange(dateRange)
+
+      // Which data variable each uploaded file lands in. Declared in the
+      // Developer Mode editor; meaningless for a no-code statement, whose
+      // conditions carry their own timeframes.
+      const devDataMapping =
+        strategyType === "dev_mode" ? normalizeDataMapping(parsedStatement?.data_mapping) : []
 
       // Execution settings the Developer-Mode engine honours. The visual
       // pipeline carries these inside the statement's TradingType instead, so
@@ -1623,6 +1685,7 @@ export default function StrategyTestingPage() {
           ...(isoRange ?? {}),
           generate_plot: true,
           trading_type: devTradingType,
+          data_mapping: devDataMapping.length > 0 ? devDataMapping : null,
         })
       } else {
         startData = await (runBacktest as any)({
@@ -1636,6 +1699,7 @@ export default function StrategyTestingPage() {
           ...(strategyType === "dev_mode" && isoRange ? isoRange : {}),
           generate_plot: true,
           trading_type: devTradingType,
+          data_mapping: devDataMapping.length > 0 ? devDataMapping : null,
         })
       }
 
@@ -4509,11 +4573,7 @@ export default function StrategyTestingPage() {
                             JSON.stringify(fallback)
                           )
                         }
-                        const toast = document.createElement('div')
-                        toast.className = 'fixed bottom-10 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded shadow-lg z-50 text-black bg-[#85e1fe]'
-                        toast.textContent = 'Trade Execution Timing saved'
-                        document.body.appendChild(toast)
-                        setTimeout(() => document.body.removeChild(toast), 2000)
+                        showToast('Trade Execution Timing saved')
                       } catch (e) {
                         console.error('Failed to save trade execution timing:', e)
                       }
@@ -4528,12 +4588,7 @@ export default function StrategyTestingPage() {
                         const updated = { ...(parsedStatement || {}), TradingSession: sessionWithTimezone }
                         setParsedStatement(updated)
                         localStorage.setItem("savedStrategy", JSON.stringify(updated))
-                        // optional toast
-                        const toast = document.createElement('div');
-                        toast.className = 'fixed bottom-10 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded shadow-lg z-50 text-black bg-[#85e1fe]';
-                        toast.textContent = 'Trading Session saved';
-                        document.body.appendChild(toast);
-                        setTimeout(() => document.body.removeChild(toast), 2000);
+                        showToast('Trading Session saved')
                       } catch (e) {
                         console.error('Failed to save TradingSession:', e)
                       }
