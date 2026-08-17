@@ -244,7 +244,9 @@ export default function StrategyTestingPage() {
   // Which slot's upload control is currently open, so the shared hidden <input>
   // knows where a picked file belongs.
   const [activeUploadSlot, setActiveUploadSlot] = useState<string | null>(null)
-  const [showSuccessModal, setShowSuccessModal] = useState(false)
+  // Non-null while a blocking "upload failed" dialog is shown. Successful
+  // uploads no longer pop a dialog — they're conveyed by toast + the slot state.
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const [currentFile, setCurrentFile] = useState("")
   const [inputFile, setInputFile] = useState<File | null>(null)
   const [plotHtml, setPlotHtml] = useState<string | null>(null)
@@ -467,6 +469,32 @@ export default function StrategyTestingPage() {
       return undefined
     }
 
+    // The engine reports its full metric set only inside summary_stats, keyed
+    // by _stats.py's display labels and stringified. The no-code detail
+    // endpoint mirrors ~30 of them into snake_case columns; a dev-mode run
+    // carries only seven scalars at the top level, so without reading through
+    // to summary_stats most of the Summary tab renders N/A.
+    const stats = extractSummaryStats(raw)
+    const statText = (...labels: string[]): string | undefined => {
+      if (!stats) return undefined
+      for (const label of labels) {
+        const v = (stats as any)[label]
+        if (v == null) continue
+        const s = String(v).trim()
+        if (!s || ['nan', 'null', 'none'].includes(s.toLowerCase())) continue
+        return s
+      }
+      return undefined
+    }
+    // The Summary tab calls .toFixed() on these, so a stat has to arrive as a
+    // real number or not at all — the values are strings, some with units.
+    const statNum = (...labels: string[]): number | undefined => {
+      const s = statText(...labels)
+      if (s == null) return undefined
+      const n = Number(s.replace(/[$,%\s]/g, ''))
+      return Number.isFinite(n) ? n : undefined
+    }
+
     return {
       ...raw,
       id: raw.id ?? raw.backtest_result_id,
@@ -474,39 +502,41 @@ export default function StrategyTestingPage() {
       chart_data: raw.chart_data ?? null,
       trades_data: raw.trades_data ?? [],
       plot_html: raw.plot_html ?? '',
-      summary_stats: extractSummaryStats(raw),
-      final_equity: pick('final_equity', 'equity_final', 'balance'),
-      return_percent: pick('return_percent', 'return_pct', 'total_return', 'return'),
-      return_ann_percent: pick('return_ann_percent', 'return_ann', 'annual_return', 'return_ann_percent_value'),
+      summary_stats: stats,
+      final_equity: pick('final_equity', 'equity_final', 'balance') ?? statNum('Equity Final [$]'),
+      return_percent: pick('return_percent', 'return_pct', 'total_return', 'return') ?? statNum('Return [%]'),
+      return_ann_percent: pick('return_ann_percent', 'return_ann', 'annual_return', 'return_ann_percent_value') ?? statNum('Return (Ann.) [%]'),
       win_rate_percent: (() => {
         const v = pick('win_rate_percent', 'win_rate', 'win_rate_pct')
-        if (v == null) return undefined
+        // summary_stats is already a percentage, so it skips the fraction
+        // heuristic below.
+        if (v == null) return statNum('Win Rate [%]')
         return (v > 0 && v <= 1) ? v * 100 : v
       })(),
-      max_drawdown_percent: pick('max_drawdown_percent', 'max_drawdown', 'max_drawdown_pct'),
-      avg_drawdown_percent: pick('avg_drawdown_percent', 'avg_drawdown', 'avg_drawdown_pct'),
-      max_drawdown_duration: pick('max_drawdown_duration'),
-      avg_drawdown_duration: pick('avg_drawdown_duration'),
-      sharpe_ratio: pick('sharpe_ratio', 'sharpe'),
-      sortino_ratio: pick('sortino_ratio', 'sortino'),
-      calmar_ratio: pick('calmar_ratio', 'calmar'),
-      num_trades: pick('num_trades', 'total_trades', 'trades_count'),
-      best_trade_percent: pick('best_trade_percent', 'best_trade', 'best_trade_pct'),
-      worst_trade_percent: pick('worst_trade_percent', 'worst_trade', 'worst_trade_pct'),
-      exposure_time_percent: pick('exposure_time_percent', 'exposure_time', 'exposure'),
-      equity_peak: pick('equity_peak', 'peak_equity', 'peak'),
-      buy_hold_return_percent: pick('buy_hold_return_percent', 'buy_hold_return'),
-      volatility_ann_percent: pick('volatility_ann_percent', 'volatility_ann', 'volatility'),
-      avg_trade_percent: pick('avg_trade_percent', 'avg_trade', 'avg_trade_pct'),
-      max_trade_duration: pick('max_trade_duration'),
-      avg_trade_duration: pick('avg_trade_duration'),
-      profit_factor: pick('profit_factor'),
-      expectancy_percent: pick('expectancy_percent', 'expectancy'),
-      sqn: pick('sqn', 'SQN'),
+      max_drawdown_percent: pick('max_drawdown_percent', 'max_drawdown', 'max_drawdown_pct') ?? statNum('Max. Drawdown [%]'),
+      avg_drawdown_percent: pick('avg_drawdown_percent', 'avg_drawdown', 'avg_drawdown_pct') ?? statNum('Avg. Drawdown [%]'),
+      max_drawdown_duration: pick('max_drawdown_duration') ?? statText('Max. Drawdown Duration'),
+      avg_drawdown_duration: pick('avg_drawdown_duration') ?? statText('Avg. Drawdown Duration'),
+      sharpe_ratio: pick('sharpe_ratio', 'sharpe') ?? statNum('Sharpe Ratio'),
+      sortino_ratio: pick('sortino_ratio', 'sortino') ?? statNum('Sortino Ratio'),
+      calmar_ratio: pick('calmar_ratio', 'calmar') ?? statNum('Calmar Ratio'),
+      num_trades: pick('num_trades', 'total_trades', 'trades_count') ?? statNum('# Trades', 'Total Trades'),
+      best_trade_percent: pick('best_trade_percent', 'best_trade', 'best_trade_pct') ?? statNum('Best Trade [%]'),
+      worst_trade_percent: pick('worst_trade_percent', 'worst_trade', 'worst_trade_pct') ?? statNum('Worst Trade [%]'),
+      exposure_time_percent: pick('exposure_time_percent', 'exposure_time', 'exposure') ?? statNum('Exposure Time [%]'),
+      equity_peak: pick('equity_peak', 'peak_equity', 'peak') ?? statNum('Equity Peak [$]'),
+      buy_hold_return_percent: pick('buy_hold_return_percent', 'buy_hold_return') ?? statNum('Buy & Hold Return [%]'),
+      volatility_ann_percent: pick('volatility_ann_percent', 'volatility_ann', 'volatility') ?? statNum('Volatility (Ann.) [%]'),
+      avg_trade_percent: pick('avg_trade_percent', 'avg_trade', 'avg_trade_pct') ?? statNum('Avg. Trade [%]'),
+      max_trade_duration: pick('max_trade_duration') ?? statText('Max. Trade Duration'),
+      avg_trade_duration: pick('avg_trade_duration') ?? statText('Avg. Trade Duration'),
+      profit_factor: pick('profit_factor') ?? statNum('Profit Factor'),
+      expectancy_percent: pick('expectancy_percent', 'expectancy') ?? statNum('Expectancy [%]'),
+      sqn: pick('sqn', 'SQN') ?? statNum('SQN'),
       data_source: raw.data_source ?? '',
       symbol: raw.symbol ?? '',
-      data_start_date: raw.data_start_date ?? '',
-      data_end_date: raw.data_end_date ?? '',
+      data_start_date: raw.data_start_date || statText('Start') || '',
+      data_end_date: raw.data_end_date || statText('End') || '',
       status: raw.status ?? 'completed',
       error_message: raw.error_message ?? null,
     }
@@ -544,8 +574,13 @@ export default function StrategyTestingPage() {
   }
 
   const formatDateForResult = (dateString: string) => {
+    // toLocaleDateString doesn't throw on an unparseable date, it renders the
+    // literal "Invalid Date" — so a missing value has to be caught up front.
+    if (!dateString) return 'N/A'
     try {
-      return new Date(dateString).toLocaleDateString('en-US', {
+      const parsed = new Date(dateString)
+      if (Number.isNaN(parsed.getTime())) return String(dateString)
+      return parsed.toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'short',
         day: 'numeric',
@@ -1399,12 +1434,10 @@ export default function StrategyTestingPage() {
                   'warning',
                 )
               } else if (timestampResult.detected) {
-                setShowSuccessModal(true)
                 showToast(`${targetSlot} file added (verified ${timestampResult.timeframeLabel} data).`, 'success')
               } else {
                 // Couldn't read cadence (e.g. tab-separated MT5 export). Accept
                 // the user's assignment; we can't contradict it.
-                setShowSuccessModal(true)
                 showToast(`${targetSlot} file added. Couldn't auto-verify cadence — trusting your slot choice.`, 'success')
               }
               return
@@ -1417,12 +1450,10 @@ export default function StrategyTestingPage() {
               matchesTimeframe(file.name, timeframe)
             )
             if (timestampResult.detected && timestampResult.matchesRequired) {
-              setShowSuccessModal(true)
               showToast(`File uploaded successfully! Detected ${timestampResult.timeframeLabel} timeframe data.`, 'success')
             } else if (timestampResult.detected && !timestampResult.matchesRequired) {
               showToast(`File contains ${timestampResult.timeframeLabel} data but required timeframes are: ${requiredTimeframes.join(', ')}. You may get incorrect results.`, 'warning')
             } else if (hasValidTimeframeColumn || matchesFilename) {
-              setShowSuccessModal(true)
               showToast(`File uploaded successfully! Valid timeframe pattern found.`, 'success')
             } else {
               showToast(`File uploaded but couldn't detect timeframe. Required: ${requiredTimeframes.join(', ')}. You may get incorrect results.`, 'warning')
@@ -1430,29 +1461,32 @@ export default function StrategyTestingPage() {
           }
         }
         reader.onerror = () => {
-          if (targetSlot) {
-            setShowSuccessModal(true)
-            showToast(`${targetSlot} file added. Couldn't read it to verify cadence.`, 'warning')
-            return
-          }
-          const matchesAnyTimeframe = requiredTimeframes.some(timeframe =>
-            matchesTimeframe(file.name, timeframe)
+          // The browser couldn't read the file at all — a real upload failure.
+          // Undo the optimistic add so no broken file is left bound to a slot,
+          // then surface the blocking error dialog.
+          setUploadedFiles((prev) => prev.filter((f) => f !== file.name))
+          setFileObjects((prev) => {
+            const next = { ...prev }
+            delete next[file.name]
+            return next
+          })
+          setSlotFiles((prev) =>
+            Object.fromEntries(Object.entries(prev).filter(([, f]) => f !== file.name)),
           )
-          if (matchesAnyTimeframe) {
-            setShowSuccessModal(true)
-            showToast(`File uploaded successfully! Matches required timeframe.`, 'success')
-          } else {
-            showToast(`File uploaded but couldn't verify timeframe data.`, 'warning')
-          }
+          setFileTimeframeMinutes((prev) => {
+            const next = { ...prev }
+            delete next[file.name]
+            return next
+          })
+          setUploadError(`Could not read "${file.name}". Please try uploading it again.`)
         }
         reader.readAsText(file)
       } else {
         // For .py files, just accept them
-        setShowSuccessModal(true)
         showToast(`Python file uploaded successfully!`, 'success')
       }
     } else {
-      showToast("Only .py and .csv files are supported", 'error')
+      setUploadError("Only .py and .csv files are supported.")
     }
   }
 
@@ -1771,7 +1805,15 @@ export default function StrategyTestingPage() {
         }
 
         sessionStorage.setItem('customBacktestResult', JSON.stringify(normalizedResult))
-        setBacktestDetail(normalizeBacktestResult(normalizedResult))
+        setBacktestDetail(normalizeBacktestResult({
+          ...normalizedResult,
+          // The two arrays the Data and Trades tables read. They come straight
+          // off the polled body and are deliberately not in the cached copy
+          // above — together they're ~3 MB and would blow sessionStorage's
+          // quota, which throws and would abort this handler.
+          chart_data: result.chart_data ?? null,
+          trades_data: result.trades_data ?? [],
+        }))
         setBacktestResultTab('chart_data')
         showToast("Custom strategy backtest completed!", 'success')
       } else {
@@ -4631,21 +4673,22 @@ export default function StrategyTestingPage() {
               </div>
 
               {/* File Upload Success Modal */}
-              {showSuccessModal && (
+              {/* Blocking dialog shown ONLY on a failed/invalid upload. */}
+              {uploadError && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                   <div className="bg-[#f5f5f5] rounded-lg shadow-lg w-full max-w-md p-6">
                     <div className="flex justify-between items-center mb-4">
-                      <h2 className="text-2xl font-bold text-black">File Upload Successful</h2>
-                      <button onClick={() => setShowSuccessModal(false)} className="text-gray-500 hover:text-gray-700">
+                      <h2 className="text-2xl font-bold text-black">Upload Error</h2>
+                      <button onClick={() => setUploadError(null)} className="text-gray-500 hover:text-gray-700">
                         <X className="w-6 h-6" />
                       </button>
                     </div>
 
                     <div className="flex flex-col items-center py-6">
-                      <div className="w-24 h-24 bg-[#85e1fe] rounded-full flex items-center justify-center mb-6">
+                      <div className="w-24 h-24 bg-red-500 rounded-full flex items-center justify-center mb-6">
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                           <path
-                            d="M5 12L10 17L20 7"
+                            d="M6 18L18 6M6 6l12 12"
                             stroke="white"
                             strokeWidth="3"
                             strokeLinecap="round"
@@ -4654,20 +4697,15 @@ export default function StrategyTestingPage() {
                         </svg>
                       </div>
 
-                      <div className="flex items-center">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <path
-                            d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z"
-                            stroke="black"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                          <path d="M14 2V8H20" stroke="black" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                        <span className="ml-2 text-black">{currentFile}</span>
-                      </div>
+                      <p className="text-black text-center">{uploadError}</p>
                     </div>
+
+                    <button
+                      onClick={() => setUploadError(null)}
+                      className="w-full bg-[#85e1fe] hover:bg-[#6bcae2] text-black rounded-md py-2 font-medium"
+                    >
+                      OK
+                    </button>
                   </div>
                 </div>
               )}
