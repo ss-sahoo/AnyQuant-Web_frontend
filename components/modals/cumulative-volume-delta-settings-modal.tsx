@@ -10,12 +10,12 @@ import { CustomTimeframeModal } from "./custom-timeframe-modal"
 
 interface CumulativeVolumeDeltaSettingsModalProps {
   onClose: () => void
-  onSave: (settings: { lowerTimeframe: string; resetPeriod: string }) => void
-  initialSettings?: { lowerTimeframe?: string; resetPeriod?: string }
+  onSave: (settings: { timeframe: string; resetPeriod: string }) => void
+  initialSettings?: { timeframe?: string; resetPeriod?: string }
 }
 
-// Lower timeframes accepted by the engine resampler (must be strictly lower
-// than the chart timeframe).
+// The indicator's timeframe. `lower_timeframe` is bound to the same value by
+// the builder, so there is a single control here.
 const TIMEFRAME_OPTIONS = [
   { value: "1min", label: "1 min" },
   { value: "5min", label: "5 min" },
@@ -26,6 +26,13 @@ const TIMEFRAME_OPTIONS = [
   { value: "2h", label: "2 hours" },
   { value: "3h", label: "3 hours" },
   { value: "4h", label: "4 hours" },
+  { value: "6h", label: "6 hours" },
+  { value: "8h", label: "8 hours" },
+  { value: "12h", label: "12 hours" },
+  { value: "1d", label: "1 day" },
+  { value: "3d", label: "3 days" },
+  { value: "1w", label: "1 week" },
+  { value: "1M", label: "1 month" },
 ]
 
 // Engine acts on exactly D/W/M/Q (CVD_RESET_PERIODS); anything else means "no
@@ -44,19 +51,21 @@ export function CumulativeVolumeDeltaSettingsModal({
   onSave,
   initialSettings,
 }: CumulativeVolumeDeltaSettingsModalProps) {
-  const [lowerTimeframe, setLowerTimeframe] = useState(initialSettings?.lowerTimeframe || "1min")
+  // Seeded from the operand's current timeframe — the builder always passes it,
+  // for both the create and the edit flow.
+  const [timeframe, setTimeframe] = useState(initialSettings?.timeframe || "3h")
   const [showCustomTimeframeModal, setShowCustomTimeframeModal] = useState(false)
   const [resetPeriod, setResetPeriod] = useState(initialSettings?.resetPeriod || "D")
 
-  // Restore the user's last choice across opens, but never override an
-  // explicit `initialSettings` (editing flow).
+  // Restore the user's last reset period across opens, but never override the
+  // one carried in from the block being edited. The timeframe is not persisted
+  // — it belongs to the operand.
   useEffect(() => {
-    if (initialSettings) return
+    if (initialSettings?.resetPeriod) return
     try {
       const saved = localStorage.getItem("cumulativeVolumeDeltaSettings")
       if (!saved) return
       const parsed = JSON.parse(saved)
-      if (parsed.lowerTimeframe) setLowerTimeframe(parsed.lowerTimeframe)
       if (parsed.resetPeriod) setResetPeriod(parsed.resetPeriod)
     } catch {
       // ignored
@@ -64,13 +73,12 @@ export function CumulativeVolumeDeltaSettingsModal({
   }, [initialSettings])
 
   const handleSave = () => {
-    const settings = { lowerTimeframe, resetPeriod }
     try {
-      localStorage.setItem("cumulativeVolumeDeltaSettings", JSON.stringify(settings))
+      localStorage.setItem("cumulativeVolumeDeltaSettings", JSON.stringify({ resetPeriod }))
     } catch {
       // ignored
     }
-    onSave(settings)
+    onSave({ timeframe, resetPeriod })
   }
 
   return (
@@ -91,21 +99,18 @@ export function CumulativeVolumeDeltaSettingsModal({
 
           <div className="space-y-4">
             <div>
-              <Label
-                htmlFor="cvd-lower-timeframe"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Lower Timeframe
+              <Label htmlFor="cvd-timeframe" className="block text-sm font-medium text-gray-700 mb-2">
+                Timeframe
               </Label>
               <Select
-                value={lowerTimeframe}
+                value={timeframe}
                 onValueChange={(v) => {
                   if (v === "add-custom") setShowCustomTimeframeModal(true)
-                  else setLowerTimeframe(v)
+                  else setTimeframe(v)
                 }}
               >
-                <SelectTrigger id="cvd-lower-timeframe" className="w-full border border-gray-300 text-black bg-white">
-                  <SelectValue placeholder="Select lower timeframe" />
+                <SelectTrigger id="cvd-timeframe" className="w-full border border-gray-300 text-black bg-white">
+                  <SelectValue placeholder="Select timeframe" />
                 </SelectTrigger>
                 <SelectContent className="bg-white text-black">
                   {TIMEFRAME_OPTIONS.map((opt) => (
@@ -113,20 +118,19 @@ export function CumulativeVolumeDeltaSettingsModal({
                       {opt.label}
                     </SelectItem>
                   ))}
-                  {!isPresetTimeframe(lowerTimeframe) && (
-                    <SelectItem value={lowerTimeframe}>{lowerTimeframe}</SelectItem>
-                  )}
+                  {!isPresetTimeframe(timeframe) && <SelectItem value={timeframe}>{timeframe}</SelectItem>}
                   <SelectItem value="add-custom">Add Custom</SelectItem>
                 </SelectContent>
               </Select>
               {showCustomTimeframeModal && (
                 <CustomTimeframeModal
                   onClose={() => setShowCustomTimeframeModal(false)}
-                  onSave={(tf) => setLowerTimeframe(tf)}
+                  onSave={(tf) => setTimeframe(tf)}
                 />
               )}
               <p className="text-xs text-gray-500 mt-1">
-                The timeframe used to calculate the running delta — must be lower than the chart timeframe.
+                The running delta is calculated on this timeframe — the indicator's lower timeframe is kept identical
+                to it.
               </p>
             </div>
 

@@ -659,6 +659,16 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         }
 
         if (loadedStatements.length > 0) {
+          // Repair strategies saved before lower_timeframe was bound to the
+          // operand's timeframe, so editing one can't silently keep a stale
+          // pair.
+          loadedStatements.forEach((stmt: any) => {
+            (stmt.strategy || []).forEach((cond: any) => {
+              syncVolumeDeltaLowerTimeframe(cond?.inp1)
+              syncVolumeDeltaLowerTimeframe(cond?.inp2)
+            })
+          })
+
           // Skip pushing this onto undo history — initial load from server is
           // not a user action.
           skipNextHistoryChange()
@@ -2434,7 +2444,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               name: "VolumeDelta",
               timeframe: timeframe,
               input_params: {
-                lower_timeframe: "1min",
+                // lower_timeframe always mirrors the operand's timeframe.
+                lower_timeframe: timeframe,
               },
             }
           } else if (component.toLowerCase() === "cumulative volume delta" || component.toLowerCase() === "cumulative-volume-delta") {
@@ -2443,7 +2454,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               name: "CumulativeVolumeDelta",
               timeframe: timeframe,
               input_params: {
-                lower_timeframe: "1min",
+                lower_timeframe: timeframe,
                 reset_period: "D",
               },
             }
@@ -2627,7 +2638,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               name: "VolumeDelta",
               timeframe: timeframe,
               input_params: {
-                lower_timeframe: "1min",
+                // lower_timeframe always mirrors the operand's timeframe.
+                lower_timeframe: timeframe,
               },
             }
           } else if (component.toLowerCase() === "cumulative volume delta" || component.toLowerCase() === "cumulative-volume-delta") {
@@ -2636,7 +2648,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               name: "CumulativeVolumeDelta",
               timeframe: timeframe,
               input_params: {
-                lower_timeframe: "1min",
+                lower_timeframe: timeframe,
                 reset_period: "D",
               },
             }
@@ -2806,6 +2818,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           // Move timeframe to inp1 and preserve it in the condition for display
           if (lastCondition.timeframe && lastCondition.inp1 && "timeframe" in lastCondition.inp1) {
             lastCondition.inp1.timeframe = lastCondition.timeframe
+            syncVolumeDeltaLowerTimeframe(lastCondition.inp1)
             // Keep timeframe in condition for display purposes, don't delete it
           }
 
@@ -3248,7 +3261,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           return {
             title: "Volume Delta",
             details: {
-              lower_timeframe: inp1.input_params?.lower_timeframe || "1min",
+              lower_timeframe: inp1.input_params?.lower_timeframe || (inp1 as any).timeframe || selectedTimeframe,
               ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
             },
           }
@@ -3256,7 +3269,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           return {
             title: "Cumulative Volume Delta",
             details: {
-              lower_timeframe: inp1.input_params?.lower_timeframe || "1min",
+              lower_timeframe: inp1.input_params?.lower_timeframe || (inp1 as any).timeframe || selectedTimeframe,
               reset_period: inp1.input_params?.reset_period || "D",
               ...(inp1.Derivative && { derivative_order: inp1.Derivative.order }),
             },
@@ -3360,7 +3373,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         return {
           title: "Volume Delta",
           details: {
-            lower_timeframe: inp2.input_params?.lower_timeframe || "1min",
+            lower_timeframe: inp2.input_params?.lower_timeframe || (inp2 as any).timeframe || selectedTimeframe,
             ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
           },
         }
@@ -3368,7 +3381,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         return {
           title: "Cumulative Volume Delta",
           details: {
-            lower_timeframe: inp2.input_params?.lower_timeframe || "1min",
+            lower_timeframe: inp2.input_params?.lower_timeframe || (inp2 as any).timeframe || selectedTimeframe,
             reset_period: inp2.input_params?.reset_period || "D",
             ...(inp2.Derivative && { derivative_order: inp2.Derivative.order }),
           },
@@ -3588,7 +3601,36 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     setShowTimeframeDropdown(false)
   }
 
+  // Volume Delta and Cumulative Volume Delta are resampled from
+  // `lower_timeframe`, but the tester only ships a dataset per operand
+  // timeframe — so the two must stay identical. Every write to one of these
+  // operands' timeframe goes through here.
+  const syncVolumeDeltaLowerTimeframe = (operand: any) => {
+    if (!operand || typeof operand !== "object") return
+    if (operand.name !== "VolumeDelta" && operand.name !== "CumulativeVolumeDelta") return
+    if (!operand.timeframe) return
+    operand.input_params = { ...(operand.input_params || {}), lower_timeframe: operand.timeframe }
+  }
 
+  // The timeframe a Volume Delta / Cumulative Volume Delta settings modal
+  // should open on: the block being edited, or the one the operand just
+  // created inherited.
+  const resolveVolumeDeltaTimeframe = (name: "VolumeDelta" | "CumulativeVolumeDelta"): string => {
+    let operand: any
+    if (editingComponent) {
+      const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
+      operand = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
+    } else {
+      const strategy = statements[activeStatementIndex]?.strategy || []
+      const lastCondition = strategy[strategy.length - 1]
+      operand =
+        lastCondition?.inp1 && lastCondition?.operator_name ? lastCondition?.inp2 : lastCondition?.inp1
+    }
+    if (operand && typeof operand === "object" && operand.name === name && operand.timeframe) {
+      return operand.timeframe
+    }
+    return selectedTimeframe
+  }
 
   // Modify the handleTimeframeSelect function to handle the "Add Custom" option
   const handleTimeframeSelect = (timeframe: string) => {
@@ -3609,12 +3651,15 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           // (per backend contract — every non-"value" operand has its own tf).
           if (activeInputType === "inp1" && condition.inp1 && "timeframe" in condition.inp1) {
             condition.inp1.timeframe = timeframe
+            syncVolumeDeltaLowerTimeframe(condition.inp1)
           } else if (activeInputType === "inp2" && condition.inp2 && typeof condition.inp2 === "object" && "timeframe" in condition.inp2) {
             condition.inp2.timeframe = timeframe
+            syncVolumeDeltaLowerTimeframe(condition.inp2)
           } else if (activeInputType === "condition") {
             // For condition-level timeframes
             if (condition.inp1 && "timeframe" in condition.inp1) {
               condition.inp1.timeframe = timeframe
+              syncVolumeDeltaLowerTimeframe(condition.inp1)
             } else {
               condition.timeframe = timeframe
             }
@@ -8157,36 +8202,30 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               setShowVolumeDeltaModal(false)
               setEditingComponent(null)
             }}
-            initialSettings={(() => {
-              if (!editingComponent) return undefined
-              const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
-              const ind: any = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
-              if (ind && "name" in ind && ind.name === "VolumeDelta") {
-                return { lowerTimeframe: ind.input_params?.lower_timeframe || "1min" }
-              }
-              return undefined
-            })()}
+            initialSettings={{ timeframe: resolveVolumeDeltaTimeframe("VolumeDelta") }}
             onSave={(settings) => {
               const newStatements = [...statements]
               const currentStatement = newStatements[activeStatementIndex]
-              const buildBlock = (timeframe: string) => ({
+              // One timeframe drives both fields — lower_timeframe is never
+              // allowed to differ from the operand's own timeframe.
+              const buildBlock = () => ({
                 type: "CUSTOM_I" as const,
                 name: "VolumeDelta" as const,
-                timeframe,
-                input_params: { lower_timeframe: settings.lowerTimeframe },
+                timeframe: settings.timeframe,
+                input_params: { lower_timeframe: settings.timeframe },
               })
 
               if (editingComponent) {
                 const condition = currentStatement.strategy[editingComponent.conditionIndex]
                 const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
                 if (targetIndicator && "timeframe" in targetIndicator) {
-                  const block = buildBlock(targetIndicator.timeframe || selectedTimeframe)
+                  const block = buildBlock()
                   if (editingComponent.componentType === "inp1") condition.inp1 = block
                   else condition.inp2 = block
                 }
               } else {
                 const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-                const block = buildBlock(lastCondition.inp1?.timeframe || selectedTimeframe)
+                const block = buildBlock()
                 if (lastCondition.inp1 && lastCondition.operator_name) lastCondition.inp2 = block
                 else lastCondition.inp1 = block
               }
@@ -8207,26 +8246,26 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
               setEditingComponent(null)
             }}
             initialSettings={(() => {
-              if (!editingComponent) return undefined
+              const timeframe = resolveVolumeDeltaTimeframe("CumulativeVolumeDelta")
+              if (!editingComponent) return { timeframe }
               const condition = statements[editingComponent.statementIndex]?.strategy[editingComponent.conditionIndex]
               const ind: any = editingComponent.componentType === "inp1" ? condition?.inp1 : condition?.inp2
               if (ind && "name" in ind && ind.name === "CumulativeVolumeDelta") {
-                return {
-                  lowerTimeframe: ind.input_params?.lower_timeframe || "1min",
-                  resetPeriod: ind.input_params?.reset_period || "D",
-                }
+                return { timeframe, resetPeriod: ind.input_params?.reset_period || "D" }
               }
-              return undefined
+              return { timeframe }
             })()}
             onSave={(settings) => {
               const newStatements = [...statements]
               const currentStatement = newStatements[activeStatementIndex]
-              const buildBlock = (timeframe: string) => ({
+              // One timeframe drives both fields — lower_timeframe is never
+              // allowed to differ from the operand's own timeframe.
+              const buildBlock = () => ({
                 type: "CUSTOM_I" as const,
                 name: "CumulativeVolumeDelta" as const,
-                timeframe,
+                timeframe: settings.timeframe,
                 input_params: {
-                  lower_timeframe: settings.lowerTimeframe,
+                  lower_timeframe: settings.timeframe,
                   reset_period: settings.resetPeriod,
                 },
               })
@@ -8235,13 +8274,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 const condition = currentStatement.strategy[editingComponent.conditionIndex]
                 const targetIndicator = editingComponent.componentType === "inp1" ? condition.inp1 : condition.inp2
                 if (targetIndicator && "timeframe" in targetIndicator) {
-                  const block = buildBlock(targetIndicator.timeframe || selectedTimeframe)
+                  const block = buildBlock()
                   if (editingComponent.componentType === "inp1") condition.inp1 = block
                   else condition.inp2 = block
                 }
               } else {
                 const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
-                const block = buildBlock(lastCondition.inp1?.timeframe || selectedTimeframe)
+                const block = buildBlock()
                 if (lastCondition.inp1 && lastCondition.operator_name) lastCondition.inp2 = block
                 else lastCondition.inp1 = block
               }
