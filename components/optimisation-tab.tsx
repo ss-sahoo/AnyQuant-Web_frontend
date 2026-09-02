@@ -22,7 +22,6 @@ interface OptimisationTabProps {
   setSelectedAlgorithm: React.Dispatch<React.SetStateAction<string>> // New prop
   saveOptimisationInput?: (jsonSt: any, ui_data: any) => Promise<any> // API function for saving
   parsedStatement?: any // Strategy statement for API calls
-  onShowWalkForwardResults?: () => void // Callback to show walk forward results
   onRunWalkForwardOptimisation?: () => void // Callback to run walk forward optimisation
   onRunWalkForwardOptimisationDroplets?: () => void // New callback for droplets
   onCancelWalkForward?: () => void // Callback to cancel walk forward
@@ -61,7 +60,6 @@ export function OptimisationTab({
   setSelectedAlgorithm, // Destructure new prop
   saveOptimisationInput, // API function for saving
   parsedStatement, // Strategy statement for API calls
-  onShowWalkForwardResults, // Callback to show walk forward results
   onRunWalkForwardOptimisation, // Callback to run walk forward optimisation
   onRunWalkForwardOptimisationDroplets, // New callback for droplets
   onCancelWalkForward, // Callback to cancel walk forward
@@ -469,14 +467,6 @@ export function OptimisationTab({
             <button className="bg-[#85e1fe] text-black rounded-full px-6 py-2" onClick={handleSaveOptimisationDefaults}>
               Save
             </button>
-            {onShowWalkForwardResults && (
-              <button 
-                className="bg-transparent border border-[#2b2e38] text-white rounded-full px-6 py-2"
-                onClick={onShowWalkForwardResults}
-              >
-                View Walk Forward Results
-              </button>
-            )}
           </div>
         </div>
 

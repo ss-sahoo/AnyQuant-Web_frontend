@@ -5,7 +5,13 @@ import { Suspense, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Sidebar } from "@/components/sidebar"
 import { MobileSidebar } from "@/components/mobile-sidebar"
-import { getOptimizationJob, getOptimizationResultDetail } from "../AllApiCalls"
+import {
+  getOptimizationJob,
+  getOptimizationResultDetail,
+  listOptimizationFiles,
+  downloadOptimizationFile,
+  downloadOptimizationZip,
+} from "../AllApiCalls"
 import { Fetch } from "../usefetch"
 import { ArrowLeft, RefreshCw } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
@@ -23,7 +29,25 @@ function OptimizationResultsContent() {
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null)
   const [selectedTab, setSelectedTab] = useState<'results' | 'graph' | 'report'>('results')
   const [selectedRow, setSelectedRow] = useState<any>(null)
+  const [downloadableFiles, setDownloadableFiles] = useState<any[]>([])
+  const [filesError, setFilesError] = useState<string | null>(null)
+  const [pendingDownload, setPendingDownload] = useState<string | null>(null)
   const isDroplet = type === 'droplet'
+
+  /**
+   * The download routes key off the numeric optimization-job id. For
+   * type=droplet the URL carries a run_id string instead, which the legacy
+   * int-only ZIP route rejected outright — hence "Download All Files" failing
+   * every time on droplet runs. Prefer a numeric id from the payload and fall
+   * back to whatever the URL gave us for the run_id-tolerant route.
+   */
+  const numericJobId = (() => {
+    const candidate = [jobData?.job_id, jobData?.optimization_job_id, jobData?.id, jobId].find(
+      (value) => value != null && /^\d+$/.test(String(value)),
+    )
+    return candidate ?? null
+  })()
+  const fileJobRef = numericJobId ?? jobId
 
   // Simple toast notification
   const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => {
@@ -39,6 +63,38 @@ function OptimizationResultsContent() {
       document.body.removeChild(toast);
     }, 3000);
   };
+
+  /**
+   * Billing and droplet details live on the optimization-jobs record, not on
+   * job-status. The droplet branch below used to read GET /api/optimization-jobs/
+   * (which carries them) and was switched to GET /api/job-status/ so that a
+   * run_id from a fresh submit would resolve — job-status reports progress and
+   * results but no pricing, so the cost row went blank with it.
+   *
+   * Best-effort re-read of the job record to fill in only what job-status left
+   * out. A run_id URL with no numeric job id anywhere in the payload simply
+   * falls through and the cost row keeps its placeholder, as it does today.
+   */
+  const fillDropletJobDetails = async (data: any) => {
+    if (!data || data.estimated_cost != null || data.actual_cost != null) return data
+
+    const numericJobId = [data.job_id, data.optimization_job_id, data.id, jobId].find(
+      (value) => value != null && /^\d+$/.test(String(value)),
+    )
+    if (numericJobId == null) return data
+
+    try {
+      const job = await getOptimizationJob(numericJobId)
+      const merged = { ...data }
+      for (const field of ['estimated_cost', 'actual_cost', 'runtime_minutes', 'droplet_size', 'droplet_id', 'started_at', 'completed_at']) {
+        if (merged[field] == null && job?.[field] != null) merged[field] = job[field]
+      }
+      return merged
+    } catch (err) {
+      console.warn("Could not load cost details for optimization job", numericJobId, err)
+      return data
+    }
+  }
 
   // Fetch job data
   const fetchJobData = async () => {
@@ -61,7 +117,7 @@ function OptimizationResultsContent() {
           throw new Error(`Failed to fetch job status: ${response.status}`)
         }
         
-        data = await response.json()
+        data = await fillDropletJobDetails(await response.json())
         console.log("📊 Droplet job data from job-status:", data)
       } else {
         // For legacy optimizations, call the results API
@@ -161,6 +217,111 @@ function OptimizationResultsContent() {
       }
     }
   }, [jobId, isDroplet])
+
+  /**
+   * Source the Generated Files list from the API rather than from the raw
+   * results_output_listing on the payload. That listing is an os.listdir() of
+   * the droplet's output dir, so most of its rows had Download buttons for
+   * files the download route cannot serve.
+   */
+  useEffect(() => {
+    if (!fileJobRef) return
+    const status = (jobData?.status || '').toLowerCase()
+    if (!['completed', 'success'].includes(status)) return
+
+    let isCancelled = false
+    listOptimizationFiles(fileJobRef)
+      .then((files) => {
+        if (isCancelled) return
+        setDownloadableFiles(files)
+        setFilesError(null)
+      })
+      .catch((err) => {
+        if (isCancelled) return
+        console.warn("Could not list optimisation files:", err)
+        setDownloadableFiles([])
+        setFilesError(err?.message || "Could not list downloadable files")
+      })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [fileJobRef, jobData?.status])
+
+  const handleFileDownload = async (path: string) => {
+    setPendingDownload(path)
+    try {
+      await downloadOptimizationFile(fileJobRef, path)
+    } catch (err: any) {
+      console.error('Download failed:', err)
+      showToast(err?.message || 'Failed to download file', 'error')
+    } finally {
+      setPendingDownload(null)
+    }
+  }
+
+  /**
+   * Shared "Generated Files" renderer. Only lists what the API says it can
+   * serve; when the listing endpoint is unreachable it falls back to naming
+   * the files the run reported, without offering a button that would 404.
+   */
+  const renderGeneratedFiles = (fallbackListing?: string[], outputDir?: string) => {
+    const hasServableFiles = downloadableFiles.length > 0
+    const fallbackNames = !hasServableFiles && Array.isArray(fallbackListing) ? fallbackListing : []
+    if (!hasServableFiles && fallbackNames.length === 0) return null
+
+    return (
+      <div className="mt-6 mb-6">
+        <h3 className="text-lg font-semibold text-white mb-4">Generated Files</h3>
+        <div className="bg-[#141721] rounded-lg p-4">
+          {hasServableFiles ? (
+            <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {downloadableFiles.map((file: any, idx: number) => (
+                <li key={file.path || idx} className="bg-[#0e1018] rounded-lg p-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <span className="text-[#85e1fe] text-lg">📄</span>
+                    <span className="text-gray-300 text-sm truncate" title={file.name}>
+                      {file.name}
+                    </span>
+                    {file.size != null && (
+                      <span className="text-gray-500 text-xs whitespace-nowrap">
+                        {(file.size / 1024).toFixed(0)} KB
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleFileDownload(file.path)}
+                    disabled={pendingDownload === file.path}
+                    className="ml-2 px-3 py-1 bg-[#85e1fe] text-black rounded text-xs font-semibold hover:bg-[#6bcae2] transition-colors whitespace-nowrap disabled:opacity-50"
+                  >
+                    {pendingDownload === file.path ? 'Downloading…' : 'Download'}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <>
+              <p className="text-yellow-500 text-xs mb-3">
+                {filesError || 'Downloadable file listing unavailable'} — showing the files this run reported.
+              </p>
+              <ul className="space-y-2">
+                {fallbackNames.map((file: string, idx: number) => (
+                  <li key={idx} className="text-gray-300 text-sm flex items-center gap-2">
+                    <span className="text-[#85e1fe]">📄</span>
+                    {file}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          <p className="text-gray-400 text-xs mt-3">
+            Output directory: {outputDir || 'N/A'}
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   // Helper function to generate convergence plot HTML
   const generateConvergencePlotHTML = (convergenceData: any[]) => {
@@ -348,28 +509,11 @@ function OptimizationResultsContent() {
                 <button
                   onClick={async () => {
                     try {
-                      const response = await Fetch(`/api/optimization-results/${jobId}/download/`, {
-                        method: "GET"
-                      });
-                      
-                      if (!response.ok) {
-                        throw new Error('Failed to download files');
-                      }
-                      
-                      const blob = await response.blob();
-                      const url = window.URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `optimization_${jobId}_results.zip`;
-                      document.body.appendChild(a);
-                      a.click();
-                      window.URL.revokeObjectURL(url);
-                      document.body.removeChild(a);
-                      
+                      await downloadOptimizationZip(fileJobRef);
                       showToast('Download started!', 'success');
-                    } catch (error) {
+                    } catch (error: any) {
                       console.error('Download failed:', error);
-                      showToast('Failed to download files. Please try downloading individual files.', 'error');
+                      showToast(error?.message || 'Failed to download files', 'error');
                     }
                   }}
                   className="flex items-center gap-2 px-4 py-2 bg-[#85e1fe] text-black rounded-lg font-semibold hover:bg-[#6bcae2] transition-colors"
@@ -618,21 +762,7 @@ function OptimizationResultsContent() {
               )}
 
               {/* Output Files Listing */}
-              {jobData.results.results_output_listing && (
-                <div className="mb-6">
-                  <h3 className="text-lg font-semibold text-white mb-4">Generated Files</h3>
-                  <div className="bg-[#141721] rounded-lg p-4">
-                    <ul className="space-y-2">
-                      {jobData.results.results_output_listing.map((file: string, idx: number) => (
-                        <li key={idx} className="text-gray-300 text-sm flex items-center gap-2">
-                          <span className="text-[#85e1fe]">📄</span>
-                          {file}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              )}
+              {renderGeneratedFiles(jobData.results.results_output_listing, jobData.results.output_dir)}
             </div>
           )}
 
@@ -885,63 +1015,7 @@ function OptimizationResultsContent() {
               )}
 
               {/* Generated Files Section */}
-              {optimisationResult.results_output_listing && optimisationResult.results_output_listing.length > 0 && (
-                <div className="mt-6">
-                  <h3 className="text-lg font-semibold text-white mb-4">Generated Files</h3>
-                  <div className="bg-[#141721] rounded-lg p-4">
-                    <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {optimisationResult.results_output_listing.map((file: string, idx: number) => {
-                        // Extract filename from path
-                        const filename = file.split('/').pop() || file;
-                        const downloadUrl = `https://anyquant.co.uk/api/download-optimization-file/?path=${encodeURIComponent(file)}`;
-                        
-                        return (
-                          <li key={idx} className="bg-[#0e1018] rounded-lg p-3 flex items-center justify-between">
-                            <div className="flex items-center gap-2 flex-1 min-w-0">
-                              <span className="text-[#85e1fe] text-lg">📄</span>
-                              <span className="text-gray-300 text-sm truncate" title={filename}>
-                                {filename}
-                              </span>
-                            </div>
-                            <a
-                              href={downloadUrl}
-                              download={filename}
-                              className="ml-2 px-3 py-1 bg-[#85e1fe] text-black rounded text-xs font-semibold hover:bg-[#6bcae2] transition-colors whitespace-nowrap"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                // Use Fetch to download the file
-                                Fetch(`/api/download-optimization-file/?path=${encodeURIComponent(file)}`, {
-                                  method: "GET"
-                                })
-                                .then(response => response.blob())
-                                .then(blob => {
-                                  const url = window.URL.createObjectURL(blob);
-                                  const a = document.createElement('a');
-                                  a.href = url;
-                                  a.download = filename;
-                                  document.body.appendChild(a);
-                                  a.click();
-                                  window.URL.revokeObjectURL(url);
-                                  document.body.removeChild(a);
-                                })
-                                .catch(err => {
-                                  console.error('Download failed:', err);
-                                  alert('Failed to download file. Please try again.');
-                                });
-                              }}
-                            >
-                              Download
-                            </a>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                    <p className="text-gray-400 text-xs mt-3">
-                      Output directory: {optimisationResult.output_dir || 'N/A'}
-                    </p>
-                  </div>
-                </div>
-              )}
+              {renderGeneratedFiles(optimisationResult.results_output_listing, optimisationResult.output_dir)}
             </div>
           )}
       </main>

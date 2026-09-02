@@ -45,6 +45,10 @@ import {
   getBacktestResultDetail,
   getStrategyBacktestResults,
   deleteBacktestResult,
+  // Optimisation artefact download helpers
+  listOptimizationFiles,
+  downloadOptimizationFile,
+  downloadOptimizationZip,
 } from "../AllApiCalls" // Import new functions
 import { X, ArrowLeft, Layout, Maximize2 } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
@@ -94,6 +98,18 @@ import { MetaAPIDebugModal } from "@/components/metaapi-debug-modal"
 // Custom strategy backtest results
 import { CustomStrategyBacktestResults } from "@/components/custom-strategy-backtest-results"
 
+// Backtest-stat columns every optimisation row carries. Anything outside this
+// set is a strategy parameter the run was optimising over.
+const STANDARD_STAT_COLUMNS = new Set([
+  'Return [%]', 'Equity Final [$]', '# Trades', 'Win Rate [%]', 'Profit Factor',
+  'Max. Drawdown [%]', 'Sharpe Ratio', 'Sortino Ratio', 'Calmar Ratio',
+  'Return (Ann.) [%]', 'Volatility (Ann.) [%]', 'Start', 'End', 'Duration', 'SQN',
+  'Exposure Time [%]', 'Equity Peak [$]', 'Avg. Trade [%]', 'Best Trade [%]',
+  'Worst Trade [%]', 'Avg. Drawdown [%]', 'Avg. Drawdown Duration',
+  'Max. Drawdown Duration', 'Avg. Trade Duration', 'Max. Trade Duration',
+  'Buy & Hold Return [%]', 'Expectancy [%]', 'Unnamed: 0', 'generation',
+])
+
 // Reusable "Coming Soon" placeholder for tabs that don't yet have content.
 function ComingSoonPanel({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
@@ -106,6 +122,131 @@ function ComingSoonPanel({ title, subtitle }: { title: string; subtitle?: string
         <div className="mt-3 max-w-md text-center text-gray-600 text-[11px] font-medium tracking-wide">
           {subtitle}
         </div>
+      )}
+    </div>
+  )
+}
+
+// "~6m remaining". Returns null when the backend has no estimate, so the
+// caller can omit the row entirely rather than render a placeholder.
+function formatEta(seconds: any): string | null {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return null
+  if (seconds < 60) return `~${Math.round(seconds)}s remaining`
+  if (seconds < 3600) return `~${Math.round(seconds / 60)}m remaining`
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.round((seconds % 3600) / 60)
+  return minutes > 0 ? `~${hours}h ${minutes}m remaining` : `~${hours}h remaining`
+}
+
+function minutesSince(timestamp: any): number | null {
+  if (!timestamp) return null
+  const then = new Date(timestamp).getTime()
+  if (!Number.isFinite(then)) return null
+  return Math.max(0, Math.floor((Date.now() - then) / 60000))
+}
+
+/**
+ * Live progress for an optimisation run, from the `progress` block on
+ * GET /api/job-status/<run_id>/. Every field is optional — the panel renders
+ * whatever the backend reports and silently omits the rest.
+ */
+function OptimisationProgressPanel({
+  progress,
+  stale,
+  percent,
+  label,
+  onCancel,
+}: {
+  progress: any
+  stale?: boolean
+  percent: number
+  label: string
+  onCancel?: () => void
+}) {
+  const phaseTotal = Number(progress?.phase_total) || 0
+  const phaseIndex = Number(progress?.phase_index) || 0
+  const phaseLabel = progress?.phase_label || progress?.phase || null
+  const done = Number(progress?.done)
+  const total = Number(progress?.total)
+  const hasCounts = Number.isFinite(done) && Number.isFinite(total) && total > 0
+  const eta = formatEta(progress?.eta_seconds)
+  const staleMinutes = stale ? minutesSince(progress?.updated_at) : null
+
+  return (
+    <div className="mb-8 rounded-lg border border-gray-800 bg-[#080A10] p-6">
+      <div className="flex items-start justify-between gap-4 mb-5">
+        <div>
+          <div className="text-[10px] font-black uppercase tracking-[0.4em] text-[#85e1fe]">{label}</div>
+          {phaseLabel && (
+            <div className="mt-2 text-sm font-semibold text-white">
+              {phaseLabel}
+              {phaseTotal > 0 && (
+                <span className="ml-2 text-[11px] font-medium text-gray-500">
+                  Phase {phaseIndex} of {phaseTotal}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="shrink-0 px-4 py-1.5 rounded-full border border-red-500 text-red-500 bg-red-500/10 hover:bg-red-500/20 text-[10px] font-black uppercase tracking-widest transition-colors"
+          >
+            Cancel
+          </button>
+        )}
+      </div>
+
+      {/* Phase stepper */}
+      {phaseTotal > 0 && (
+        <div className="flex items-center gap-1.5 mb-5">
+          {Array.from({ length: phaseTotal }).map((_, idx) => {
+            const step = idx + 1
+            const isDone = step < phaseIndex
+            const isCurrent = step === phaseIndex
+            return (
+              <div
+                key={step}
+                className={`h-1.5 flex-1 rounded-full transition-colors ${
+                  isCurrent ? 'bg-[#85e1fe]' : isDone ? 'bg-[#85e1fe]/40' : 'bg-gray-800'
+                }`}
+                title={isCurrent && phaseLabel ? phaseLabel : `Phase ${step}`}
+              />
+            )
+          })}
+        </div>
+      )}
+
+      {stale ? (
+        <div className="rounded-md border border-yellow-600/40 bg-yellow-500/10 px-4 py-3 text-[11px] font-semibold text-yellow-400">
+          Still running — no update
+          {staleMinutes != null ? ` for ${staleMinutes}m` : ' recently'}
+        </div>
+      ) : (
+        <div className="w-full h-2 rounded-full bg-gray-800 overflow-hidden">
+          <div
+            className="h-full bg-[#85e1fe] transition-all duration-500"
+            style={{ width: `${Math.max(0, Math.min(100, percent))}%` }}
+          />
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px]">
+        {hasCounts && (
+          <span className="font-mono text-white">
+            {progress?.phase === 'running_ga' ? 'Generation' : 'Step'} {done} of {total}
+          </span>
+        )}
+        {typeof progress?.percent === 'number' && (
+          <span className="font-mono text-gray-400">{Math.round(progress.percent)}%</span>
+        )}
+        {eta && <span className="text-gray-400">{eta}</span>}
+      </div>
+
+      {progress?.detail && (
+        <div className="mt-3 text-[11px] text-gray-400 font-mono break-words">{progress.detail}</div>
       )}
     </div>
   )
@@ -141,39 +282,6 @@ function toIsoDateRange(dateRange: string): { start_date: string; end_date: stri
   const iso = /^\d{4}-\d{2}-\d{2}$/
   if (!iso.test(start ?? "") || !iso.test(end ?? "")) return null
   return { start_date: start, end_date: end }
-}
-
-/** Minutes per bar for the bar-count estimate; null for units we don't size. */
-function timeframeMinutes(timeframe: string): number | null {
-  const match = /^(\d+)(min|h|d|w)$/i.exec(String(timeframe || "").trim())
-  if (!match) return null
-  const size = Number(match[1])
-  const unit = match[2].toLowerCase()
-  if (unit === "min") return size
-  if (unit === "h") return size * 60
-  if (unit === "d") return size * 1440
-  return size * 10080
-}
-
-/**
- * Rough bar count for the requested window on the finest timeframe. Calendar
- * days, no weekend discount — deliberately the same arithmetic the backend's
- * paging note uses, so the warning threshold means the same thing on both sides.
- */
-function estimateBarCount(
-  requested: { start_date: string; end_date: string } | null,
-  timeframes: string[],
-): { bars: number; timeframe: string } | null {
-  if (!requested) return null
-  const sized = timeframes
-    .map((tf) => ({ tf, minutes: timeframeMinutes(tf) }))
-    .filter((entry): entry is { tf: string; minutes: number } => entry.minutes != null && entry.minutes > 0)
-  if (sized.length === 0) return null
-
-  const finest = sized.reduce((a, b) => (b.minutes < a.minutes ? b : a))
-  const days = (Date.parse(requested.end_date) - Date.parse(requested.start_date)) / 86_400_000
-  if (!Number.isFinite(days) || days <= 0) return null
-  return { bars: Math.round(days * (1440 / finest.minutes)), timeframe: finest.tf }
 }
 
 /**
@@ -270,6 +378,11 @@ export default function StrategyTestingPage() {
   const optimisationPollerRef = useRef<(() => void) | null>(null)
   const walkForwardPollerRef = useRef<(() => void) | null>(null)
 
+  // Mirrors isLoading2 / isCreatingOptimizationJob so the mount-time hydration
+  // effect can check "is a run in flight?" at the moment its response lands.
+  // A state read there would be pinned to the value captured at mount.
+  const isOptimisationInFlightRef = useRef(false)
+
   const [isDragging, setIsDragging] = useState(false)
 
   const [strID, setStrID] = useState<string | null>(null)
@@ -338,6 +451,30 @@ export default function StrategyTestingPage() {
   // Add state for top-level optimisation tab and selected result
   const [optimisationTab, setOptimisationTab] = useState<'chart' | 'chart_data' | 'trades' | 'summary' | 'results' | 'graph'>('results');
   const [selectedOptimisationRow, setSelectedOptimisationRow] = useState<any>(null);
+  const [optimisationRowsPage, setOptimisationRowsPage] = useState(1);
+
+  // Real optimisation progress, as reported by GET /api/job-status/<run_id>/.
+  // null until the first heartbeat lands.
+  const [optimisationProgress, setOptimisationProgress] = useState<any>(null);
+  const [optimisationStale, setOptimisationStale] = useState(false);
+  const [walkForwardProgress, setWalkForwardProgress] = useState<any>(null);
+  const [walkForwardStale, setWalkForwardStale] = useState(false);
+
+  // Downloadable artefacts for the run currently shown in the Results tab
+  const [optimisationFiles, setOptimisationFiles] = useState<any[]>([]);
+  const [optimisationFilesError, setOptimisationFilesError] = useState<string | null>(null);
+  const [pendingOptimisationDownload, setPendingOptimisationDownload] = useState<string | null>(null);
+
+  // job-status heartbeat handlers. `progress` is absent on older backends, in
+  // which case these keep the state null and the bar falls back to a crawl.
+  const captureOptimisationProgress = (payload: any) => {
+    setOptimisationProgress(payload?.progress ?? null);
+    setOptimisationStale(Boolean(payload?.stale));
+  };
+  const captureWalkForwardProgress = (payload: any) => {
+    setWalkForwardProgress(payload?.progress ?? null);
+    setWalkForwardStale(Boolean(payload?.stale));
+  };
 
   const [showPreviousOptimisationView, setShowPreviousOptimisationView] = useState(false);
 
@@ -389,6 +526,7 @@ export default function StrategyTestingPage() {
   // Pagination state for chart data and trades tables
   const CHART_DATA_PAGE_SIZE = 100
   const TRADES_PAGE_SIZE = 100
+  const OPTIMISATION_ROWS_PAGE_SIZE = 100
   const [chartDataPage, setChartDataPage] = useState(1)
   const [tradesPage, setTradesPage] = useState(1)
   useEffect(() => {
@@ -674,10 +812,12 @@ export default function StrategyTestingPage() {
       // Do not auto-load the most recent backtest chart on navigation — users
       // pick a run from the sidebar list explicitly.
 
-      // Also load last optimization result
-      getStrategyOptimizationResults(strategy_id)
+      // Also load last optimization result. Only ever hydrates from a finished
+      // run, and every write is re-gated on the in-flight refs below so a slow
+      // response can never land on top of a run the user just started.
+      getStrategyOptimizationResults(strategy_id, { page: 1, page_size: 1 })
         .then(async (response: any) => {
-          if (isCancelled) return
+          if (isCancelled || isOptimisationInFlightRef.current) return
 
           const results = Array.isArray(response) ? response : (response?.results || [])
           if (results.length > 0) {
@@ -686,13 +826,22 @@ export default function StrategyTestingPage() {
               new Date(b.optimization_date || b.created_at || b.date).getTime() -
               new Date(a.optimization_date || a.created_at || a.date).getTime()
             )
-            const latestId = sorted[0].id;
+            const latest = sorted[0]
+            const latestStatus = String(latest.status || '').toLowerCase()
+            // A running/failed row has no table to show — leave the tabs empty
+            // rather than hydrating a half-written result.
+            if (latestStatus && !['completed', 'success'].includes(latestStatus)) {
+              console.log("⏭️ Skipping auto-load, latest optimisation is", latestStatus)
+              return
+            }
+
+            const latestId = latest.id;
             console.log("🚀 Auto-loading latest optimization result:", latestId);
             try {
               const detail = await getOptimizationResultDetail(latestId);
-              if (isCancelled) return
+              if (isCancelled || isOptimisationInFlightRef.current) return
 
-              setOptimisationResult(detail);
+              setOptimisationResult(normalizeOptimisationResult(detail));
               setShowOptimisationResults(true);
               setOptimisationTab('results');
             } catch (err) {
@@ -708,44 +857,74 @@ export default function StrategyTestingPage() {
     }
   }, [strategy_id])
 
-  // Animate progress bar for optimisation
+  // Optimisation progress bar.
+  //
+  // Driven by the real `percent` from GET /api/job-status/<run_id>/ as soon as
+  // one arrives. Before the first heartbeat there is nothing to report, so a
+  // slow indeterminate crawl runs to show the request is alive — it stops the
+  // moment real data lands rather than racing ahead of it.
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
+    if (!isLoading2) {
+      if (progress2 > 0) {
+        setProgress2(100);
+        const settle = setTimeout(() => setProgress2(0), 500);
+        return () => clearTimeout(settle);
+      }
+      return;
+    }
+
+    const percent = optimisationProgress?.percent;
+    if (typeof percent === 'number' && Number.isFinite(percent)) {
+      setProgress2(Math.max(0, Math.min(100, percent)));
+      return;
+    }
+
+    // Pre-first-heartbeat only: creep to 20% over ~10s and stop there.
+    const crawl = setInterval(() => {
+      setProgress2((prev) => (prev < 20 ? prev + 0.25 : prev));
+    }, 120);
+    return () => clearInterval(crawl);
+  }, [isLoading2, optimisationProgress]);
+
+  // Walk-forward progress bar. Same contract — the backend may or may not
+  // report `progress` for this path, so it degrades to the crawl when absent.
+  useEffect(() => {
+    if (!isLoading3) {
+      if (progress3 > 0) {
+        setProgress3(100);
+        const settle = setTimeout(() => setProgress3(0), 500);
+        return () => clearTimeout(settle);
+      }
+      return;
+    }
+
+    const percent = walkForwardProgress?.percent;
+    if (typeof percent === 'number' && Number.isFinite(percent)) {
+      setProgress3(Math.max(0, Math.min(100, percent)));
+      return;
+    }
+
+    const crawl = setInterval(() => {
+      setProgress3((prev) => (prev < 20 ? prev + 0.25 : prev));
+    }, 120);
+    return () => clearInterval(crawl);
+  }, [isLoading3, walkForwardProgress]);
+
+  // Clear stale progress when a new run starts
+  useEffect(() => {
     if (isLoading2) {
       setProgress2(0);
-      interval = setInterval(() => {
-        setProgress2((prev) => {
-          if (prev < 95) return prev + Math.random() * 5 + 1;
-          return prev;
-        });
-      }, 120);
-    } else if (!isLoading2 && progress2 > 0) {
-      setProgress2(100);
-      setTimeout(() => setProgress2(0), 500);
+      setOptimisationProgress(null);
+      setOptimisationStale(false);
     }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
   }, [isLoading2]);
 
-  // Animate progress bar for walk forward optimisation
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
     if (isLoading3) {
       setProgress3(0);
-      interval = setInterval(() => {
-        setProgress3((prev) => {
-          if (prev < 95) return prev + Math.random() * 5 + 1;
-          return prev;
-        });
-      }, 120);
-    } else if (!isLoading3 && progress3 > 0) {
-      setProgress3(100);
-      setTimeout(() => setProgress3(0), 500);
+      setWalkForwardProgress(null);
+      setWalkForwardStale(false);
     }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
   }, [isLoading3]);
 
   useEffect(() => {
@@ -1687,18 +1866,6 @@ export default function StrategyTestingPage() {
           }
           : null
 
-      // Pre-flight size check. MetaAPI pages at ~1000 bars per round trip with
-      // a 0.4s pause and a hard page ceiling, so a wide window on a fine
-      // timeframe is both slow and liable to come back truncated.
-      const estimate = estimateBarCount(isoRange, requiredTimeframes)
-      if (estimate && estimate.bars > 20_000) {
-        showToast(
-          `This window is about ${estimate.bars.toLocaleString()} ${estimate.timeframe} bars. ` +
-          `Expect a slow run, and data may come back truncated — narrow the dates or use a coarser timeframe.`,
-          'warning',
-        )
-      }
-
       let startData: any
       if (useMetaAPI) {
         const symbol = metaAPIConfig?.symbol || "XAUUSD"
@@ -2007,7 +2174,7 @@ export default function StrategyTestingPage() {
       let polledResult: any = startData
       if (startData?.run_id) {
         optimisationRunIdRef.current = startData.run_id
-        const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000 })
+        const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000, onStatus: captureOptimisationProgress })
         optimisationPollerRef.current = stop
         try {
           const polled = await promise
@@ -2022,12 +2189,12 @@ export default function StrategyTestingPage() {
       // No DB record exists for custom optimisation runs (job-store only), so
       // the polled payload IS the final result — no detail re-fetch.
       const adapted = adaptCustomOptimisationRows(polledResult?.results)
-      setOptimisationResult({
+      setOptimisationResult(normalizeOptimisationResult({
         ...polledResult,
         table: adapted,
         // Don't let the raw custom rows shadow the adapted table in previewRows.
         results: undefined,
-      })
+      }))
       setOptimisationMessage(
         polledResult?.partial
           ? "Time budget hit — showing partial ranked results."
@@ -2149,7 +2316,7 @@ export default function StrategyTestingPage() {
         if (startData?.run_id && startData?.status === 'started') {
           optimisationRunIdRef.current = startData.run_id
           console.log("✅ Stored optimisation run_id for cancel:", startData.run_id)
-          const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000 })
+          const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000, onStatus: captureOptimisationProgress })
           optimisationPollerRef.current = stop
           try {
             result = await promise
@@ -2172,7 +2339,7 @@ export default function StrategyTestingPage() {
         if (startData?.run_id && startData?.status === 'started') {
           optimisationRunIdRef.current = startData.run_id
           console.log("✅ Stored optimisation run_id for cancel:", startData.run_id)
-          const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000 })
+          const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000, onStatus: captureOptimisationProgress })
           optimisationPollerRef.current = stop
           try {
             result = await promise
@@ -2198,7 +2365,12 @@ export default function StrategyTestingPage() {
       // Handle the response — treat polledResult as the actual result data
       if (polledResult) {
         // If we have a run_id, fetch the full detail to ensure we have previewRows/table data
-        const runId = result?.run_id || startData?.run_id || polledResult?.id || polledResult?.run_id || result?.id || result?.runId;
+        // /api/optimization-results/<int:pk>/ only accepts an integer id, so a
+        // UUID run_id here always 404s and silently falls back to the polled
+        // payload. Prefer the DB row id; keep run_id as the last resort.
+        const runId = polledResult?.optimization_id || result?.optimization_id ||
+          polledResult?.id || result?.id ||
+          result?.run_id || startData?.run_id || polledResult?.run_id || result?.runId;
 
         // Add a small delay and a retry mechanism to ensure backend has finished processing
         const fetchWithRetry = async (retryCount = 0) => {
@@ -2214,7 +2386,7 @@ export default function StrategyTestingPage() {
 
             if (hasTableData || retryCount >= 3) {
               console.log("✅ Successfully fetched full optimization data");
-              setOptimisationResult(fullDetail);
+              setOptimisationResult(normalizeOptimisationResult(fullDetail));
               if (fullDetail.heatmap_plot_html) {
                 setPlotHeatmapHtml(fullDetail.heatmap_plot_html);
               }
@@ -2224,7 +2396,7 @@ export default function StrategyTestingPage() {
             }
           } catch (fetchErr) {
             console.error("❌ Failed to fetch full detail, using polled result:", fetchErr);
-            setOptimisationResult(polledResult);
+            setOptimisationResult(normalizeOptimisationResult(polledResult));
           }
         };
 
@@ -2232,7 +2404,7 @@ export default function StrategyTestingPage() {
           // Start the fetch process after a small initial delay
           setTimeout(() => fetchWithRetry(0), 1000);
         } else {
-          setOptimisationResult(polledResult);
+          setOptimisationResult(normalizeOptimisationResult(polledResult));
         }
 
         setActiveTab("optimisation");
@@ -2427,7 +2599,7 @@ export default function StrategyTestingPage() {
       if (startData?.run_id && startData?.status === 'started') {
         walkForwardRunIdRef.current = startData.run_id
         console.log("✅ Stored walk forward run_id for cancel:", startData.run_id)
-        const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000 })
+        const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000, onStatus: captureWalkForwardProgress })
         walkForwardPollerRef.current = stop
         try {
           result = await promise
@@ -2588,7 +2760,7 @@ export default function StrategyTestingPage() {
           setStatusPollingInterval(null);
 
           if (statusResult.result) {
-            setOptimisationResult(statusResult.result);
+            setOptimisationResult(normalizeOptimisationResult(statusResult.result));
             setOptimizationResults(prev => Array.isArray(prev) ? [...prev, statusResult.result] : [statusResult.result]);
             setShowPreviousOptimisationView(true);
           }
@@ -3047,8 +3219,10 @@ export default function StrategyTestingPage() {
   }
 
   // When optimisation results load, set the first row as selected by default
+  // and rewind the results table to page 1.
   useEffect(() => {
-    const rows = (optimisationResult?.convergence_data || optimisationResult?.full_optimization_results || optimisationResult?.table || []);
+    const rows = optimisationResult?.rows ?? [];
+    setOptimisationRowsPage(1);
     if (rows.length > 0) {
       setSelectedOptimisationRow(rows[0]);
     }
@@ -3201,10 +3375,14 @@ export default function StrategyTestingPage() {
   const [dropletJobId, setDropletJobId] = useState<number | null>(null)
   const [dropletJobStatus, setDropletJobStatus] = useState<string>("")
   const [dropletJobResults, setDropletJobResults] = useState<any>(null)
-  const [dropletPollingInterval, setDropletPollingInterval] = useState<NodeJS.Timeout | null>(null)
   const [isPollingActive, setIsPollingActive] = useState(false)
   const isPollingRequestPendingRef = useRef(false)
   const hasFinalStatusRef = useRef(false)
+  const dropletPollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  useEffect(() => {
+    isOptimisationInFlightRef.current = isLoading2 || isCreatingOptimizationJob
+  }, [isLoading2, isCreatingOptimizationJob])
 
   // New Optimization Droplets Flow Functions
 
@@ -3225,9 +3403,9 @@ export default function StrategyTestingPage() {
     }
 
     // Clear any existing polling
-    if (dropletPollingInterval) {
-      clearInterval(dropletPollingInterval)
-      setDropletPollingInterval(null)
+    if (dropletPollTimeoutRef.current) {
+      clearTimeout(dropletPollTimeoutRef.current)
+      dropletPollTimeoutRef.current = null
     }
 
     const isFinalStatus = (status: string) =>
@@ -3254,6 +3432,13 @@ export default function StrategyTestingPage() {
 
         if (initialJobData.status === 'Completed' || initialJobData.status === 'completed') {
           console.log('✅ Droplet job already completed:', initialJobData)
+          // Regular droplet runs belong in the Results/Graph tabs like every
+          // other producer. Walk-forward keeps its own panel below.
+          if (optimizationType === 'regular') {
+            setOptimisationResult(normalizeOptimisationResult(initialJobData.results))
+            setShowOptimisationResults(true)
+            setOptimisationTab('results')
+          }
           // Don't show toast if we're just loading existing results
           // showToast('Optimization already completed!', 'success')
         } else if (initialJobData.status === 'Failed' || initialJobData.status === 'failed') {
@@ -3272,7 +3457,33 @@ export default function StrategyTestingPage() {
     setIsPollingActive(true)
     let stopped = false
 
-    const interval = setInterval(async () => {
+    // A minute between polls is far too coarse to drive a progress readout.
+    // Poll every 10s while the run is young, then back off to 60s once it is
+    // clearly a long job so a multi-hour run isn't hammering the API.
+    const POLL_FAST_MS = 10000
+    const POLL_SLOW_MS = 60000
+    const BACKOFF_AFTER_MS = 10 * 60 * 1000
+    const pollingStartedAt = Date.now()
+
+    const nextDelay = () =>
+      Date.now() - pollingStartedAt >= BACKOFF_AFTER_MS ? POLL_SLOW_MS : POLL_FAST_MS
+
+    const stopPolling = () => {
+      stopped = true
+      if (dropletPollTimeoutRef.current) clearTimeout(dropletPollTimeoutRef.current)
+      dropletPollTimeoutRef.current = null
+      setIsPollingActive(false)
+    }
+
+    // The live handle lives in a ref, not state: this reschedules on every
+    // tick, and writing that to state would re-fire the cleanup effect below
+    // (tearing down isPollingActive) once per poll.
+    const scheduleNext = () => {
+      if (stopped) return
+      dropletPollTimeoutRef.current = setTimeout(poll, nextDelay())
+    }
+
+    const poll = async () => {
       // Early exit if polling has been stopped
       if (stopped) {
         console.log(`🛑 Polling stopped for job ${jobId}`)
@@ -3282,6 +3493,7 @@ export default function StrategyTestingPage() {
       // Skip this polling cycle if previous request is still pending
       if (isPollingRequestPendingRef.current) {
         console.log(`⏳ Skipping poll for job ${jobId} - previous request still pending`)
+        scheduleNext()
         return
       }
 
@@ -3292,22 +3504,29 @@ export default function StrategyTestingPage() {
         console.log(`📊 Droplet Job ${jobId}: ${jobData.status} (Runtime: ${jobData.runtime_minutes} min)`)
 
         setDropletJobStatus(jobData.status)
+        setOptimisationProgress(jobData.progress ?? null)
+        setOptimisationStale(Boolean(jobData.stale))
 
         // Check if job has reached a final state
         if (isFinalStatus(jobData.status)) {
           console.log(`🛑 Job ${jobId} reached final status: ${jobData.status} - stopping polling`)
 
           // Set all flags to stop polling completely
-          stopped = true
           hasFinalStatusRef.current = true
-          clearInterval(interval)
-          setDropletPollingInterval(null)
-          setIsPollingActive(false)
+          stopPolling()
           isPollingRequestPendingRef.current = false
 
           if (jobData.status === 'Completed' || jobData.status === 'completed') {
             console.log('✅ Droplet job completed successfully:', jobData)
             setDropletJobResults(jobData)  // Store entire job data, not just results
+
+            // Regular droplet runs belong in the Results/Graph tabs like every
+            // other producer. Walk-forward keeps its own panel below.
+            if (optimizationType === 'regular') {
+              setOptimisationResult(normalizeOptimisationResult(jobData.results))
+              setShowOptimisationResults(true)
+              setOptimisationTab('results')
+            }
 
             // Show results for walk forward optimization
             if (optimizationType === 'walk_forward') {
@@ -3355,23 +3574,22 @@ export default function StrategyTestingPage() {
 
           // Ensure polling has fully stopped
           console.log(`✅ Polling cleanup complete for job ${jobId}`)
-          return // Exit the interval callback after final status
+          return // Exit the poll callback after final status
         }
+
+        scheduleNext()
       } catch (error) {
         isPollingRequestPendingRef.current = false
         console.error(`❌ Error polling droplet job status for job ${jobId}:`, error)
 
         // Stop polling on error to prevent infinite error loops
-        stopped = true
-        clearInterval(interval)
-        setDropletPollingInterval(null)
-        setIsPollingActive(false)
+        stopPolling()
 
         console.log(`🛑 Polling stopped due to error for job ${jobId}`)
       }
-    }, 60000) // Poll every 1 minute (60 seconds)
+    }
 
-    setDropletPollingInterval(interval)
+    scheduleNext()
   }
 
   /**
@@ -3385,17 +3603,18 @@ export default function StrategyTestingPage() {
     setShowCostDialog(true)
   }
 
-  // Cleanup droplet polling interval on unmount
+  // Cleanup droplet polling timer on unmount only (the poller self-schedules
+  // with setTimeout so the cadence can change between ticks)
   useEffect(() => {
     return () => {
-      if (dropletPollingInterval) {
-        clearInterval(dropletPollingInterval)
-        setIsPollingActive(false)
+      if (dropletPollTimeoutRef.current) {
+        clearTimeout(dropletPollTimeoutRef.current)
+        dropletPollTimeoutRef.current = null
         isPollingRequestPendingRef.current = false
         hasFinalStatusRef.current = false
       }
     }
-  }, [dropletPollingInterval])
+  }, [])
 
   /**
    * Open walk forward plot in new tab or display in iframe
@@ -3696,22 +3915,169 @@ export default function StrategyTestingPage() {
     }
   }
 
+  /**
+   * Four producers feed `optimisationResult`, each with its own shape:
+   *   - local Celery return          -> rows under `optimisation_results`
+   *   - getOptimizationResultDetail  -> `full_optimization_results`
+   *   - droplet job.results          -> `full_optimization_results` + `optimisation_preview`
+   *   - custom-strategy adapter      -> `table`
+   *
+   * Collapse them to one shape so the Results and Graph tabs don't each have
+   * to re-derive the fallback chain. The raw payload is spread through so the
+   * Summary tab and history views keep reading the fields they always did.
+   *
+   * Note the row precedence: full results outrank `optimisation_preview`,
+   * which for droplet runs is truncated to 20 rows and used to shadow the
+   * complete table. `optimisation_results` was missing from the old chain
+   * entirely, which is why a successful local run rendered an empty table.
+   */
+  const normalizeOptimisationResult = (raw: any): any => {
+    if (!raw) return null
+    // job-status nests the run body under `result`; only unwrap a real object.
+    const src = raw.result && typeof raw.result === 'object' && !Array.isArray(raw.result)
+      ? raw.result
+      : raw
+
+    const firstArray = (container: any, keys: string[]): any[] | null => {
+      if (!container || typeof container !== 'object') return null
+      for (const key of keys) {
+        const value = container[key]
+        if (Array.isArray(value) && value.length > 0) return value
+      }
+      return null
+    }
+
+    const ROW_KEYS = [
+      'optimisation_results',
+      'full_optimization_results',
+      'table',
+      'optimisation_preview',
+      'convergence_data',
+      'results',
+      'data',
+    ]
+
+    const rows =
+      firstArray(src, ROW_KEYS) ||
+      firstArray(src?.result, ROW_KEYS) ||
+      firstArray(src?.results, ROW_KEYS) ||
+      []
+
+    const convergenceRows = firstArray(src, ['convergence_data']) || rows
+
+    // generateHeatmapPlotHTML() picks the first two non-metric keys as its
+    // axes. Handed a raw stats row that would be "Start" vs "End", so project
+    // the rows down to their parameter columns plus the two scored metrics.
+    const heatmapRows = firstArray(src, ['optimization_heatmap_data']) || (() => {
+      const paramKeys = rows.length
+        ? Object.keys(rows[0]).filter((key) => !STANDARD_STAT_COLUMNS.has(key))
+        : []
+      if (paramKeys.length === 0) return []
+      return rows.map((row: any) => {
+        const projected: any = {}
+        for (const key of paramKeys) projected[key] = row[key]
+        projected['Equity Final [$]'] = row['Equity Final [$]']
+        projected['Return [%]'] = row['Return [%]']
+        return projected
+      })
+    })()
+
+    // Backend-rendered scatter. Key naming drifted across producers, so fall
+    // back to the first HTML blob in plots_html rather than guessing further.
+    const plotsHtml = src?.plots_html || {}
+    const scatterHtml =
+      src?.heatmap_plot_html ||
+      plotsHtml['optimise_plot.html'] ||
+      plotsHtml['optimisation_plot.html'] ||
+      Object.values(plotsHtml).find((value: any) => typeof value === 'string' && value.includes('<')) ||
+      null
+
+    const tradesPlotHtml = src?.trades_plot_html || plotsHtml['trades_plot.html'] || null
+
+    const bestStats = {
+      optimised_parameters: src?.optimised_parameters ?? null,
+      optimised_parameter_txt: src?.optimised_parameter_txt ?? null,
+      final_equity: src?.final_equity ?? null,
+      num_trades: src?.num_trades ?? null,
+      sharpe_ratio: src?.sharpe_ratio ?? null,
+      sortino_ratio: src?.sortino_ratio ?? null,
+      calmar_ratio: src?.calmar_ratio ?? null,
+      time_taken: src?.optimised_parameters?.['Time taken'] ?? src?.time_taken ?? null,
+    }
+
+    return { ...src, rows, convergenceRows, heatmapRows, scatterHtml, tradesPlotHtml, bestStats }
+  }
+
   // Optimisation preview rows (lifted so the same table can render under both
   // the Optimisation and Backtest "Results" tabs).
-  const previewRows: any[] = (() => {
-    if (!optimisationResult) return []
-    return (
-      optimisationResult.optimisation_preview ||
-      optimisationResult.full_optimization_results ||
-      optimisationResult.table ||
-      optimisationResult.results ||
-      optimisationResult.data ||
-      optimisationResult.result?.table ||
-      optimisationResult.result?.results ||
-      optimisationResult.result?.optimisation_preview ||
-      []
-    )
+  const previewRows: any[] = optimisationResult?.rows ?? []
+
+  // A run is "active" for either the legacy in-page path or a droplet job
+  const isOptimisationRunActive = isLoading2 || isCreatingOptimizationJob || isPollingActive
+
+  // Job reference the download routes key off. Numeric ids are preferred; a
+  // run_id string is accepted by the run_id-tolerant routes.
+  const optimisationDownloadRef: any = (() => {
+    const candidates = [
+      optimisationResult?.job_id,
+      optimisationResult?.optimization_job_id,
+      optimisationResult?.optimization_id,
+      optimisationResult?.id,
+      dropletJobId,
+      currentOptimizationId,
+    ]
+    const numeric = candidates.find((value) => value != null && /^\d+$/.test(String(value)))
+    if (numeric != null) return numeric
+    return candidates.find((value) => value != null && value !== '') ?? null
   })()
+
+  useEffect(() => {
+    if (!optimisationDownloadRef) {
+      setOptimisationFiles([])
+      setOptimisationFilesError(null)
+      return
+    }
+
+    let isCancelled = false
+    listOptimizationFiles(optimisationDownloadRef)
+      .then((files: any[]) => {
+        if (isCancelled) return
+        setOptimisationFiles(files)
+        setOptimisationFilesError(null)
+      })
+      .catch((err: any) => {
+        if (isCancelled) return
+        console.warn('Could not list optimisation files:', err)
+        setOptimisationFiles([])
+        setOptimisationFilesError(err?.message || 'Downloadable files unavailable')
+      })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [optimisationDownloadRef])
+
+  const handleOptimisationFileDownload = async (path: string) => {
+    setPendingOptimisationDownload(path)
+    try {
+      await downloadOptimizationFile(optimisationDownloadRef, path)
+    } catch (err: any) {
+      console.error('Download failed:', err)
+      showToast(err?.message || 'Failed to download file', 'error')
+    } finally {
+      setPendingOptimisationDownload(null)
+    }
+  }
+
+  const handleOptimisationZipDownload = async () => {
+    try {
+      await downloadOptimizationZip(optimisationDownloadRef)
+      showToast('Download started!', 'success')
+    } catch (err: any) {
+      console.error('Download failed:', err)
+      showToast(err?.message || 'Failed to download results archive', 'error')
+    }
+  }
 
   const renderResultsTable = (rows: any[]) => {
     if (!rows || rows.length === 0) {
@@ -3723,7 +4089,18 @@ export default function StrategyTestingPage() {
       )
     }
     const fmt = (v: any) => (v === undefined || v === null || v === '' ? '-' : v)
+
+    // A GA of population 100 x 50 generations is 5000 rows; paginate rather
+    // than committing all of them to one <table>.
+    const totalRows = rows.length
+    const totalPages = Math.max(1, Math.ceil(totalRows / OPTIMISATION_ROWS_PAGE_SIZE))
+    const currentPage = Math.min(optimisationRowsPage, totalPages)
+    const startIdx = (currentPage - 1) * OPTIMISATION_ROWS_PAGE_SIZE
+    const endIdx = Math.min(startIdx + OPTIMISATION_ROWS_PAGE_SIZE, totalRows)
+    const pageRows = rows.slice(startIdx, endIdx)
+
     return (
+      <>
       <table className="min-w-full text-[10px] border-separate border-spacing-y-2">
         <thead>
           <tr className="bg-[#000] text-gray-500 font-black uppercase tracking-widest">
@@ -3752,13 +4129,13 @@ export default function StrategyTestingPage() {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row: any, idx: number) => (
+          {pageRows.map((row: any, idx: number) => (
             <tr
-              key={idx}
+              key={startIdx + idx}
               className={`bg-[#080A10] text-[#85e1fe] cursor-pointer hover:bg-[#121420] border-l-2 ${selectedOptimisationRow === row ? 'border-[#85e1fe] bg-[#121420]' : 'border-transparent'}`}
               onClick={() => { setSelectedOptimisationRow(row); setOptimisationTab('summary'); }}
             >
-              <td className="px-4 py-3 font-black">{idx + 1}</td>
+              <td className="px-4 py-3 font-black">{startIdx + idx + 1}</td>
               <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{fmt(row['Start'])}</td>
               <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{fmt(row['End'])}</td>
               <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{fmt(row['Duration'])}</td>
@@ -3783,7 +4160,7 @@ export default function StrategyTestingPage() {
                   .filter(([k]) => k.startsWith('param_'))
                   .map(([k, v]) => `${k}: ${v}`)
                   .join(', ') || Object.keys(row)
-                    .filter(key => !['Return [%]', 'Equity Final [$]', '# Trades', 'Win Rate [%]', 'Profit Factor', 'Max. Drawdown [%]', 'Sharpe Ratio', 'Sortino Ratio', 'Calmar Ratio', 'Return (Ann.) [%]', 'Volatility (Ann.) [%]', 'Start', 'End', 'Duration', 'SQN', 'Exposure Time [%]', 'Equity Peak [$]', 'Avg. Trade [%]', 'Best Trade [%]', 'Worst Trade [%]', 'Avg. Drawdown [%]', 'Avg. Drawdown Duration', 'Max. Drawdown Duration', 'Avg. Trade Duration', 'Max. Trade Duration', 'Buy & Hold Return [%]', 'Expectancy [%]', 'Unnamed: 0', 'generation'].includes(key))
+                    .filter(key => !STANDARD_STAT_COLUMNS.has(key))
                     .map(key => `${key}=${row[key]}`)
                     .join(', ')}
               </td>
@@ -3796,8 +4173,145 @@ export default function StrategyTestingPage() {
           ))}
         </tbody>
       </table>
+      <div className="flex items-center justify-between mt-3 text-[10px] font-black uppercase tracking-widest">
+        <span className="text-gray-500">
+          Showing {startIdx + 1}–{endIdx} of {totalRows}
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setOptimisationRowsPage((p) => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            className="px-3 py-1.5 rounded-full bg-[#141721] hover:bg-[#1f2335] border border-gray-700 text-gray-300 tracking-widest transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Prev
+          </button>
+          <span className="text-gray-400">
+            Page {currentPage} of {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => setOptimisationRowsPage((p) => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+            className="px-3 py-1.5 rounded-full bg-[#141721] hover:bg-[#1f2335] border border-gray-700 text-gray-300 tracking-widest transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+      </>
     )
   }
+
+  /**
+   * Optimisation visuals for the Graph tab: backend scatter first, then the
+   * locally-rendered convergence and parameter heatmap plots.
+   */
+  const renderOptimisationGraphs = () => {
+    const scatterHtml = optimisationResult?.scatterHtml || plotHeatmapHtml
+    const convergenceHtml = generateConvergencePlotHTML(optimisationResult?.convergenceRows || [])
+    const heatmapHtml = generateHeatmapPlotHTML(optimisationResult?.heatmapRows || [])
+
+    if (!scatterHtml && !convergenceHtml && !heatmapHtml) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[400px] py-10">
+          <div className="text-gray-600 text-[10px] font-black uppercase tracking-[0.5em]">No plots for this run</div>
+          <div className="text-gray-800 text-[8px] font-bold mt-4 uppercase tracking-[0.3em]">
+            This optimisation produced no plot data
+          </div>
+        </div>
+      )
+    }
+
+    const frame = (title: string, html: string, height: string) => (
+      <div className="space-y-4">
+        <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.4em]">{title}</h3>
+        <div className="w-full bg-[#000] border border-gray-900 rounded-lg overflow-hidden">
+          <iframe
+            title={title}
+            className="w-full"
+            style={{ height, border: 'none', backgroundColor: '#0e1018' }}
+            srcDoc={html}
+          />
+        </div>
+      </div>
+    )
+
+    return (
+      <div className="p-6 space-y-10">
+        {scatterHtml && frame('Scatter Plot', scatterHtml, '450px')}
+        {convergenceHtml && frame('Convergence Plot', convergenceHtml, '400px')}
+        {heatmapHtml && frame('Parameter Optimisation Heatmap', heatmapHtml, '400px')}
+      </div>
+    )
+  }
+
+  /**
+   * Compact download bar so the run's artefacts are reachable without leaving
+   * the page. Sourced from /api/optimization-files/, which only advertises
+   * files the download route can actually serve.
+   */
+  const renderOptimisationDownloads = () => {
+    // Nothing to offer: stay quiet rather than showing an empty/failed bar.
+    if (!optimisationDownloadRef || optimisationFiles.length === 0) return null
+
+    return (
+      <div className="flex flex-wrap items-center gap-2 pb-6 border-b border-gray-900">
+        <span className="text-[9px] font-black text-gray-500 uppercase tracking-[0.4em] mr-2">Files</span>
+        {optimisationFiles.map((file: any) => (
+          <button
+            key={file.path}
+            type="button"
+            onClick={() => handleOptimisationFileDownload(file.path)}
+            disabled={pendingOptimisationDownload === file.path}
+            className="px-3 py-1.5 rounded-full bg-[#141721] hover:bg-[#1f2335] border border-gray-700 text-gray-300 text-[10px] font-semibold transition-colors disabled:opacity-40"
+            title={file.path}
+          >
+            {pendingOptimisationDownload === file.path ? 'Downloading…' : file.name}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={handleOptimisationZipDownload}
+          className="px-3 py-1.5 rounded-full bg-[#85e1fe] text-black text-[10px] font-black uppercase tracking-widest hover:bg-[#6bcae2] transition-colors"
+        >
+          Download all (ZIP)
+        </button>
+      </div>
+    )
+  }
+
+  /**
+   * Optimisation history for this strategy, shown under the Results tab the
+   * same way backtest history sits under Trades. Covers both regular and
+   * walk-forward runs; the list labels which is which.
+   */
+  const renderOptimisationHistory = () => (
+    <div>
+      <h3 className="text-xs font-black text-gray-500 mb-6 uppercase tracking-[0.4em]">Optimisation History</h3>
+      {strategy_id ? (
+        <OptimisationHistoryList
+          strategyId={strategy_id}
+          onSelect={async (id) => {
+            try {
+              const detail = await getOptimizationResultDetail(id as any)
+              setOptimisationResult(normalizeOptimisationResult(detail))
+              setShowOptimisationResults(true)
+              setOptimisationTab('results')
+            } catch (err: any) {
+              console.error('Failed to load optimisation result:', err)
+              showToast(err?.message || 'Failed to load optimisation result', 'error')
+            }
+          }}
+          isInline={true}
+        />
+      ) : (
+        <p className="text-gray-500 text-[10px] font-black uppercase tracking-widest">
+          Save the strategy to view its optimisation history.
+        </p>
+      )}
+    </div>
+  )
 
 
   return (
@@ -3861,8 +4375,47 @@ export default function StrategyTestingPage() {
               >
                 {activeTab === 'optimisation' ? (
                   <div className="w-full min-h-full flex flex-col">
+                    {/* Live progress for the run in flight, above the results */}
+                    {isOptimisationRunActive && (
+                      <div className="px-6 pt-6">
+                        <OptimisationProgressPanel
+                          progress={optimisationProgress}
+                          stale={optimisationStale}
+                          percent={progress2}
+                          label="Optimisation in progress"
+                          onCancel={cancelOptimisation}
+                        />
+                      </div>
+                    )}
+                    {isLoading3 && (
+                      <div className="px-6 pt-6">
+                        <OptimisationProgressPanel
+                          progress={walkForwardProgress}
+                          stale={walkForwardStale}
+                          percent={progress3}
+                          label="Walk forward in progress"
+                          onCancel={cancelWalkForward}
+                        />
+                      </div>
+                    )}
                     {(() => {
                       if (!optimisationResult) {
+                        // History is worth showing before any run has loaded —
+                        // it's how the user gets back to an earlier result.
+                        if (optimisationTab === 'results') {
+                          return (
+                            <div className="p-6 bg-[#000] text-white space-y-12">
+                              {renderOptimisationHistory()}
+                              <div className="space-y-8">
+                                <h3 className="text-xs font-black text-gray-500 uppercase tracking-[0.4em]">Current Results</h3>
+                                <div className="overflow-x-auto">
+                                  {renderResultsTable([])}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+                        if (isOptimisationRunActive || isLoading3) return null;
                         return (
                           <div className="flex-1 bg-[#0a0b12] flex flex-col items-center justify-center min-h-[400px]">
                             <div className="text-gray-600 text-[10px] font-black uppercase tracking-[0.5em]">No optimization data</div>
@@ -3908,32 +4461,22 @@ export default function StrategyTestingPage() {
 
                           {/* Sub-Tabs Grid */}
                           {optimisationTab === 'results' && (
-                            <div className="space-y-8">
-                              <div className="overflow-x-auto">
-                                {renderResultsTable(previewRows)}
-                              </div>
-                              {/* Scatter Plot Inline */}
-                              {(optimisationResult?.heatmap_plot_html || optimisationResult?.plots_html?.['optimise_plot.html']) && (
-                                <div className="space-y-4 pt-10 border-t border-gray-900">
-                                  <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.4em]">Scatter Plot</h3>
-                                  <div className="w-full bg-[#000] border border-gray-900 rounded-lg overflow-hidden">
-                                    <iframe
-                                      title="Scatter Plot"
-                                      className="w-full h-[450px]"
-                                      style={{ border: 'none' }}
-                                      srcDoc={optimisationResult?.heatmap_plot_html || optimisationResult?.plots_html?.['optimise_plot.html']}
-                                    />
-                                  </div>
+                            <div className="space-y-12">
+                              {renderOptimisationHistory()}
+                              <div className="space-y-8">
+                                <h3 className="text-xs font-black text-gray-500 uppercase tracking-[0.4em]">Current Results</h3>
+                                {renderOptimisationDownloads()}
+                                <div className="overflow-x-auto">
+                                  {renderResultsTable(previewRows)}
                                 </div>
-                              )}
+                              </div>
                             </div>
                           )}
 
-                          {(optimisationTab === 'chart' || optimisationTab === 'chart_data' || optimisationTab === 'graph') && (
-                            <ComingSoonPanel
-                              title={optimisationTab === 'graph' ? 'Optimisation Visuals' : optimisationTab === 'chart' ? 'Chart' : 'Data'}
-                              subtitle={optimisationTab === 'graph' ? 'Convergence, scatter, and heatmap visuals will live here' : undefined}
-                            />
+                          {optimisationTab === 'graph' && renderOptimisationGraphs()}
+
+                          {(optimisationTab === 'chart' || optimisationTab === 'chart_data') && (
+                            <ComingSoonPanel title={optimisationTab === 'chart' ? 'Chart' : 'Data'} />
                           )}
 
                           {optimisationTab === 'summary' && (() => {
@@ -4007,7 +4550,7 @@ export default function StrategyTestingPage() {
                                 strategyId={strategy_id || ''}
                                 onSelect={async (id) => {
                                   const detail = await getOptimizationResultDetail(id as any);
-                                  setOptimisationResult(detail);
+                                  setOptimisationResult(normalizeOptimisationResult(detail));
                                   setShowOptimisationResults(true);
                                   setOptimisationTab('results');
                                 }}
@@ -4347,20 +4890,20 @@ export default function StrategyTestingPage() {
 
                     {/* Results Tab — same optimisation results table as in optimisation mode */}
                     {backtestResultTab === 'results' && (
-                      <div className="p-6 bg-[#000] text-white">
-                        <div className="overflow-x-auto">
-                          {renderResultsTable(previewRows)}
+                      <div className="p-6 bg-[#000] text-white space-y-12">
+                        {renderOptimisationHistory()}
+                        <div className="space-y-8">
+                          <h3 className="text-xs font-black text-gray-500 uppercase tracking-[0.4em]">Current Results</h3>
+                          {renderOptimisationDownloads()}
+                          <div className="overflow-x-auto">
+                            {renderResultsTable(previewRows)}
+                          </div>
                         </div>
                       </div>
                     )}
 
                     {/* Graph Tab — optimisation visuals and other unique feedback land here */}
-                    {backtestResultTab === 'graph' && (
-                      <ComingSoonPanel
-                        title="Graph"
-                        subtitle="Optimisation visuals and other AnyQuant-only insights are on the way"
-                      />
-                    )}
+                    {backtestResultTab === 'graph' && renderOptimisationGraphs()}
                   </div>
                 ) : backtestResultTab === 'trades' ? (
                   <div className="w-full bg-[#000000] p-6">
@@ -4378,9 +4921,26 @@ export default function StrategyTestingPage() {
                     )}
                   </div>
                 ) : backtestResultTab === 'results' || backtestResultTab === 'graph' ? (
-                  <div className="w-full h-[400px] bg-[#000000] flex items-center justify-center">
-                    <p className="text-gray-400 font-black uppercase tracking-[0.3em] text-[15px]">Run an optimisation from the bottom panel to view detailed results</p>
-                  </div>
+                  // Optimisation output is independent of a backtest having run,
+                  // so show it here too rather than the placeholder.
+                  backtestResultTab === 'results' ? (
+                    <div className="w-full p-6 bg-[#000] text-white space-y-12">
+                      {renderOptimisationHistory()}
+                      <div className="space-y-8">
+                        <h3 className="text-xs font-black text-gray-500 uppercase tracking-[0.4em]">Current Results</h3>
+                        {renderOptimisationDownloads()}
+                        <div className="overflow-x-auto">
+                          {renderResultsTable(previewRows)}
+                        </div>
+                      </div>
+                    </div>
+                  ) : optimisationResult ? (
+                    <div className="w-full">{renderOptimisationGraphs()}</div>
+                  ) : (
+                    <div className="w-full h-[400px] bg-[#000000] flex items-center justify-center">
+                      <p className="text-gray-400 font-black uppercase tracking-[0.3em] text-[15px]">Run an optimisation from the bottom panel to view detailed results</p>
+                    </div>
+                  )
                 ) : (
                   <div className="w-full h-[400px] bg-[#000000] flex items-center justify-center">
                     <p className="text-gray-400 font-black uppercase tracking-[0.3em] text-[15px]">Run a backtest from the bottom panel to view detailed results</p>
@@ -4658,7 +5218,6 @@ export default function StrategyTestingPage() {
                       setSelectedAlgorithm={setSelectedAlgorithm} // New prop
                       saveOptimisationInput={saveOptimisationInput} // API function for saving
                       parsedStatement={parsedStatement} // Strategy statement for API calls
-                      onShowWalkForwardResults={() => setShowWalkForwardOptimizationResults(true)}
                       onRunWalkForwardOptimisation={() => handleWalkForwardOptimisation(false)}
                       onRunWalkForwardOptimisationDroplets={() => handleOptimizationWithDroplets('walk_forward')}
                       onCancelWalkForward={cancelWalkForward}
@@ -4826,7 +5385,7 @@ export default function StrategyTestingPage() {
                                   <button
                                     onClick={() => {
                                       // Load this result into the main view
-                                      setOptimisationResult(result)
+                                      setOptimisationResult(normalizeOptimisationResult(result))
                                       setShowOptimisationResults(true)
                                       setShowOptimizationHistory(false)
                                     }}

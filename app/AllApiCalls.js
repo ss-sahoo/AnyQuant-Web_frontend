@@ -1056,6 +1056,148 @@ export const getStrategyOptimizationResults = async (strategyStatementId, params
   return response.json();
 };
 
+/* ------------------------------------------------------------------ *
+ * Optimisation output files
+ *
+ * Single source of truth for listing and downloading the artefacts an
+ * optimisation run leaves behind. Both /optimization-results and the
+ * Results tab on /strategy-testing go through these — previously each
+ * page hand-rolled its own fetch/blob dance and neither checked the
+ * response before saving, so a JSON error body was written to disk as
+ * a .csv.
+ * ------------------------------------------------------------------ */
+
+// Download endpoints answer with JSON on some failures and plain text on
+// others, so read the body once as text and only then try to parse it.
+const readDownloadError = async (response, fallback) => {
+  try {
+    const text = await response.text();
+    if (!text) return fallback;
+    try {
+      const parsed = JSON.parse(text);
+      return parsed.error || parsed.detail || parsed.message || fallback;
+    } catch {
+      return text.slice(0, 200);
+    }
+  } catch {
+    return fallback;
+  }
+};
+
+// Fetch() turns a 404 into a thrown "Not Found" before the caller ever sees
+// the response, which is useless in a toast. Restate it in terms of what the
+// user actually asked for.
+const fetchOptimizationAsset = async (url, notFoundMessage) => {
+  try {
+    return await Fetch(url, { method: "GET" });
+  } catch (error) {
+    if (error?.message === "Not Found") throw new Error(notFoundMessage);
+    throw error;
+  }
+};
+
+const saveBlobToDisk = (blob, filename) => {
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  window.URL.revokeObjectURL(url);
+  document.body.removeChild(anchor);
+};
+
+/**
+ * List the optimisation artefacts the API can actually serve for a job.
+ *
+ * Prefer this over the raw `results_output_listing` on the result payload —
+ * that is an os.listdir() of the droplet's output directory and advertises
+ * plenty of files the download route will not hand back.
+ *
+ * @param {number|string} jobId - Optimisation job id (or run_id)
+ * @returns {Promise<Array<{name: string, path: string, size: number|null}>>}
+ */
+export const listOptimizationFiles = async (jobId) => {
+  if (jobId === null || jobId === undefined || jobId === "") return [];
+
+  const response = await fetchOptimizationAsset(
+    `/api/optimization-files/?job_id=${encodeURIComponent(jobId)}`,
+    "File listing is not available for this optimisation job.",
+  );
+
+  if (!response.ok) {
+    throw new Error(await readDownloadError(response, "Failed to list optimisation files"));
+  }
+
+  const data = await response.json();
+  const entries = Array.isArray(data) ? data : data?.files || data?.results || [];
+
+  return entries
+    .map((entry) => {
+      if (typeof entry === "string") {
+        return { name: entry.split("/").pop() || entry, path: entry, size: null };
+      }
+      const path = entry?.path || entry?.name || entry?.filename || "";
+      return {
+        name: entry?.name || entry?.filename || String(path).split("/").pop() || "",
+        path,
+        size: entry?.size ?? null,
+      };
+    })
+    .filter((entry) => entry.name && entry.path);
+};
+
+/**
+ * Download a single optimisation artefact.
+ *
+ * job_id is mandatory: without it the backend falls back to the caller's most
+ * recent completed job and happily serves another strategy's file.
+ *
+ * @param {number|string} jobId - Optimisation job id (or run_id)
+ * @param {string} filename - Path/name as reported by listOptimizationFiles()
+ */
+export const downloadOptimizationFile = async (jobId, filename) => {
+  if (!filename) throw new Error("No file specified");
+  if (jobId === null || jobId === undefined || jobId === "") {
+    throw new Error("Missing optimisation job id — refusing to download, the server would return another run's file.");
+  }
+
+  const params = new URLSearchParams({ path: String(filename), job_id: String(jobId) });
+  const response = await fetchOptimizationAsset(
+    `/api/download-optimization-file/?${params.toString()}`,
+    `"${String(filename).split("/").pop()}" is no longer available on the server.`,
+  );
+
+  if (!response.ok) {
+    throw new Error(await readDownloadError(response, "Failed to download file"));
+  }
+
+  saveBlobToDisk(await response.blob(), String(filename).split("/").pop() || "download");
+};
+
+/**
+ * Download every artefact for a job as a single ZIP.
+ *
+ * @param {number|string} jobRef - Numeric job id where the payload carries one,
+ *   otherwise the run_id (the route tolerates both).
+ */
+export const downloadOptimizationZip = async (jobRef) => {
+  if (jobRef === null || jobRef === undefined || jobRef === "") {
+    throw new Error("Missing optimisation job reference — cannot build the archive.");
+  }
+
+  const response = await fetchOptimizationAsset(
+    `/api/optimization-results/${encodeURIComponent(jobRef)}/download/`,
+    "No downloadable archive exists for this optimisation job.",
+  );
+
+  if (!response.ok) {
+    throw new Error(await readDownloadError(response, "Failed to download results archive"));
+  }
+
+  saveBlobToDisk(await response.blob(), `optimization_${jobRef}_results.zip`);
+};
+
 // Walk Forward Optimization API functions
 
 /**
