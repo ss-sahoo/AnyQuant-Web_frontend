@@ -3,17 +3,22 @@
 import { useState, useEffect } from "react"
 import { X } from "lucide-react"
 import { DraggableModal } from "./draggable-modal"
+import { isOptimizableValue, scalarParamValue, type OptimizableValue } from "@/lib/custom-component-schema"
 
 interface MovingOperatorSettingsModalProps {
   onClose: () => void
   onSave: (settings: {
     logical_operator: string
-    value: number
+    // Carries the optimisation range straight back out when the param is being
+    // optimised, so editing the threshold here does not discard it.
+    value: number | OptimizableValue
     unit: string
   }) => void
   initialSettings?: {
     logical_operator: string
-    value: number
+    // Once a param is marked optimisable in the Properties tab its stored value
+    // is `{ start, step, stop, value }`, not a bare number.
+    value: number | OptimizableValue
     unit: string
   }
   operatorType: "moving_up" | "moving_down"
@@ -26,8 +31,19 @@ export function MovingOperatorSettingsModal({
   operatorType,
 }: MovingOperatorSettingsModalProps) {
   const [logicalOperator, setLogicalOperator] = useState(initialSettings?.logical_operator || ">=")
-  const [value, setValue] = useState(initialSettings?.value || 20)
+  // Edit the scalar only. `|| 20` would also swallow a legitimate 0, so fall
+  // back only when there is genuinely nothing numeric to show.
+  const [value, setValue] = useState<number>(() => {
+    const scalar = scalarParamValue(initialSettings?.value)
+    return typeof scalar === "number" && Number.isFinite(scalar) ? scalar : 20
+  })
   const [unit, setUnit] = useState(initialSettings?.unit || "points")
+
+  // Preserved verbatim so Save can put the threshold back inside the range the
+  // user set up for optimisation instead of flattening it to a plain number.
+  const optimisationRange = isOptimizableValue(initialSettings?.value)
+    ? (initialSettings!.value as OptimizableValue)
+    : null
 
   useEffect(() => {
     // Convert incoming 'pips' to 'points' for consistency
@@ -54,7 +70,7 @@ export function MovingOperatorSettingsModal({
   const handleSave = () => {
     onSave({
       logical_operator: logicalOperator,
-      value: value,
+      value: optimisationRange ? { ...optimisationRange, value } : value,
       unit: unit,
     })
   }
@@ -124,6 +140,11 @@ export function MovingOperatorSettingsModal({
             <p className="text-sm text-gray-600">
               <strong>Preview:</strong> {operatorType.replace("_", " ")} {logicalOperator} {value}{unit}
             </p>
+            {optimisationRange && (
+              <p className="text-xs text-gray-500 mt-1">
+                Optimising over {optimisationRange.start} to {optimisationRange.stop} (step {optimisationRange.step}). This value is the starting point.
+              </p>
+            )}
           </div>
         </div>
 

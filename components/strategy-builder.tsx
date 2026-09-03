@@ -51,6 +51,8 @@ import {
   ParamRuntimeValue,
   normalizeStoredParameters,
   parseDrfParameterErrors,
+  scalarParamValue,
+  isOptimizableValue,
 } from "@/lib/custom-component-schema"
 import { type DataBinding, saveDataMapping } from "@/lib/dev-data-mapping"
 import { EditStrategyModal } from "@/components/edit-strategy-modal"
@@ -3519,13 +3521,18 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       condition.Operator &&
       (condition.Operator.operator_name === "moving_up" || condition.Operator.operator_name === "moving_down")
     ) {
+      const movingParams = condition.Operator.params
+      const movingRange = isOptimizableValue(movingParams.value) ? movingParams.value : null
       return {
         title: "Moving Operator",
         details: {
           operator: condition.Operator.operator_name.replace("_", " "),
-          logical_operator: condition.Operator.params.logical_operator,
-          value: condition.Operator.params.value,
-          unit: condition.Operator.params.unit,
+          logical_operator: movingParams.logical_operator,
+          value: scalarParamValue(movingParams.value) ?? "",
+          unit: movingParams.unit,
+          ...(movingRange
+            ? { optimising: `${movingRange.start} to ${movingRange.stop} step ${movingRange.step}` }
+            : {}),
         },
       }
     }
@@ -5154,7 +5161,10 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         // For moving operators with new structure, show the full configuration
         else if (condition.Operator && (condition.operator_name === "moving_up" || condition.operator_name === "moving_down")) {
           const params = condition.Operator.params
-          operatorDisplay = pipsToPointsDisplay(`${condition.Operator.operator_name.replace("_", " ")} ${params.logical_operator} ${params.value}${params.unit}`)
+          // params.value is `{ start, step, stop, value }` once the param is
+          // marked optimisable — show the threshold, not the wrapper object.
+          const shownValue = scalarParamValue(params.value) ?? ""
+          operatorDisplay = pipsToPointsDisplay(`${condition.Operator.operator_name.replace("_", " ")} ${params.logical_operator} ${shownValue}${params.unit}`)
         }
         // For Above/Below operators with offset
         else if (condition.offset && (

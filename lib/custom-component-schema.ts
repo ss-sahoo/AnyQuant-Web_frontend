@@ -317,6 +317,22 @@ export function isOptimizableValue(v: unknown): v is OptimizableValue {
   )
 }
 
+/**
+ * The single editable/displayable number behind a parameter that may be
+ * carrying an optimisation range.
+ *
+ * Turning "optimise" on for a numeric param in the Properties tab rewrites its
+ * value from `20` to `{ start, step, stop, value }`. Any UI that renders or
+ * edits one number must read the central `value` — rendering the wrapper
+ * object as a React child throws "Objects are not valid as a React child" and
+ * takes the whole page down.
+ */
+export function scalarParamValue(v: unknown): number | string | boolean | undefined {
+  if (isOptimizableValue(v)) return v.value
+  if (v === null || v === undefined || typeof v === "object") return undefined
+  return v as number | string | boolean
+}
+
 // ---------------------------------------------------------------------------
 // Bridge into the Strategy Tester "Properties" tab.
 //
