@@ -13,7 +13,25 @@ interface OptimisationHistoryListProps {
   onSelect: (id: string | number) => void;
   onClose?: () => void;
   isInline?: boolean;
+  /**
+   * Called instead of onSelect when the clicked run is still in progress.
+   * The testing page uses it to bring the live progress panel into view; when
+   * absent the list falls back to navigating there.
+   */
+  onSelectRunning?: () => void;
+  /**
+   * Changing this refetches the list. The page flips it when a run starts or
+   * ends, so a row stops saying "running" as soon as it completes or fails.
+   */
+  refreshToken?: string | number;
+  /**
+   * A run in flight in this browser. The backend does not always write a row
+   * for a job until it finishes, so surface it here regardless.
+   */
+  activeRun?: { kind: OptimisationKind; startedAt?: number } | null;
 }
+
+const RUNNING_STATUSES = ['running', 'started', 'pending', 'in_progress', 'queued'];
 
 type OptimisationKind = 'regular' | 'walk_forward';
 
@@ -44,7 +62,7 @@ const toTime = (value: string | null) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = ({ strategyId, onSelect, onClose, isInline = false }) => {
+export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = ({ strategyId, onSelect, onClose, isInline = false, onSelectRunning, refreshToken, activeRun }) => {
   const router = useRouter();
   const [rows, setRows] = useState<HistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -113,9 +131,20 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
     return () => {
       isCancelled = true;
     };
-  }, [strategyId]);
+  }, [strategyId, refreshToken]);
 
   const handleItemClick = (row: HistoryRow) => {
+    // A run still in progress has no result to open. Send the user to where
+    // the live progress is instead of a results page that would be empty.
+    if (RUNNING_STATUSES.includes((row.status || '').toLowerCase())) {
+      if (onSelectRunning) {
+        onSelectRunning();
+        if (onClose) onClose();
+      } else {
+        router.push('/strategy-testing');
+      }
+      return;
+    }
     if (row.kind === 'walk_forward') {
       router.push(`/walk-forward-results?id=${row.id}`);
       if (onClose) onClose();
@@ -162,12 +191,31 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
     }
   };
 
+  const allRows: HistoryRow[] = (() => {
+    if (!activeRun) return rows;
+    const alreadyListed = rows.some((row) => RUNNING_STATUSES.includes((row.status || '').toLowerCase()));
+    if (alreadyListed) return rows;
+    return [
+      {
+        id: 'in-flight',
+        kind: activeRun.kind,
+        date: activeRun.startedAt ? new Date(activeRun.startedAt).toISOString() : new Date().toISOString(),
+        algorithm: '-',
+        status: 'running',
+        finalEquity: null,
+        throughDroplet: false,
+        pValue: null,
+      },
+      ...rows,
+    ];
+  })();
+
   const visibleRows = (() => {
-    if (!expanded) return rows.slice(0, COLLAPSED_ROWS);
-    const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+    if (!expanded) return allRows.slice(0, COLLAPSED_ROWS);
+    const totalPages = Math.max(1, Math.ceil(allRows.length / PAGE_SIZE));
     const currentPage = Math.min(page, totalPages);
     const start = (currentPage - 1) * PAGE_SIZE;
-    return rows.slice(start, start + PAGE_SIZE);
+    return allRows.slice(start, start + PAGE_SIZE);
   })();
 
   const content = (
@@ -184,7 +232,7 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
         </div>
       ) : error ? (
         <div className="text-center text-red-400 py-8 text-[10px] font-black uppercase tracking-widest">{error}</div>
-      ) : rows.length === 0 ? (
+      ) : allRows.length === 0 ? (
         <div className="text-center py-20 bg-[#141721] rounded-lg">
           <p className="text-gray-500 text-[10px] font-black uppercase tracking-[0.4em]">No previous optimisations</p>
         </div>
@@ -250,7 +298,7 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
                       }}
                       className="text-[#85e1fe] hover:text-white font-black uppercase text-[9px] tracking-widest"
                     >
-                      View
+                      {RUNNING_STATUSES.includes((row.status || '').toLowerCase()) ? 'View progress' : 'View'}
                     </button>
                   </td>
                 </tr>
@@ -258,26 +306,26 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
             </tbody>
           </table>
 
-          {rows.length > COLLAPSED_ROWS && (
+          {allRows.length > COLLAPSED_ROWS && (
             <div className="flex flex-col items-center gap-2 mt-2">
               <button
                 type="button"
                 onClick={() => setExpanded((v) => !v)}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#141721] hover:bg-[#1f2335] border border-gray-700 text-gray-300 text-[9px] font-black uppercase tracking-widest transition-colors"
                 aria-expanded={expanded}
-                aria-label={expanded ? 'Show fewer optimisations' : `Show all ${rows.length} optimisations`}
+                aria-label={expanded ? 'Show fewer optimisations' : `Show all ${allRows.length} optimisations`}
               >
                 {expanded ? <Minus className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
-                {expanded ? 'Show less' : `Show all (${rows.length})`}
+                {expanded ? 'Show less' : `Show all (${allRows.length})`}
               </button>
-              {expanded && rows.length > PAGE_SIZE && (() => {
-                const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+              {expanded && allRows.length > PAGE_SIZE && (() => {
+                const totalPages = Math.max(1, Math.ceil(allRows.length / PAGE_SIZE));
                 const currentPage = Math.min(page, totalPages);
                 const start = (currentPage - 1) * PAGE_SIZE;
-                const end = Math.min(start + PAGE_SIZE, rows.length);
+                const end = Math.min(start + PAGE_SIZE, allRows.length);
                 return (
                   <div className="flex items-center gap-3 text-[9px] font-black uppercase tracking-widest">
-                    <span className="text-gray-500">{start + 1}–{end} of {rows.length}</span>
+                    <span className="text-gray-500">{start + 1}–{end} of {allRows.length}</span>
                     <button
                       type="button"
                       onClick={() => setPage((p) => Math.max(1, p - 1))}

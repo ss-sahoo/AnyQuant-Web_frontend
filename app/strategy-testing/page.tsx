@@ -98,6 +98,58 @@ import { MetaAPIDebugModal } from "@/components/metaapi-debug-modal"
 // Custom strategy backtest results
 import { CustomStrategyBacktestResults } from "@/components/custom-strategy-backtest-results"
 
+/* ------------------------------------------------------------------ *
+ * In-flight optimisation handoff
+ *
+ * The run_id of a legacy (in-page) optimisation used to live only in a ref,
+ * so navigating away orphaned the run: it kept going on the backend but the
+ * UI had no way back to it. Persisting it lets the page re-attach its poller
+ * on return and pick the progress readout back up.
+ * ------------------------------------------------------------------ */
+const ACTIVE_OPTIMISATION_KEY = 'anyquant_active_optimisation'
+
+type ActiveOptimisationRecord = {
+  runId: string
+  kind: 'regular' | 'walk_forward'
+  strategyId: string | null
+  startedAt: number
+}
+
+const rememberActiveOptimisation = (record: Omit<ActiveOptimisationRecord, 'startedAt'>) => {
+  try {
+    localStorage.setItem(
+      ACTIVE_OPTIMISATION_KEY,
+      JSON.stringify({ ...record, startedAt: Date.now() } satisfies ActiveOptimisationRecord),
+    )
+  } catch {
+    // Private mode / storage full — resumability is a convenience, not a
+    // requirement, so a failure here must never break the run itself.
+  }
+}
+
+const readActiveOptimisation = (): ActiveOptimisationRecord | null => {
+  try {
+    const raw = localStorage.getItem(ACTIVE_OPTIMISATION_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed?.runId) return null
+    // Anything older than 24h is stale — the backend job store will have
+    // dropped it long before this.
+    if (parsed.startedAt && Date.now() - parsed.startedAt > 24 * 60 * 60 * 1000) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+const forgetActiveOptimisation = () => {
+  try {
+    localStorage.removeItem(ACTIVE_OPTIMISATION_KEY)
+  } catch {
+    /* nothing to clean up */
+  }
+}
+
 // Backtest-stat columns every optimisation row carries. Anything outside this
 // set is a strategy parameter the run was optimising over.
 const STANDARD_STAT_COLUMNS = new Set([
@@ -478,8 +530,6 @@ export default function StrategyTestingPage() {
 
   const [showPreviousOptimisationView, setShowPreviousOptimisationView] = useState(false);
 
-  const [showOptimisationHistory, setShowOptimisationHistory] = useState(false);
-  const [selectedOptimisationDetail, setSelectedOptimisationDetail] = useState(null);
 
   // Walk Forward Optimization states
   const [isLoading3, setIsLoading3] = useState(false);
@@ -856,6 +906,46 @@ export default function StrategyTestingPage() {
       isCancelled = true
     }
   }, [strategy_id])
+
+  /**
+   * Re-attach to a run that was still going when the user navigated away.
+   * The run_id was persisted at start, so the poller (and with it the progress
+   * panel) can pick up exactly where it left off instead of the run being
+   * orphaned until it happens to finish.
+   */
+  useEffect(() => {
+    if (!strategy_id) return
+    const record = readActiveOptimisation()
+    if (!record?.runId) return
+    // Only resume a run belonging to the strategy currently open.
+    if (record.strategyId && String(record.strategyId) !== String(strategy_id)) return
+    // Already watching something — either a run the user just started, or a
+    // resume from an earlier pass of this effect. Checking the poller refs
+    // rather than a "did we try" flag keeps this correct under StrictMode's
+    // mount/unmount/mount, which tears the first poller down.
+    if (optimisationPollerRef.current || walkForwardPollerRef.current) return
+
+    console.log("🔄 Resuming in-flight optimisation:", record)
+    showToast("Reconnected to an optimisation already in progress", 'success')
+    if (record.kind === 'walk_forward') {
+      resumeWalkForwardRun(record.runId)
+    } else {
+      resumeOptimisationRun(record.runId)
+    }
+  }, [strategy_id])
+
+  // Tear down any live poller on unmount. Without this the 3s job-status
+  // interval keeps firing against a component that no longer exists.
+  useEffect(() => {
+    return () => {
+      backtestPollerRef.current?.()
+      optimisationPollerRef.current?.()
+      walkForwardPollerRef.current?.()
+      backtestPollerRef.current = null
+      optimisationPollerRef.current = null
+      walkForwardPollerRef.current = null
+    }
+  }, [])
 
   // Optimisation progress bar.
   //
@@ -2174,6 +2264,7 @@ export default function StrategyTestingPage() {
       let polledResult: any = startData
       if (startData?.run_id) {
         optimisationRunIdRef.current = startData.run_id
+        rememberActiveOptimisation({ runId: startData.run_id, kind: 'regular', strategyId: strategy_id })
         const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000, onStatus: captureOptimisationProgress })
         optimisationPollerRef.current = stop
         try {
@@ -2204,14 +2295,183 @@ export default function StrategyTestingPage() {
       setActiveTab("optimisation")
       setShowOptimisationResults(true)
       setOptimisationTab('results')
+      forgetActiveOptimisation()
       showToast("Optimisation completed!", 'success')
     } catch (error: any) {
       console.error("Custom strategy optimisation failed:", error)
+      // 'cancelled' also fires when the page unmounts mid-run; in that case the
+      // record must survive so the run can be resumed on return.
+      if (error?.message !== 'cancelled') forgetActiveOptimisation()
       showToast(formatErrorForDisplay(error) || "Custom strategy optimisation failed", 'error')
     } finally {
       setIsLoading2(false)
       optimisationRunIdRef.current = null
       optimisationPollerRef.current = null
+    }
+  }
+
+  /**
+   * Apply a finished optimisation payload to the page. Extracted from
+   * handleOptimisation so a run resumed after navigation lands in exactly the
+   * same state as one watched start to finish.
+   */
+  const applyOptimisationResult = (result: any, startData?: any) => {
+    console.log("Full optimization response:", result)
+
+    // Unwrap polled result — pollJobStatus resolves with { status, result: {...} }
+    const polledResult = result?.result ?? result
+
+    // Capture optional message/stdout/stderr from response
+    setOptimisationMessage(polledResult?.message || result?.message || "")
+    setOptimisationStdout(polledResult?.stdout || result?.stdout || "")
+    setOptimisationStderr(polledResult?.stderr || result?.stderr || "")
+
+    if (!polledResult) {
+      showToast("No optimisation result received", 'error')
+      return
+    }
+
+    // /api/optimization-results/<int:pk>/ only accepts an integer id, so a
+    // UUID run_id here always 404s and silently falls back to the polled
+    // payload. Prefer the DB row id; keep run_id as the last resort.
+    const runId = polledResult?.optimization_id || result?.optimization_id ||
+      polledResult?.id || result?.id ||
+      result?.run_id || startData?.run_id || polledResult?.run_id || result?.runId;
+
+    // Add a small delay and a retry mechanism to ensure backend has finished processing
+    const fetchWithRetry = async (retryCount = 0) => {
+      try {
+        console.log(`🔄 Fetching full optimization detail (Attempt ${retryCount + 1}) for ID:`, runId);
+        const fullDetail = await getOptimizationResultDetail(runId);
+
+        // Verify if the result is actually "full" (has table or preview rows)
+        const hasTableData = fullDetail?.optimisation_preview?.length > 0 ||
+          fullDetail?.full_optimization_results?.length > 0 ||
+          fullDetail?.table?.length > 0 ||
+          fullDetail?.results?.length > 0;
+
+        if (hasTableData || retryCount >= 3) {
+          console.log("✅ Successfully fetched full optimization data");
+          setOptimisationResult(normalizeOptimisationResult(fullDetail));
+          if (fullDetail.heatmap_plot_html) {
+            setPlotHeatmapHtml(fullDetail.heatmap_plot_html);
+          }
+        } else {
+          console.log("⏳ Data not yet available, retrying in 2s...");
+          setTimeout(() => fetchWithRetry(retryCount + 1), 2000);
+        }
+      } catch (fetchErr) {
+        console.error("❌ Failed to fetch full detail, using polled result:", fetchErr);
+        setOptimisationResult(normalizeOptimisationResult(polledResult));
+      }
+    };
+
+    if (runId) {
+      // Start the fetch process after a small initial delay
+      setTimeout(() => fetchWithRetry(0), 1000);
+    } else {
+      setOptimisationResult(normalizeOptimisationResult(polledResult));
+    }
+
+    setActiveTab("optimisation");
+    setShowOptimisationResults(true);
+    setOptimisationTab('results');
+    setOptimizationResults(prev => Array.isArray(prev) ? [...prev, polledResult] : [polledResult])
+    if (polledResult.heatmap_plot_html) {
+      setPlotHeatmapHtml(polledResult.heatmap_plot_html)
+    } else {
+      setPlotHeatmapHtml(null)
+    }
+    if (polledResult.trades_plot_html) {
+      setPlotHtml(polledResult.trades_plot_html)
+    }
+    setOptimizationStatus("completed")
+    setCurrentOptimizationId(result?.optimization_id || polledResult?.optimization_id || null)
+  }
+
+  /**
+   * Re-attach to a regular optimisation that is still running on the backend
+   * after the user navigated away and came back.
+   */
+  const resumeOptimisationRun = async (runId: string) => {
+    // Set the ref directly as well as the state: the mount-time hydration
+    // effect reads the ref when its own request lands, and a state update
+    // would not have committed by then.
+    isOptimisationInFlightRef.current = true
+    setIsLoading2(true)
+    setActiveTab("optimisation")
+    setOptimisationTab('results')
+    optimisationRunIdRef.current = runId
+
+    const { promise, stop } = (pollJobStatus as any)(runId, {
+      intervalMs: 3000,
+      onStatus: captureOptimisationProgress,
+    })
+    optimisationPollerRef.current = stop
+
+    try {
+      const result = await promise
+      optimisationPollerRef.current = null
+      showToast("Optimisation finished while you were away", 'success')
+      applyOptimisationResult(result, { run_id: runId })
+      forgetActiveOptimisation()
+    } catch (e: any) {
+      optimisationPollerRef.current = null
+      // Unmount also cancels — keep the record so it can be resumed again.
+      if (e?.message === 'cancelled') return
+      forgetActiveOptimisation()
+      // Expired job-store entry, or the run failed while we were away.
+      console.warn("Could not resume optimisation run:", e)
+      showToast(
+        e?.message === 'Not Found'
+          ? "That optimisation is no longer being tracked by the server"
+          : `Optimisation ended: ${e?.message || 'unknown error'}`,
+        'warning',
+      )
+    } finally {
+      setIsLoading2(false)
+      optimisationRunIdRef.current = null
+    }
+  }
+
+  /**
+   * Same, for a walk-forward run. Deliberately does not auto-navigate to the
+   * results page — the user came back here, so surface the outcome in place
+   * and let them open it from the history list.
+   */
+  const resumeWalkForwardRun = async (runId: string) => {
+    isOptimisationInFlightRef.current = true
+    setIsLoading3(true)
+    setActiveTab("optimisation")
+    setOptimisationTab('results')
+    walkForwardRunIdRef.current = runId
+
+    const { promise, stop } = (pollJobStatus as any)(runId, {
+      intervalMs: 3000,
+      onStatus: captureWalkForwardProgress,
+    })
+    walkForwardPollerRef.current = stop
+
+    try {
+      await promise
+      walkForwardPollerRef.current = null
+      showToast("Walk forward optimisation finished while you were away", 'success')
+      forgetActiveOptimisation()
+    } catch (e: any) {
+      walkForwardPollerRef.current = null
+      // Unmount also cancels — keep the record so it can be resumed again.
+      if (e?.message === 'cancelled') return
+      forgetActiveOptimisation()
+      console.warn("Could not resume walk forward run:", e)
+      showToast(
+        e?.message === 'Not Found'
+          ? "That walk forward run is no longer being tracked by the server"
+          : `Walk forward ended: ${e?.message || 'unknown error'}`,
+        'warning',
+      )
+    } finally {
+      setIsLoading3(false)
+      walkForwardRunIdRef.current = null
     }
   }
 
@@ -2315,6 +2575,7 @@ export default function StrategyTestingPage() {
 
         if (startData?.run_id && startData?.status === 'started') {
           optimisationRunIdRef.current = startData.run_id
+          rememberActiveOptimisation({ runId: startData.run_id, kind: 'regular', strategyId: strategy_id })
           console.log("✅ Stored optimisation run_id for cancel:", startData.run_id)
           const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000, onStatus: captureOptimisationProgress })
           optimisationPollerRef.current = stop
@@ -2338,6 +2599,7 @@ export default function StrategyTestingPage() {
 
         if (startData?.run_id && startData?.status === 'started') {
           optimisationRunIdRef.current = startData.run_id
+          rememberActiveOptimisation({ runId: startData.run_id, kind: 'regular', strategyId: strategy_id })
           console.log("✅ Stored optimisation run_id for cancel:", startData.run_id)
           const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000, onStatus: captureOptimisationProgress })
           optimisationPollerRef.current = stop
@@ -2353,80 +2615,14 @@ export default function StrategyTestingPage() {
         }
       }
 
-      console.log("Full optimization response:", result)
-
-      // Unwrap polled result — pollJobStatus resolves with { status, result: {...} }
-      const polledResult = result?.result ?? result
-
-      // Capture optional message/stdout/stderr from response
-      setOptimisationMessage(polledResult?.message || result?.message || "")
-      setOptimisationStdout(polledResult?.stdout || result?.stdout || "")
-      setOptimisationStderr(polledResult?.stderr || result?.stderr || "")
-      // Handle the response — treat polledResult as the actual result data
-      if (polledResult) {
-        // If we have a run_id, fetch the full detail to ensure we have previewRows/table data
-        // /api/optimization-results/<int:pk>/ only accepts an integer id, so a
-        // UUID run_id here always 404s and silently falls back to the polled
-        // payload. Prefer the DB row id; keep run_id as the last resort.
-        const runId = polledResult?.optimization_id || result?.optimization_id ||
-          polledResult?.id || result?.id ||
-          result?.run_id || startData?.run_id || polledResult?.run_id || result?.runId;
-
-        // Add a small delay and a retry mechanism to ensure backend has finished processing
-        const fetchWithRetry = async (retryCount = 0) => {
-          try {
-            console.log(`🔄 Fetching full optimization detail (Attempt ${retryCount + 1}) for ID:`, runId);
-            const fullDetail = await getOptimizationResultDetail(runId);
-
-            // Verify if the result is actually "full" (has table or preview rows)
-            const hasTableData = fullDetail?.optimisation_preview?.length > 0 ||
-              fullDetail?.full_optimization_results?.length > 0 ||
-              fullDetail?.table?.length > 0 ||
-              fullDetail?.results?.length > 0;
-
-            if (hasTableData || retryCount >= 3) {
-              console.log("✅ Successfully fetched full optimization data");
-              setOptimisationResult(normalizeOptimisationResult(fullDetail));
-              if (fullDetail.heatmap_plot_html) {
-                setPlotHeatmapHtml(fullDetail.heatmap_plot_html);
-              }
-            } else {
-              console.log("⏳ Data not yet available, retrying in 2s...");
-              setTimeout(() => fetchWithRetry(retryCount + 1), 2000);
-            }
-          } catch (fetchErr) {
-            console.error("❌ Failed to fetch full detail, using polled result:", fetchErr);
-            setOptimisationResult(normalizeOptimisationResult(polledResult));
-          }
-        };
-
-        if (runId) {
-          // Start the fetch process after a small initial delay
-          setTimeout(() => fetchWithRetry(0), 1000);
-        } else {
-          setOptimisationResult(normalizeOptimisationResult(polledResult));
-        }
-
-        setActiveTab("optimisation");
-        setShowOptimisationResults(true);
-        setOptimisationTab('results');
-        setOptimizationResults(prev => Array.isArray(prev) ? [...prev, polledResult] : [polledResult])
-        if (polledResult.heatmap_plot_html) {
-          setPlotHeatmapHtml(polledResult.heatmap_plot_html)
-        } else {
-          setPlotHeatmapHtml(null)
-        }
-        if (polledResult.trades_plot_html) {
-          setPlotHtml(polledResult.trades_plot_html)
-        }
-        setOptimizationStatus("completed")
-        setCurrentOptimizationId(result?.optimization_id || polledResult?.optimization_id || null)
-        return
-      }
-
-      showToast("No optimisation result received", 'error')
+      applyOptimisationResult(result, startData)
+      forgetActiveOptimisation()
+      return
     } catch (error: any) {
       console.error("Optimisation Error:", error)
+      // 'cancelled' also fires when the page unmounts mid-run; in that case the
+      // record must survive so the run can be resumed on return.
+      if (error?.message !== 'cancelled') forgetActiveOptimisation()
 
       // Check if this is a MetaAPI-related error
       const errorMessage = error.message || "Unknown error"
@@ -2467,6 +2663,7 @@ export default function StrategyTestingPage() {
     optimisationPollerRef.current = null
     const runId = optimisationRunIdRef.current
     optimisationRunIdRef.current = null
+    forgetActiveOptimisation()
     if (runId) {
       cancelOptimisationRun(runId as any)
         .then((r) => console.log("✅ cancel-optimisation:", r))
@@ -2489,6 +2686,11 @@ export default function StrategyTestingPage() {
       showToast("Not enough files uploaded for the required timeframes", 'error')
       return
     }
+
+    // A cancel also fires when the page unmounts mid-run. In that case the
+    // persisted run record must survive so the run can be resumed on return;
+    // every other exit path clears it in the finally below.
+    let wasCancelled = false
 
     try {
       setIsLoading3(true)
@@ -2598,13 +2800,17 @@ export default function StrategyTestingPage() {
       let result: any
       if (startData?.run_id && startData?.status === 'started') {
         walkForwardRunIdRef.current = startData.run_id
+        rememberActiveOptimisation({ runId: startData.run_id, kind: 'walk_forward', strategyId: strategy_id })
         console.log("✅ Stored walk forward run_id for cancel:", startData.run_id)
         const { promise, stop } = (pollJobStatus as any)(startData.run_id, { intervalMs: 3000, onStatus: captureWalkForwardProgress })
         walkForwardPollerRef.current = stop
         try {
           result = await promise
         } catch (e: any) {
-          if (e?.message === 'cancelled') return
+          if (e?.message === 'cancelled') {
+            wasCancelled = true
+            return
+          }
           throw e
         }
         walkForwardPollerRef.current = null
@@ -2718,6 +2924,7 @@ export default function StrategyTestingPage() {
     } finally {
       setIsLoading3(false)
       walkForwardRunIdRef.current = null
+      if (!wasCancelled) forgetActiveOptimisation()
     }
   }
 
@@ -2726,6 +2933,7 @@ export default function StrategyTestingPage() {
     walkForwardPollerRef.current = null
     const runId = walkForwardRunIdRef.current
     walkForwardRunIdRef.current = null
+    forgetActiveOptimisation()
     if (runId) {
       cancelOptimisationRun(runId as any)
         .then((r) => console.log("✅ cancel-walk-forward:", r))
@@ -4303,6 +4511,38 @@ export default function StrategyTestingPage() {
               showToast(err?.message || 'Failed to load optimisation result', 'error')
             }
           }}
+          onSelectRunning={() => {
+            setActiveTab("optimisation")
+            setOptimisationTab('results')
+            if (isOptimisationRunActive || isLoading3) {
+              showToast("This run is in progress — see the panel above", 'success')
+              return
+            }
+            // Not currently attached: re-attach if we still hold the run_id.
+            const record = readActiveOptimisation()
+            if (record?.runId && !optimisationPollerRef.current && !walkForwardPollerRef.current) {
+              if (record.kind === 'walk_forward') {
+                resumeWalkForwardRun(record.runId)
+              } else {
+                resumeOptimisationRun(record.runId)
+              }
+            } else {
+              showToast(
+                "This run started elsewhere — its progress can't be followed from this browser",
+                'warning',
+              )
+            }
+          }}
+          // Refetch whenever a run starts or ends, so a row stops saying
+          // "running" as soon as it completes, fails or is cancelled.
+          refreshToken={`${isLoading2}-${isLoading3}-${isPollingActive}`}
+          activeRun={
+            isLoading3
+              ? { kind: 'walk_forward' as const }
+              : isOptimisationRunActive
+                ? { kind: 'regular' as const }
+                : null
+          }
           isInline={true}
         />
       ) : (
@@ -4544,18 +4784,11 @@ export default function StrategyTestingPage() {
                           })()}
 
                           {optimisationTab === 'trades' && (
-                            <div className="p-6 space-y-8">
-                              <h3 className="text-xs font-black text-gray-500 mb-6 uppercase tracking-[0.4em]">Previous Optimisation Results</h3>
-                              <OptimisationHistoryList
-                                strategyId={strategy_id || ''}
-                                onSelect={async (id) => {
-                                  const detail = await getOptimizationResultDetail(id as any);
-                                  setOptimisationResult(normalizeOptimisationResult(detail));
-                                  setShowOptimisationResults(true);
-                                  setOptimisationTab('results');
-                                }}
-                                isInline={true}
-                              />
+                            <div className="flex flex-col items-center justify-center min-h-[300px] py-10">
+                              <div className="text-gray-600 text-[10px] font-black uppercase tracking-[0.5em]">No trades for an optimisation</div>
+                              <div className="text-gray-800 text-[8px] font-bold mt-4 uppercase tracking-[0.3em]">
+                                Past runs are listed under the Results tab
+                              </div>
                             </div>
                           )}
                         </div>
@@ -5495,27 +5728,6 @@ export default function StrategyTestingPage() {
                     </div>
                   </div>
                 </div>
-              )}
-
-              {showOptimisationHistory && !selectedOptimisationDetail && (
-                <OptimisationHistoryList
-                  strategyId={strategy_id || ''}
-                  onSelect={async (id) => {
-                    const detail = await getOptimizationResultDetail(id);
-                    setSelectedOptimisationDetail(detail);
-                  }}
-                  onClose={() => setShowOptimisationHistory(false)}
-                />
-              )}
-              {selectedOptimisationDetail && (
-                <PreviousOptimisationView
-                  optimisationResults={[selectedOptimisationDetail]}
-                  onClose={() => {
-                    setSelectedOptimisationDetail(null);
-                    setShowOptimisationHistory(false);
-                  }}
-                  isFullScreen={true}
-                />
               )}
 
               {/* Walk Forward Optimization Results Modal */}
