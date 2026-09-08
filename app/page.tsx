@@ -4,13 +4,12 @@ import { useEffect } from "react"
 
 export default function Home() {
   useEffect(() => {
-    // Redirect to external waitlist page
-    window.location.href = "https://anyquant.webflow.io/waitlist"
+    window.location.href = "/auth"
   }, [])
 
   return (
     <div className="min-h-screen bg-black flex justify-center items-center">
-      <div className="text-white text-lg">Redirecting to waitlist...</div>
+      <div className="text-white text-lg">Redirecting to login...</div>
     </div>
   )
 }

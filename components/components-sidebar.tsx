@@ -158,6 +158,7 @@ export function ComponentsSidebar({ onComponentSelect, onEditCustomComponent, wi
     "Cumulative Volume Delta",
     "Historical Price Level",
     "Candle Size",
+    "VWAP",
     // "SMA",
     // "WMA",
     // "VWMA",

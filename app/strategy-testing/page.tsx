@@ -1971,16 +1971,19 @@ export default function StrategyTestingPage() {
         startData = await runBacktestWithMetaAPI(parsedStatement, token, accountId, symbol, null as any, {
           strategy_type: strategyType,
           custom_strategy_id: customStrategyIdForRun,
+          code: parsedStatement?.code || parsedStatement?.compiled_code || null,
           // Spread, not two fields: toIsoDateRange returns null unless both
           // bounds parse, and a lone bound is a 400.
           ...(isoRange ?? {}),
           generate_plot: true,
           trading_type: devTradingType,
           data_mapping: devDataMapping.length > 0 ? devDataMapping : null,
+          allow_sample_data: true,
         })
       } else {
         startData = await (runBacktest as any)({
           statement: parsedStatement,
+          code: parsedStatement?.code || parsedStatement?.compiled_code || null,
           files: buildTimeframeFiles(),
           strategy_type: strategyType,
           custom_strategy_id: customStrategyIdForRun,
@@ -1991,6 +1994,7 @@ export default function StrategyTestingPage() {
           generate_plot: true,
           trading_type: devTradingType,
           data_mapping: devDataMapping.length > 0 ? devDataMapping : null,
+          allow_sample_data: true,
         })
       }
 
