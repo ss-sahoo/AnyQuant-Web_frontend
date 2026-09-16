@@ -619,7 +619,7 @@ export const cancelBacktest = async (runId) => {
   const authToken = typeof localStorage !== 'undefined' ? localStorage.getItem("auth_token") : null
   const headers = new Headers()
   if (authToken) headers.append("Authorization", `Bearer ${authToken}`)
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || ""
   const response = await fetch(`${apiBase}/api/cancel-backtest/`, { method: "POST", headers, body: formData })
   console.log("📡 cancel-backtest status:", response.status)
   return response.json().catch(() => ({}))
@@ -632,7 +632,7 @@ export const cancelOptimisationRun = async (runId) => {
   const headers = new Headers()
   if (authToken) headers.append("Authorization", `Bearer ${authToken}`)
   console.log("📡 cancel-optimisation →", runId)
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || ""
   const response = await fetch(`${apiBase}/api/cancel-optimisation/`, { method: "POST", headers, body: formData })
   console.log("📡 cancel-optimisation status:", response.status)
   return response.json().catch(() => ({}))

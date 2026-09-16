@@ -1978,7 +1978,6 @@ export default function StrategyTestingPage() {
           generate_plot: true,
           trading_type: devTradingType,
           data_mapping: devDataMapping.length > 0 ? devDataMapping : null,
-          allow_sample_data: true,
         })
       } else {
         startData = await (runBacktest as any)({
@@ -1994,7 +1993,6 @@ export default function StrategyTestingPage() {
           generate_plot: true,
           trading_type: devTradingType,
           data_mapping: devDataMapping.length > 0 ? devDataMapping : null,
-          allow_sample_data: true,
         })
       }
 
@@ -2030,6 +2028,11 @@ export default function StrategyTestingPage() {
       const shortfall = coverageShortfallMessage(job, result, isoRange)
       if (shortfall) showToast(shortfall, 'warning')
 
+      const resultWarnings = result?.warnings || job?.warnings
+      if (Array.isArray(resultWarnings) && resultWarnings.length > 0) {
+        resultWarnings.forEach((w: string) => showToast(w, 'warning'))
+      }
+
       if (result?.plot_html) setPlotHtml(result.plot_html)
 
       if (strategyType === "dev_mode") {
@@ -2062,7 +2065,8 @@ export default function StrategyTestingPage() {
           plot_html: result.plot_html || null,
           csv_url: result.csv_url || null,
           summary_stats: extractSummaryStats(result),
-          metadata: result.metadata || {}
+          metadata: result.metadata || {},
+          warnings: result.warnings || job?.warnings || []
         }
 
         sessionStorage.setItem('customBacktestResult', JSON.stringify(normalizedResult))
