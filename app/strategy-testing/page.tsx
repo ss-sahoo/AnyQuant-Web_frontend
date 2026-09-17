@@ -1971,6 +1971,7 @@ export default function StrategyTestingPage() {
         startData = await runBacktestWithMetaAPI(parsedStatement, token, accountId, symbol, null as any, {
           strategy_type: strategyType,
           custom_strategy_id: customStrategyIdForRun,
+          code: parsedStatement?.code || parsedStatement?.compiled_code || null,
           // Spread, not two fields: toIsoDateRange returns null unless both
           // bounds parse, and a lone bound is a 400.
           ...(isoRange ?? {}),
@@ -1981,6 +1982,7 @@ export default function StrategyTestingPage() {
       } else {
         startData = await (runBacktest as any)({
           statement: parsedStatement,
+          code: parsedStatement?.code || parsedStatement?.compiled_code || null,
           files: buildTimeframeFiles(),
           strategy_type: strategyType,
           custom_strategy_id: customStrategyIdForRun,
@@ -2026,6 +2028,11 @@ export default function StrategyTestingPage() {
       const shortfall = coverageShortfallMessage(job, result, isoRange)
       if (shortfall) showToast(shortfall, 'warning')
 
+      const resultWarnings = result?.warnings || job?.warnings
+      if (Array.isArray(resultWarnings) && resultWarnings.length > 0) {
+        resultWarnings.forEach((w: string) => showToast(w, 'warning'))
+      }
+
       if (result?.plot_html) setPlotHtml(result.plot_html)
 
       if (strategyType === "dev_mode") {
@@ -2058,7 +2065,8 @@ export default function StrategyTestingPage() {
           plot_html: result.plot_html || null,
           csv_url: result.csv_url || null,
           summary_stats: extractSummaryStats(result),
-          metadata: result.metadata || {}
+          metadata: result.metadata || {},
+          warnings: result.warnings || job?.warnings || []
         }
 
         sessionStorage.setItem('customBacktestResult', JSON.stringify(normalizedResult))

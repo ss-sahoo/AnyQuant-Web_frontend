@@ -248,6 +248,11 @@ export const INDICATOR_CONTRACT: Record<string, IndicatorSpec> = {
       { name: "output", type: "select", default: "price", options: CANDLESIZE_OUTPUTS },
     ],
   },
+  VWAP: {
+    params: [
+      { name: "reset_period", type: "select", default: "D", options: CVD_RESET_PERIODS, nullable: true, softDefault: true },
+    ],
+  },
   SmoothedHeikenAshi: {
     params: [
       { name: "len1", type: "int", default: 10 },

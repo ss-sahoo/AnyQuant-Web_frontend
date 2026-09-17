@@ -21,6 +21,7 @@ import { SLTPSettingsModal, type SLTPSettings } from "@/components/modals/sl-tp-
 import { PriceSettingsModal } from "@/components/modals/price-settings-modal"
 import { AtCandleModal } from "@/components/modals/at-candle-modal"
 import { DerivativeSettingsModal } from "@/components/modals/derivative-settings-modal"
+import { VwapSettingsModal } from "@/components/modals/vwap-settings-modal"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { createStatement, editStrategy, createCustomComponent, validateCustomComponentCode, activateCustomComponent, listCustomComponents, createCustomStrategy, validateCustomStrategyCode, getCustomStrategyTemplate, updateCustomStrategy, listCustomStrategies, deleteCustomStrategy, getCustomStrategy, updateCustomComponent, fetchStatementDetail, validateStrategy } from "@/app/AllApiCalls"
@@ -282,6 +283,8 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   const [showBollingerModal, setShowBollingerModal] = useState(false)
   const [showVolumeModal, setShowVolumeModal] = useState(false)
   const [showAtrModal, setShowAtrModal] = useState(false)
+  const [showVwapModal, setShowVwapModal] = useState(false)
+  const [vwapModalTarget, setVwapModalTarget] = useState<any>(null)
   const [showMacdModal, setShowMacdModal] = useState(false)
   const [showSuperTrendModal, setShowSuperTrendModal] = useState(false)
   const [showMaModal, setShowMaModal] = useState(false)
@@ -1565,6 +1568,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       if (name === "HistoricalPriceLevel") { setShowHistoricalPriceLevelModal(true); return true }
       if (name === "CandleSize") { setShowCandleSizeModal(true); return true }
       if (name === "ATR") { openAtrModal(statementIndex, conditionIndex, slot); return true }
+      if (name === "VWAP") { openVwapModal(statementIndex, conditionIndex, slot); return true }
       if (name === "Stochastic") { openStochasticModal(statementIndex, conditionIndex, slot); return true }
       if (MA_FAMILY.has(name)) { setShowMaModal(true); return true }
       return false
@@ -2794,6 +2798,15 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             } else if (component.toLowerCase() === "price") {
               // Show the Price Settings modal
               setShowPriceSettingsModal(true)
+            } else if (component === "VWAP" || component.toLowerCase() === "vwap") {
+              lastCondition.inp1 = {
+                type: "CUSTOM_I",
+                name: "VWAP",
+                timeframe: timeframe,
+                input_params: {
+                  reset_period: "D",
+                },
+              }
             } else {
               // Keep the existing handling for other indicators
               lastCondition.inp1 = createConstantInput(component.toLowerCase(), timeframe)
@@ -2896,6 +2909,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             const targetInput = lastCondition.operator_name && lastCondition.inp2 ? "inp2" : "inp1"
             const timeframeForModal = lastCondition.timeframe || selectedTimeframe
             openAtrModal(statementIndex, conditionIndex, targetInput, timeframeForModal)
+          } else if (component === "VWAP" || component.toLowerCase() === "vwap") {
+            const conditionIndex = currentStatement.strategy.length - 1
+            const targetInput = lastCondition.operator_name && lastCondition.inp2 ? "inp2" : "inp1"
+            const timeframeForModal = lastCondition.timeframe || selectedTimeframe
+            openVwapModal(statementIndex, conditionIndex, targetInput, timeframeForModal)
           } else if (component === "MACD" || component.toLowerCase() === "macd") {
             setShowMacdModal(true)
           } else if (component === "SuperTrend" || component.toLowerCase() === "supertrend") {
@@ -4852,6 +4870,104 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
     setAtrModalTarget(null)
     setShowAtrModal(false)
     setPendingTimeframe("3h")
+    setTimeout(() => {
+      searchInputRefs.current[activeStatementIndex]?.focus()
+    }, 100)
+  }
+
+  // VWAP Modal Helper Functions
+  const openVwapModal = (
+    statementIndex: number,
+    conditionIndex: number,
+    inputType: "inp1" | "inp2",
+    timeframeOverride?: string,
+  ) => {
+    setVwapModalTarget({
+      statementIndex,
+      conditionIndex,
+      inputType,
+      timeframeOverride,
+    })
+    setShowVwapModal(true)
+  }
+
+  const resolveVwapTarget = () => {
+    if (vwapModalTarget) return vwapModalTarget
+    if (editingComponent && (editingComponent.componentType === "inp1" || editingComponent.componentType === "inp2")) {
+      return {
+        statementIndex: editingComponent.statementIndex,
+        conditionIndex: editingComponent.conditionIndex,
+        inputType: editingComponent.componentType,
+      }
+    }
+    const fallbackStatement = statements[activeStatementIndex]
+    if (!fallbackStatement) return null
+    const fallbackConditionIndex = Math.max(0, fallbackStatement.strategy.length - 1)
+    const fallbackCondition = fallbackStatement.strategy[fallbackConditionIndex]
+    const fallbackInput: "inp1" | "inp2" =
+      fallbackCondition?.inp1 && fallbackCondition?.operator_name && !fallbackCondition?.inp2 ? "inp2" : "inp1"
+    return {
+      statementIndex: activeStatementIndex,
+      conditionIndex: fallbackConditionIndex,
+      inputType: fallbackInput,
+    }
+  }
+
+  const getVwapInitialSettings = () => {
+    const target = resolveVwapTarget()
+    if (!target) return undefined
+    const condition = statements[target.statementIndex]?.strategy[target.conditionIndex]
+    if (!condition) return undefined
+    const indicator = target.inputType === "inp1" ? condition?.inp1 : condition?.inp2
+    if (indicator && "name" in indicator && indicator.name === "VWAP" && "input_params" in indicator) {
+      return {
+        reset_period: indicator.input_params?.reset_period || "D",
+      }
+    }
+    return undefined
+  }
+
+  const applyVwapSettings = (settings: any) => {
+    const target = resolveVwapTarget()
+    if (!target) return
+    const newStatements = [...statements]
+    const targetStatement = newStatements[target.statementIndex]
+    const condition = targetStatement?.strategy[target.conditionIndex]
+    if (!condition) return
+    const getExistingTimeframe = () => {
+      const existing =
+        target.inputType === "inp1"
+          ? condition.inp1 && typeof condition.inp1 === "object" && "timeframe" in condition.inp1
+            ? condition.inp1.timeframe
+            : undefined
+          : condition.inp2 && typeof condition.inp2 === "object" && "timeframe" in condition.inp2
+            ? condition.inp2.timeframe
+            : undefined
+      return existing
+    }
+    const timeframe =
+      target.timeframeOverride ||
+      pendingTimeframe ||
+      getExistingTimeframe() ||
+      condition.timeframe ||
+      selectedTimeframe
+    const indicatorData = {
+      type: "CUSTOM_I" as const,
+      name: "VWAP" as const,
+      timeframe,
+      input_params: {
+        reset_period: settings.reset_period || "D",
+      },
+    }
+    if (target.inputType === "inp1") {
+      condition.inp1 = indicatorData
+    } else {
+      condition.inp2 = indicatorData
+    }
+    setStatements(newStatements)
+    setEditingComponent(null)
+    setVwapModalTarget(null)
+    setShowVwapModal(false)
     setTimeout(() => {
       searchInputRefs.current[activeStatementIndex]?.focus()
     }, 100)
@@ -8464,6 +8580,17 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             }}
             initialSettings={getAtrInitialSettings()}
             onSave={applyAtrSettings}
+          />
+        )}
+        {showVwapModal && (
+          <VwapSettingsModal
+            onClose={() => {
+              setShowVwapModal(false)
+              setEditingComponent(null)
+              setVwapModalTarget(null)
+            }}
+            initialSettings={getVwapInitialSettings()}
+            onSave={applyVwapSettings}
           />
         )}
         {showMacdModal && (

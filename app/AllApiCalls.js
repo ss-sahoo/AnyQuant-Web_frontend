@@ -264,18 +264,22 @@ export const runBacktest = async ({
   run_id = null,
   strategy_type = null,
   custom_strategy_id = null,
+  code = null,
   start_date = null,
   end_date = null,
   generate_plot = null,
   trading_type = null,
   data_mapping = null,
+  allow_sample_data = null,
 }) => {
   const formData = new FormData()
 
-  formData.append("statement", JSON.stringify(statement))
+  if (statement) formData.append("statement", JSON.stringify(statement))
+  if (code) formData.append("code", code)
   if (run_id) formData.append("run_id", run_id)
   if (strategy_type) formData.append("strategy_type", strategy_type)
   if (custom_strategy_id != null) formData.append("custom_strategy_id", String(custom_strategy_id))
+  if (allow_sample_data != null) formData.append("allow_sample_data", String(allow_sample_data))
   if (data_mapping && data_mapping.length > 0) {
     formData.append("data_mapping", JSON.stringify(data_mapping))
   }
@@ -293,8 +297,10 @@ export const runBacktest = async ({
     }
   }
 
-  for (const [timeframe, file] of Object.entries(files)) {
-    formData.append(timeframe, file)
+  if (files) {
+    for (const [timeframe, file] of Object.entries(files)) {
+      formData.append(timeframe, file)
+    }
   }
 
   const response = await Fetch("/api/run-backtest/", {
@@ -323,10 +329,10 @@ export const runBacktest = async ({
  * @param {string} accountId
  * @param {string} symbol
  * @param {string|null} [run_id]
- * @param {{ strategy_type?: string|null, custom_strategy_id?: number|null,
+ * @param {{ strategy_type?: string|null, custom_strategy_id?: number|null, code?: string|null,
  *   start_date?: string|null, end_date?: string|null,
  *   generate_plot?: boolean|null, trading_type?: Object|null,
- *   data_mapping?: Array<{name: string, timeframe: string}>|null }} [options]
+ *   data_mapping?: Array<{name: string, timeframe: string}>|null, allow_sample_data?: boolean|null }} [options]
  */
 export const runBacktestWithMetaAPI = async (
   strategy,
@@ -337,11 +343,13 @@ export const runBacktestWithMetaAPI = async (
   {
     strategy_type = null,
     custom_strategy_id = null,
+    code = null,
     start_date = null,
     end_date = null,
     generate_plot = null,
     trading_type = null,
     data_mapping = null,
+    allow_sample_data = null,
   } = {},
 ) => {
   console.log('🔍 MetaAPI Debug Info:', {
@@ -354,13 +362,15 @@ export const runBacktestWithMetaAPI = async (
   });
 
   const formData = new FormData();
-  formData.append('statement', JSON.stringify(strategy));
+  if (strategy) formData.append('statement', JSON.stringify(strategy));
+  if (code) formData.append('code', code);
   formData.append('metaapi_token', token);
   formData.append('metaapi_account_id', accountId);
   formData.append('symbol', symbol);
   if (run_id) formData.append('run_id', run_id);
   if (strategy_type) formData.append('strategy_type', strategy_type);
   if (custom_strategy_id != null) formData.append('custom_strategy_id', String(custom_strategy_id));
+  if (allow_sample_data != null) formData.append('allow_sample_data', String(allow_sample_data));
   // See runBacktest: dev-mode only, binds data variables to timeframes.
   if (data_mapping && data_mapping.length > 0) {
     formData.append('data_mapping', JSON.stringify(data_mapping));
@@ -609,8 +619,8 @@ export const cancelBacktest = async (runId) => {
   const authToken = typeof localStorage !== 'undefined' ? localStorage.getItem("auth_token") : null
   const headers = new Headers()
   if (authToken) headers.append("Authorization", `Bearer ${authToken}`)
-  console.log("📡 cancel-backtest →", runId)
-  const response = await fetch("https://anyquant.co.uk/api/cancel-backtest/", { method: "POST", headers, body: formData })
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || ""
+  const response = await fetch(`${apiBase}/api/cancel-backtest/`, { method: "POST", headers, body: formData })
   console.log("📡 cancel-backtest status:", response.status)
   return response.json().catch(() => ({}))
 }
@@ -622,7 +632,8 @@ export const cancelOptimisationRun = async (runId) => {
   const headers = new Headers()
   if (authToken) headers.append("Authorization", `Bearer ${authToken}`)
   console.log("📡 cancel-optimisation →", runId)
-  const response = await fetch("https://anyquant.co.uk/api/cancel-optimisation/", { method: "POST", headers, body: formData })
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || ""
+  const response = await fetch(`${apiBase}/api/cancel-optimisation/`, { method: "POST", headers, body: formData })
   console.log("📡 cancel-optimisation status:", response.status)
   return response.json().catch(() => ({}))
 }

@@ -1,5 +1,5 @@
 export const Fetch = async (endPoint, config, headerKey) => {
-  const baseUrl = "https://anyquant.co.uk"
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || ""
   const url = `${baseUrl}${endPoint.startsWith("/") ? endPoint : `/${endPoint}`}`
 
   const headers = new Headers(config.headers || {})
