@@ -6400,7 +6400,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 onCompile={handleDeveloperModeCompile}
                 onSave={handleDeveloperModeSave}
                 onGoToBacktest={(strategyId) => {
-                  setDevModeView("closed")
+                  // Deliberately no setDevModeView("closed") here: the push
+                  // resolves a route later, so closing the editor now repaints
+                  // the no-code builder underneath it and the user watches that
+                  // flash until the navigation commits. This whole tree
+                  // unmounts on navigation anyway.
                   setEditingCustomComponent(null)
                   setCurrentComponentId(null)
                   router.push(`/strategy-testing?id=${strategyId}&custom=true`)
