@@ -244,6 +244,7 @@ export interface AppliedEdits {
   Equity?: any[]
   behavior?: any
   equity?: any
+  Parameters?: Record<string, any>
 }
 
 /**
@@ -261,11 +262,19 @@ export function applyEdits(statement: any, rows: PersistableRow[]): AppliedEdits
     const value = rowValue(row)
 
     if (resolved.sltp) {
-      // Operator string can only hold the scalar; use the dict's central value
-      // when optimising, else the bare number.
+      // Operator string holds the scalar value.
       const num = typeof value === "object" ? value.value : value
       if (typeof num !== "number" || !Number.isFinite(num)) continue
       if (rewriteSltpOperatorValue(clone.Equity, resolved.sltp, num)) touched.add("Equity")
+
+      // Persist full dict range into top-level Parameters when optimising SL/TP
+      clone.Parameters = clone.Parameters || {}
+      if (typeof value === "object") {
+        clone.Parameters[row.encoding] = value
+      } else {
+        delete clone.Parameters[row.encoding]
+      }
+      touched.add("Parameters")
       continue
     }
 
@@ -280,5 +289,6 @@ export function applyEdits(statement: any, rows: PersistableRow[]): AppliedEdits
   if (touched.has("Equity")) out.Equity = clone.Equity
   if (touched.has("behavior")) out.behavior = clone.behavior
   if (touched.has("equity")) out.equity = clone.equity
+  if (touched.has("Parameters")) out.Parameters = clone.Parameters
   return out
 }
