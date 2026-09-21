@@ -2524,10 +2524,36 @@ export default function StrategyTestingPage() {
           const optimisationForm = JSON.parse(optimisationFormString)
           parametersObject = optimisationForm.Parameters || {}
           constraintsArray = optimisationForm.Constraints || []
+
+          // If Parameters is empty, fallback to building it dynamically from the parameters array
+          if (!parametersObject || Object.keys(parametersObject).length === 0) {
+            if (optimisationForm.parameters && Array.isArray(optimisationForm.parameters)) {
+              optimisationForm.parameters.forEach((param: any) => {
+                if (param.optimise && param.encoding) {
+                  parametersObject[param.encoding] = {
+                    value: param.default ?? param.value,
+                    ...(param.range && { range: param.range }),
+                    ...(param.step && { step: param.step }),
+                    type: param.type,
+                  }
+                }
+              })
+            }
+          }
         } catch (error) {
           console.error("Error parsing optimisation_form from localStorage:", error)
         }
       }
+
+      if (!parametersObject || Object.keys(parametersObject).length === 0) {
+        showToast("No parameters selected for optimization. Please check 'Optimise' for at least one parameter in the Properties tab.", 'warning')
+        setIsLoading2(false)
+        return
+      }
+
+      // Automatically switch to Optimisation tab to show progress / results
+      setActiveTab('optimisation')
+      setOptimisationTab('results')
 
       // Construct Hyper-parameters from state
       const hyperParameters = {
@@ -2539,8 +2565,8 @@ export default function StrategyTestingPage() {
 
       // Construct Misc object
       const misc = {
-        Algorithm: selectedAlgorithm,
-        Maximise: selectedMaximiseOption,
+        Algorithm: selectedAlgorithm || "Genetic algorithm",
+        Maximise: selectedMaximiseOption || "Equity Final [$]",
         "Hyper-parameters": hyperParameters,
       }
 
