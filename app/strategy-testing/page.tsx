@@ -162,6 +162,17 @@ const STANDARD_STAT_COLUMNS = new Set([
   'Buy & Hold Return [%]', 'Expectancy [%]', 'Unnamed: 0', 'generation',
 ])
 
+// Engine statistics POST /api/custom-strategies/optimise/ takes by name as
+// `maximise`. Any other label goes through the route's older keys.
+const DEV_MODE_OPTIMISATION_OBJECTIVES = [
+  'Equity Final [$]', 'Return [%]', 'Return (Ann.) [%]', 'Sharpe Ratio',
+  'Sortino Ratio', 'Calmar Ratio', 'Win Rate [%]', 'Profit Factor', '# Trades',
+  'Max. Drawdown [%]', 'SQN', 'Expectancy [%]',
+]
+
+// The optimiser's algorithm names, exactly as the backend spells them.
+const OPTIMISATION_ALGORITHMS = ['Genetic Algorithm', 'Grid Search', 'Baysian Optimisation']
+
 // Reusable "Coming Soon" placeholder for tabs that don't yet have content.
 function ComingSoonPanel({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
@@ -336,20 +347,28 @@ function toIsoDateRange(dateRange: string): { start_date: string; end_date: stri
   return { start_date: start, end_date: end }
 }
 
-/** The Leverage dropdown value for a TradingType margin; anything unlisted shows as 1:1. */
-function leverageFromMargin(margin: number): string {
-  return margin === 1.0 ? "1:1" :
-    margin === 0.5 ? "1:2" :
-      margin === 0.2 ? "1:5" :
-        margin === 0.1 ? "1:10" :
-          margin === 0.05 ? "1:20" :
-            margin === 0.04 ? "1:25" :
-              margin === 0.033 ? "1:30" :
-                margin === 0.02 ? "1:50" :
-                  margin === 0.013 ? "1:75" :
-                    margin === 0.01 ? "1:100" :
-                      margin === 0.005 ? "1:200" :
-                        margin === 0.002 ? "1:500" : "1:1"
+// Leverage ratios the Leverage dropdown lists; anything else is "Custom...".
+const LEVERAGE_PRESET_RATIOS = [1, 2, 5, 10, 20, 25, 30, 50, 75, 100, 200, 500]
+
+// Rounded margins the old margin -> leverage table recognised for 1:30 and 1:75.
+const LEGACY_ROUNDED_MARGINS = new Map([[0.033, 30], [0.013, 75]])
+
+/**
+ * The Leverage dropdown state for a saved TradingType margin. Margins are
+ * saved as 1/ratio (getLeverageMargin), so 1:30 comes back as 0.0333…, which
+ * the old exact-match table missed and showed as 1:1. A ratio the dropdown
+ * doesn't list was typed into "Custom...", and is restored there — falling
+ * back to 1:1 made the next save overwrite it.
+ */
+function leverageFromMargin(margin: number): { leverage: string; customLeverage: string } {
+  const value = Number(margin)
+  const ratio = LEGACY_ROUNDED_MARGINS.get(value) ?? 1 / value
+  if (!Number.isFinite(ratio) || ratio < 1) return { leverage: "1:1", customLeverage: "" }
+  const whole = Math.round(ratio)
+  if (Math.abs(ratio - whole) < 1e-6 && LEVERAGE_PRESET_RATIOS.includes(whole)) {
+    return { leverage: `1:${whole}`, customLeverage: "" }
+  }
+  return { leverage: "custom", customLeverage: `1:${whole}` }
 }
 
 /**
@@ -979,6 +998,13 @@ export default function StrategyTestingPage() {
               new Date(a.optimization_date || a.created_at || a.date).getTime()
             )
             const latest = sorted[0]
+            // A cloud job's result lives on the job, not at
+            // /optimization-results/<id>/ — its id there 404s or loads an
+            // unrelated result. It opens from the history list instead.
+            if (latest.through_droplet) {
+              console.log("⏭️ Skipping auto-load, latest optimisation is a cloud job", latest.id)
+              return
+            }
             const latestStatus = String(latest.status || '').toLowerCase()
             // A running/failed row has no table to show — leave the tabs empty
             // rather than hydrating a half-written result.
@@ -1179,7 +1205,9 @@ export default function StrategyTestingPage() {
 
             // Calculate leverage from margin
             if (parsed.TradingType.margin) {
-              setLeverage(leverageFromMargin(parsed.TradingType.margin))
+              const restored = leverageFromMargin(parsed.TradingType.margin)
+              setLeverage(restored.leverage)
+              setCustomLeverage(restored.customLeverage)
             }
           }
         } catch (err) {
@@ -1295,7 +1323,12 @@ export default function StrategyTestingPage() {
                   nTrade_max: 1,
                   ...(savedSettings.TradingType || {}),
                 },
-                ...(savedSettings.date_range ? { date_range: savedSettings.date_range } : {}),
+                // The rest of what the Backtest tab shows, as saved.
+                ...Object.fromEntries(
+                  ["date_range", "TradingSession", "entry_at", "exit_at", "execution_timeframe"]
+                    .filter((key) => savedSettings[key] != null && savedSettings[key] !== "")
+                    .map((key) => [key, savedSettings[key]]),
+                ),
                 // Mark as custom strategy for backtest handling
                 is_custom_strategy: true,
                 custom_strategy_id: customStrategy.id,
@@ -1431,7 +1464,12 @@ export default function StrategyTestingPage() {
               setCommission(tradingType.commission || 0.00007)
               setAssetType(tradingType.asset_type || "gold")
               setPositionSize(tradingType.position_size?.toString() || "1")
-              if (tradingType.margin) setLeverage(leverageFromMargin(tradingType.margin))
+              if (tradingType.margin) {
+                const restored = leverageFromMargin(tradingType.margin)
+                setLeverage(restored.leverage)
+                setCustomLeverage(restored.customLeverage)
+              }
+              if (strategyData.TradingSession?.Timezone) setTimezone(strategyData.TradingSession.Timezone)
             }
 
             // Load date range if available
@@ -2177,7 +2215,14 @@ export default function StrategyTestingPage() {
           warnings: result.warnings || job?.warnings || []
         }
 
-        sessionStorage.setItem('customBacktestResult', JSON.stringify(normalizedResult))
+        // The copy /custom-backtest-results reads. plot_html inlines every bar,
+        // trade and indicator, so a long run can still overflow the quota; that
+        // must not stop the result showing here.
+        try {
+          sessionStorage.setItem('customBacktestResult', JSON.stringify(normalizedResult))
+        } catch (e) {
+          console.warn("Couldn't cache the custom backtest result for /custom-backtest-results:", e)
+        }
         setBacktestDetail(normalizeBacktestResult({
           ...normalizedResult,
           // The two arrays the Data and Trades tables read. They come straight
@@ -2251,9 +2296,12 @@ export default function StrategyTestingPage() {
     showToast("Backtest cancelled", 'warning')
   }
 
-  // Map the UI maximise label (e.g. "Return [%]", "Sharpe_Ratio") to the
-  // custom-strategy optimiser's objective vocabulary.
+  // Map the UI maximise label (e.g. "Return (Ann.) [%]", "Sharpe_Ratio") to the
+  // custom-strategy optimiser's `maximise`. An engine statistic it takes by name
+  // goes as is: folded into the route's keys, "Return (Ann.) [%]" became
+  // total_return and optimised Return [%] instead.
   const mapMaximiseToCustomObjective = (label: string): string => {
+    if (DEV_MODE_OPTIMISATION_OBJECTIVES.includes(label)) return label
     const l = (label || "").toLowerCase()
     if (l.includes("sharpe")) return "sharpe_ratio"
     if (l.includes("win")) return "win_rate"
@@ -2311,10 +2359,11 @@ export default function StrategyTestingPage() {
   // Optimisation for Developer-Mode (custom Python) strategies. Talks to the
   // dedicated POST /api/custom-strategies/optimise/ endpoint — the visual
   // pipeline (run-optimisation + strategies/<pk>/edit) is keyed to the
-  // strategy-builder JSON and cannot apply here. Ranges come from the
-  // Properties tab via the localStorage optimisation_form (they're never
-  // persisted server-side for custom strategies; the endpoint takes them
-  // per-request).
+  // strategy-builder JSON and cannot apply here. The backend runs the same
+  // optimiser as a no-code run, with the tab's algorithm, hyper-parameters and
+  // objective. Ranges come from the Properties tab via the localStorage
+  // optimisation_form (they're never persisted server-side for custom
+  // strategies; the endpoint takes them per-request).
   const handleCustomStrategyOptimisation = async () => {
     const customStrategyId = parsedStatement?.custom_strategy_id || parsedStatement?.id
     if (!customStrategyId) {
@@ -2368,6 +2417,14 @@ export default function StrategyTestingPage() {
         strategy_id: Number(customStrategyId),
         parameters,
         maximise: mapMaximiseToCustomObjective(selectedMaximiseOption),
+        // Unset until the tab picks one; the backend then runs the GA.
+        algorithm: OPTIMISATION_ALGORITHMS.includes(selectedAlgorithm) ? selectedAlgorithm : null,
+        algorithm_params: {
+          population_size: Number(populationSize),
+          generations: Number(generations),
+          mutation_rate: Number(mutationRate),
+          tournament_size: Number(tournamentSize),
+        },
         symbol,
         initial_equity: Number(accountDeposit.replace(/,/g, "")) || 10000,
         ...(useMetaAPI && token && accountId
@@ -2393,15 +2450,23 @@ export default function StrategyTestingPage() {
         optimisationPollerRef.current = null
       }
 
-      // No DB record exists for custom optimisation runs (job-store only), so
-      // the polled payload IS the final result — no detail re-fetch.
+      // The run is saved as an OptimizationResult (`optimization_id`), which
+      // the history list opens. The polled payload is shown as it is: its rows
+      // are ranked best first, in the shape adaptCustomOptimisationRows reads.
       const adapted = adaptCustomOptimisationRows(polledResult?.results)
       setOptimisationResult(normalizeOptimisationResult({
         ...polledResult,
         table: adapted,
-        // Don't let the raw custom rows shadow the adapted table in previewRows.
+        // Don't let raw rows shadow the adapted table in previewRows. The
+        // first two would outrank `table`; neither is sent for dev mode today.
+        optimisation_results: undefined,
+        full_optimization_results: undefined,
         results: undefined,
       }))
+      const runWarnings = polledResult?.warnings
+      if (Array.isArray(runWarnings)) {
+        runWarnings.forEach((w: string) => showToast(w, 'warning'))
+      }
       setOptimisationMessage(
         polledResult?.partial
           ? "Time budget hit — showing partial ranked results."
@@ -3164,7 +3229,9 @@ export default function StrategyTestingPage() {
     try {
       const results = await getStrategyWalkForwardOptimizationResults(strategy_id, {
         page: 1,
-        page_size: 50
+        page_size: 50,
+        is_custom_strategy: parsedStatement?.is_custom_strategy ||
+          localStorage.getItem("is_custom_strategy") === "true",
       })
       setWalkForwardOptimizationResults(results.results || [])
 
@@ -3318,6 +3385,9 @@ export default function StrategyTestingPage() {
       asset_type: assetType,
       margin: getLeverageMargin(leverage),
       ...(Number.isFinite(cash) && cash > 0 ? { initial_equity: cash } : {}),
+      new_trade_policy: selectedTradingMode,
+      // Same rule as the saved TradingType: a trade cap only for MTOOTAAT.
+      ...(selectedTradingMode === "MTOOTAAT" ? { n_trade_max: Number.parseInt(maxTrades) || 1 } : {}),
     }
   }
 
@@ -4496,7 +4566,10 @@ export default function StrategyTestingPage() {
         </div>
       )
     }
-    const fmt = (v: any) => (v === undefined || v === null || v === '' ? '-' : v)
+    // A missing value is a bare "-", without its unit. A dev-mode grid or
+    // Bayesian run reports only the objective, so most of its cells are null.
+    const fmt = (v: any, prefix = '', suffix = '') =>
+      (v === undefined || v === null || v === '' ? '-' : `${prefix}${v}${suffix}`)
 
     // A GA of population 100 x 50 generations is 5000 rows; paginate rather
     // than committing all of them to one <table>.
@@ -4547,21 +4620,21 @@ export default function StrategyTestingPage() {
               <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{fmt(row['Start'])}</td>
               <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{fmt(row['End'])}</td>
               <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{fmt(row['Duration'])}</td>
-              <td className="px-4 py-3 font-mono text-white">${fmt(row['Equity Final [$]'])}</td>
-              <td className="px-4 py-3 font-mono text-white">${fmt(row['Equity Peak [$]'])}</td>
-              <td className="px-4 py-3 font-mono">{fmt(row['Return [%]'])}%</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Equity Final [$]'], '$')}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Equity Peak [$]'], '$')}</td>
+              <td className="px-4 py-3 font-mono">{fmt(row['Return [%]'], '', '%')}</td>
               <td className="px-4 py-3 font-mono">{fmt(row['Profit Factor'])}</td>
-              <td className="px-4 py-3 font-mono text-red-500">{fmt(row['Max. Drawdown [%]'])}%</td>
+              <td className="px-4 py-3 font-mono text-red-500">{fmt(row['Max. Drawdown [%]'], '', '%')}</td>
               <td className="px-4 py-3 font-mono text-white">{fmt(row['Sharpe Ratio'])}</td>
               <td className="px-4 py-3 font-mono text-white">{fmt(row['Sortino Ratio'])}</td>
               <td className="px-4 py-3 font-mono text-white">{fmt(row['SQN'])}</td>
-              <td className="px-4 py-3 font-mono text-white">{fmt(row['Win Rate [%]'])}%</td>
-              <td className="px-4 py-3 font-mono text-green-400">{fmt(row['Best Trade [%]'])}%</td>
-              <td className="px-4 py-3 font-mono text-red-400">{fmt(row['Worst Trade [%]'])}%</td>
-              <td className="px-4 py-3 font-mono text-white">{fmt(row['Avg. Trade [%]'])}%</td>
-              <td className="px-4 py-3 font-mono text-white">{fmt(row['Expectancy [%]'])}%</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Win Rate [%]'], '', '%')}</td>
+              <td className="px-4 py-3 font-mono text-green-400">{fmt(row['Best Trade [%]'], '', '%')}</td>
+              <td className="px-4 py-3 font-mono text-red-400">{fmt(row['Worst Trade [%]'], '', '%')}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Avg. Trade [%]'], '', '%')}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Expectancy [%]'], '', '%')}</td>
               <td className="px-4 py-3 font-mono text-white">{fmt(row['# Trades'])}</td>
-              <td className="px-4 py-3 font-mono text-white">{fmt(row['Exposure Time [%]'])}%</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Exposure Time [%]'], '', '%')}</td>
               <td className="px-4 py-3 font-mono text-white">{fmt(row['generation'])}</td>
               <td className="px-4 py-3 max-w-[250px] truncate text-gray-400" title={JSON.stringify(row)}>
                 {Object.entries(row)
@@ -5605,7 +5678,11 @@ export default function StrategyTestingPage() {
                         }
                         setParsedStatement(next)
                         localStorage.setItem("savedStrategy", JSON.stringify(next))
-                        if (strategy_id) {
+                        // The per-id fallback covers no-code strategies, whose
+                        // backend may strip these fields. A Developer-Mode id is
+                        // from another sequence: writing it here would hand this
+                        // timing to the no-code strategy with the same id.
+                        if (strategy_id && !isDevModeStrategy) {
                           const fallback: any = {
                             entry_at: settings.entry_at,
                             exit_at: settings.exit_at,

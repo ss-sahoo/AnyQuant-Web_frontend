@@ -1411,6 +1411,11 @@ export const deleteWalkForwardOptimizationResult = async (optimizationId) => {
   return response.json();
 };
 
+/**
+ * @param {number|string} strategyStatementId
+ * @param {{ page?: number, page_size?: number, is_custom_strategy?: boolean }} [params]
+ *   `is_custom_strategy`: as for getStrategyOptimizationResults.
+ */
 export const getStrategyWalkForwardOptimizationResults = async (strategyStatementId, params = {}) => {
   const queryParams = new URLSearchParams();
 
@@ -1419,6 +1424,9 @@ export const getStrategyWalkForwardOptimizationResults = async (strategyStatemen
   }
   if (params.page_size) {
     queryParams.append('page_size', params.page_size);
+  }
+  if (params.is_custom_strategy) {
+    queryParams.append('is_custom_strategy', 'true');
   }
 
   const response = await Fetch(`/api/strategies/${strategyStatementId}/walkforward-optimization-results/?${queryParams}`, {
@@ -2304,19 +2312,28 @@ export const runCustomStrategyBacktest = async ({ strategy_id, params = {}, init
 };
 
 /**
- * Run a grid/random-search optimisation on a custom (Developer Mode) strategy.
- * Returns 202 with { run_id, grid_size, n_evaluations_planned, sampled, poll_url };
- * poll GET /api/job-status/<run_id>/ (pollJobStatus) until completed. Cancellable
+ * Optimise a custom (Developer Mode) strategy with the optimiser no-code
+ * strategies use (the Genetic Algorithm unless `algorithm` says otherwise).
+ * Returns 202 with { run_id, status, algorithm, hyper_parameters, grid_size,
+ * n_evaluations_planned (null for Bayesian), sampled, poll_url }; poll
+ * GET /api/job-status/<run_id>/ (pollJobStatus) until completed. Cancellable
  * via the existing cancelOptimisationRun(run_id).
  *
  * @param {Object} params
  * @param {number} params.strategy_id - The custom strategy ID
  * @param {Array}  params.parameters - Per-param spec:
  *   { name, optimise: true, start, step, stop } or { name, optimise: false, value }
- * @param {string} [params.maximise] - Objective: final_equity | total_return |
+ * @param {string} [params.maximise] - Objective: an engine statistic such as
+ *   "Return (Ann.) [%]", or one of the route's keys final_equity | total_return |
  *   sharpe_ratio | win_rate | profit_factor | num_trades | max_drawdown
- * @param {number} [params.max_evals] - Evaluation cap (backend caps at 1000)
- * @param {number} [params.time_budget_seconds] - Wall-clock budget (partial results if hit)
+ * @param {string|null} [params.algorithm] - "Genetic Algorithm" | "Grid Search" |
+ *   "Baysian Optimisation" (the backend's spelling). Omitted: the GA
+ * @param {Object|null} [params.algorithm_params] - { population_size, generations,
+ *   mutation_rate, tournament_size }. Omitted: a GA sized to max_evals
+ * @param {number} [params.max_evals] - Search budget (backend caps at 1000): sizes a GA
+ *   sent without algorithm_params; a larger grid search is a 400
+ * @param {number} [params.time_budget_seconds] - Accepted for older clients; the backend
+ *   now bounds a run's time itself
  * @param {string} [params.symbol]
  * @param {string} [params.timeframe]
  * @param {number} [params.initial_equity]
@@ -2331,6 +2348,8 @@ export const runCustomStrategyOptimisation = async ({
   strategy_id,
   parameters,
   maximise = "final_equity",
+  algorithm = null,
+  algorithm_params = null,
   max_evals = 300,
   time_budget_seconds = 1200,
   symbol = "XAUUSD",
@@ -2355,6 +2374,8 @@ export const runCustomStrategyOptimisation = async ({
     start_date,
     end_date,
   }
+  if (algorithm) body.algorithm = algorithm
+  if (algorithm_params) body.algorithm_params = algorithm_params
   if (metaapi_token && metaapi_account_id) {
     body.metaapi_token = metaapi_token
     body.metaapi_account_id = metaapi_account_id

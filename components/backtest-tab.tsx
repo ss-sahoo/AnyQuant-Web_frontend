@@ -45,8 +45,8 @@ interface BacktestTabProps {
   tradeTiming?: TradeTimingSettings
   onTradeTimingSave?: (settings: TradeTimingSettings) => void
   /**
-   * Developer-Mode (custom Python) strategy. The tab shows a notice for it and
-   * hides the trading session, execution timing and trading mode panels.
+   * Developer-Mode (custom Python) strategy. The tab is the same as for a
+   * no-code strategy, plus a notice and a commission hint.
    */
   isDevMode?: boolean
 }
@@ -145,54 +145,48 @@ export function BacktestTab({
 
   return (
     <div className="p-6 ml-[63px]">
-      {/* Developer-Mode strategies run their own entry/exit logic in Python.
-          The session window, position-limit and bar-vs-tick timing panels stay
-          hidden for them; the engine now accepts those settings, but offering
-          them is a separate decision. */}
+      {/* Developer-Mode strategies get the same panels as no-code ones: the
+          engine takes every setting on this tab, though it fills tick-timed
+          entries and exits at the bar close and says so in the run's warnings. */}
       {isDevMode && (
         <div className="mb-6 p-4 bg-[#85e1fe]/10 rounded-md border border-[#85e1fe]/30">
           <div className="text-white font-medium">Developer-Mode strategy</div>
           <div className="text-xs text-gray-300 mt-1">
-            Account deposit, leverage, commission, lot definition, position size and asset type
-            affect the simulation the same way they do for a no-code strategy. Results saved before
-            this update used 10× the configured position size and ignored margin, so don't compare
-            them with new runs.
+            These settings apply the same way they do for a no-code strategy, except that a tick
+            entry or exit runs at the bar close. Results saved before this update used 10× the
+            configured position size and ignored margin, so don't compare them with new runs.
           </div>
         </div>
       )}
 
       {/* Trading Session Panel */}
-      {!isDevMode && (
-        <div className="mb-6 p-4 bg-[#141721] rounded-md border border-[#2b2e38]">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-white font-medium">Trading Session</div>
-              <div className="text-xs text-gray-400 mt-1">{tradingSessionSummary || "Not configured"}</div>
-            </div>
-            <button className="px-4 py-2 bg-[#2b2e38] text-white rounded-md hover:bg-[#3a3e4a]" onClick={() => setShowTradingSessionModal(true)}>
-              Configure
-            </button>
+      <div className="mb-6 p-4 bg-[#141721] rounded-md border border-[#2b2e38]">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-white font-medium">Trading Session</div>
+            <div className="text-xs text-gray-400 mt-1">{tradingSessionSummary || "Not configured"}</div>
           </div>
+          <button className="px-4 py-2 bg-[#2b2e38] text-white rounded-md hover:bg-[#3a3e4a]" onClick={() => setShowTradingSessionModal(true)}>
+            Configure
+          </button>
         </div>
-      )}
+      </div>
 
       {/* Trade Execution Timing Panel */}
-      {!isDevMode && (
-        <div className="mb-6 p-4 bg-[#141721] rounded-md border border-[#2b2e38]">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-white font-medium">Trade Execution Timing</div>
-              <div className="text-xs text-gray-400 mt-1">{tradeTimingSummary}</div>
-            </div>
-            <button
-              className="px-4 py-2 bg-[#2b2e38] text-white rounded-md hover:bg-[#3a3e4a]"
-              onClick={() => setShowTradeTimingModal(true)}
-            >
-              Configure
-            </button>
+      <div className="mb-6 p-4 bg-[#141721] rounded-md border border-[#2b2e38]">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-white font-medium">Trade Execution Timing</div>
+            <div className="text-xs text-gray-400 mt-1">{tradeTimingSummary}</div>
           </div>
+          <button
+            className="px-4 py-2 bg-[#2b2e38] text-white rounded-md hover:bg-[#3a3e4a]"
+            onClick={() => setShowTradeTimingModal(true)}
+          >
+            Configure
+          </button>
         </div>
-      )}
+      </div>
       <div className="flex justify-between items-start mb-6">
         {/* Left side - Dates */}
         <div className="w-[30%]">
@@ -355,11 +349,10 @@ export function BacktestTab({
         </div>
       </div>
 
-      {!isDevMode && <div className="border-t border-[#2b2e38] my-6"></div>}
+      <div className="border-t border-[#2b2e38] my-6"></div>
 
-      {/* Trading Mode Section — hidden for Developer Mode until the engine
-          supports multiple concurrent positions for custom strategies. */}
-      <div className={`mb-6 ${isDevMode ? "hidden" : ""}`}>
+      {/* Trading Mode Section */}
+      <div className="mb-6">
         <label className="block text-sm text-gray-400 mb-4">Trading Mode</label>
         <div className="flex flex-wrap gap-3 mb-4">
           {[

@@ -91,7 +91,12 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
     // history (and vice versa).
     Promise.allSettled([
       getStrategyOptimizationResults(strategyId, { page: 1, page_size: 50, is_custom_strategy: isCustomStrategy }),
-      getStrategyWalkForwardOptimizationResults(strategyId, { page: 1, page_size: 50 }),
+      // Developer-Mode strategies have no walk-forward runs, and this endpoint
+      // can't tell their ids from no-code ones: it would list the runs of the
+      // no-code strategy that shares the id.
+      isCustomStrategy
+        ? Promise.resolve([])
+        : getStrategyWalkForwardOptimizationResults(strategyId, { page: 1, page_size: 50 }),
     ])
       .then(([regularResult, walkForwardResult]) => {
         if (isCancelled) return;
