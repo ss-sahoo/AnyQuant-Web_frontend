@@ -10,6 +10,11 @@ import {
 
 interface OptimisationHistoryListProps {
   strategyId: string;
+  /**
+   * `strategyId` is a Developer-Mode strategy's. The two id sequences collide,
+   * so the backend needs telling, or it lists a same-id no-code strategy's runs.
+   */
+  isCustomStrategy?: boolean;
   onSelect: (id: string | number) => void;
   onClose?: () => void;
   isInline?: boolean;
@@ -62,7 +67,7 @@ const toTime = (value: string | null) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = ({ strategyId, onSelect, onClose, isInline = false, onSelectRunning, refreshToken, activeRun }) => {
+export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = ({ strategyId, isCustomStrategy = false, onSelect, onClose, isInline = false, onSelectRunning, refreshToken, activeRun }) => {
   const router = useRouter();
   const [rows, setRows] = useState<HistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,7 +90,7 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
     // allSettled: a walk-forward endpoint that 404s must not blank the regular
     // history (and vice versa).
     Promise.allSettled([
-      getStrategyOptimizationResults(strategyId, { page: 1, page_size: 50 }),
+      getStrategyOptimizationResults(strategyId, { page: 1, page_size: 50, is_custom_strategy: isCustomStrategy }),
       getStrategyWalkForwardOptimizationResults(strategyId, { page: 1, page_size: 50 }),
     ])
       .then(([regularResult, walkForwardResult]) => {
@@ -131,7 +136,7 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
     return () => {
       isCancelled = true;
     };
-  }, [strategyId, refreshToken]);
+  }, [strategyId, isCustomStrategy, refreshToken]);
 
   const handleItemClick = (row: HistoryRow) => {
     // A run still in progress has no result to open. Send the user to where

@@ -288,8 +288,8 @@ export const runBacktest = async ({
     formData.append("end_date", end_date)
   }
   if (generate_plot != null) formData.append("generate_plot", String(generate_plot))
-  // Flat top-level execution settings (commission, slippage, lot_type,
-  // position_size, asset_type) — the dev-mode serializer takes them
+  // Flat top-level execution settings (commission, lot_type, position_size,
+  // asset_type, margin, initial_equity) — the dev-mode serializer takes them
   // individually rather than as a TradingType object.
   if (trading_type) {
     for (const [key, value] of Object.entries(trading_type)) {
@@ -1042,6 +1042,13 @@ export const deleteOptimizationResult = async (optimizationId) => {
   return response.json();
 };
 
+/**
+ * @param {number|string} strategyStatementId
+ * @param {{ page?: number, page_size?: number, is_custom_strategy?: boolean }} [params]
+ *   `is_custom_strategy`: the id is a Developer-Mode strategy's. No-code and
+ *   dev-mode ids are separate sequences that collide, and without the flag the
+ *   backend reads a colliding id as the no-code strategy.
+ */
 export const getStrategyOptimizationResults = async (strategyStatementId, params = {}) => {
   const queryParams = new URLSearchParams();
 
@@ -1050,6 +1057,9 @@ export const getStrategyOptimizationResults = async (strategyStatementId, params
   }
   if (params.page_size) {
     queryParams.append('page_size', params.page_size);
+  }
+  if (params.is_custom_strategy) {
+    queryParams.append('is_custom_strategy', 'true');
   }
 
   const response = await Fetch(`/api/strategies/${strategyStatementId}/optimization-results/?${queryParams}`, {
@@ -1458,8 +1468,9 @@ export const getOptimizationCosts = async () => {
  * Headers: Authorization: Bearer {token}, Content-Type: application/json
  * Response: Job ID, droplet ID, estimated cost
  * 
- * NOTE: Backend fetches strategy from database using strategy_statement_id, so NO statement parameter needed!
- * 
+ * NOTE: Backend fetches strategy from database using strategy_statement_id, so a no-code job needs NO
+ * statement. A Developer-Mode job sends one only for its backtest settings (see params.statement).
+ *
  * @param {Object} params
  * @param {string} params.strategy_statement_id - REQUIRED: Strategy statement ID (backend fetches from DB)
  * @param {string} [params.type] - Type of optimization: "regular" or "walk_forward" (default: "regular")
@@ -1469,6 +1480,18 @@ export const getOptimizationCosts = async () => {
  * @param {string|null} [params.metaapi_token] - MetaAPI token (for MetaAPI mode)
  * @param {string|null} [params.metaapi_account_id] - MetaAPI account ID (for MetaAPI mode)
  * @param {string|null} [params.symbol] - Trading symbol (for MetaAPI mode)
+ * @param {number|null} [params.custom_strategy_id] - Developer-Mode strategy id. No-code and dev-mode
+ *   ids are separate sequences that collide, so a dev-mode run has to say which it means
+ * @param {Object|null} [params.optimisation_form] - The optimisation form (parameters, algorithm,
+ *   objective, hyper-parameters, constraints): the search the droplet runs
+ * @param {Object|null} [params.statement] - Developer-Mode only: the tester's strategy object. The
+ *   droplet runs the strategy's saved backtest settings, overridden by this statement's, then by the
+ *   flat fields below — the same layering as a dev-mode backtest
+ * @param {Array<{name: string, timeframe: string}>|null} [params.data_mapping] - Developer-Mode only:
+ *   which data variable each uploaded file fills (see runBacktest)
+ * @param {Object|null} [params.trading_type] - Developer-Mode only: flat execution settings, as for runBacktest
+ * @param {string|null} [params.start_date] - Developer-Mode only: window start (ISO), sent with end_date
+ * @param {string|null} [params.end_date] - Developer-Mode only: window end (ISO), sent with start_date
  */
 export const createOptimizationJob = async ({
   strategy_statement_id, // REQUIRED - backend fetches strategy from DB
@@ -1478,7 +1501,14 @@ export const createOptimizationJob = async ({
   csvFile = null,
   metaapi_token = null,
   metaapi_account_id = null,
-  symbol = null
+  symbol = null,
+  custom_strategy_id = null,
+  optimisation_form = null,
+  statement = null,
+  data_mapping = null,
+  trading_type = null,
+  start_date = null,
+  end_date = null
 }) => {
   // Validate required parameters
   if (!strategy_statement_id) {
@@ -1514,12 +1544,38 @@ export const createOptimizationJob = async ({
 
   const formData = new FormData();
 
-  // ❌ DO NOT send statement - backend fetches from database!
+  // ❌ DO NOT send a no-code statement - backend fetches from database!
   // ✅ Send strategy_statement_id instead
   formData.append("strategy_statement_id", strategy_statement_id);
 
   // Attach optimization type (backend expects 'type')
   formData.append("type", type);
+
+  if (custom_strategy_id != null) {
+    formData.append("custom_strategy_id", String(custom_strategy_id));
+  }
+  if (optimisation_form) {
+    formData.append("optimisation_form", JSON.stringify(optimisation_form));
+  }
+
+  // Developer Mode: the code is still loaded by id, but the run's backtest
+  // settings and data binding travel the way a dev-mode backtest sends them.
+  if (statement) {
+    formData.append("statement", JSON.stringify(statement));
+  }
+  if (data_mapping && data_mapping.length > 0) {
+    formData.append("data_mapping", JSON.stringify(data_mapping));
+  }
+  // All-or-nothing: a lone bound is a 400.
+  if (start_date && end_date) {
+    formData.append("start_date", start_date);
+    formData.append("end_date", end_date);
+  }
+  if (trading_type) {
+    for (const [key, value] of Object.entries(trading_type)) {
+      if (value != null && value !== "") formData.append(key, String(value));
+    }
+  }
 
   // Attach walk forward settings if provided (backend expects 'walk_forward_settings')
   if (walk_forward_settings) {
@@ -1565,7 +1621,12 @@ export const createOptimizationJob = async ({
     if (!response.ok) {
       const errorData = await response.json();
       console.error('🔍 Optimization Job Backend Error:', errorData);
-      throw new Error(errorData.error || "Failed to create optimization job");
+      // A dev-mode settings check answers with field errors and no `error` key.
+      const error = new Error(errorData.error || errorData.detail || JSON.stringify(errorData) || "Failed to create optimization job");
+      // The message is the backend's own and carries no status, so the caller
+      // could not tell a 400 from a network failure without this.
+      error.status = response.status;
+      throw error;
     }
 
     const data = await response.json();

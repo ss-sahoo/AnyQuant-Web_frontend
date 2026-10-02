@@ -336,6 +336,39 @@ function toIsoDateRange(dateRange: string): { start_date: string; end_date: stri
   return { start_date: start, end_date: end }
 }
 
+/** The Leverage dropdown value for a TradingType margin; anything unlisted shows as 1:1. */
+function leverageFromMargin(margin: number): string {
+  return margin === 1.0 ? "1:1" :
+    margin === 0.5 ? "1:2" :
+      margin === 0.2 ? "1:5" :
+        margin === 0.1 ? "1:10" :
+          margin === 0.05 ? "1:20" :
+            margin === 0.04 ? "1:25" :
+              margin === 0.033 ? "1:30" :
+                margin === 0.02 ? "1:50" :
+                  margin === 0.013 ? "1:75" :
+                    margin === 0.01 ? "1:100" :
+                      margin === 0.005 ? "1:200" :
+                        margin === 0.002 ? "1:500" : "1:1"
+}
+
+/**
+ * What saving the Backtest tab writes for a Developer-Mode strategy: the
+ * settings the tab edits, plus the data binding. The rest of the tester's
+ * strategy object is not settings — /api/strategies/<id>/edit/ would write its
+ * placeholder `instrument` over the real one and resend the code it loaded.
+ */
+const DEV_MODE_SAVED_SETTINGS = [
+  "TradingType",
+  "date_range",
+  "TradingSession",
+  "entry_at",
+  "exit_at",
+  "execution_timeframe",
+  "data_mapping",
+  "timeframes_required",
+] as const
+
 /**
  * What the run actually covered vs what was asked for. A MetaAPI fetch can fall
  * short — broker history, the page ceiling or a timeout all truncate a wide
@@ -379,6 +412,71 @@ function coverageShortfallMessage(
 
   const detail = short.map((s) => `${s.label ? `${s.label}: ` : ""}${s.start} → ${s.end}`).join("; ")
   return `Only ${detail} was available — short of the requested ${askedStart} → ${askedEnd}. Results cover the shorter window.`
+}
+
+interface TradeRow {
+  side: 'Buy' | 'Sell' | null
+  entryTime: string | null
+  exitTime: string | null
+  size: number | null
+  entryPrice: number | null
+  exitPrice: number | null
+  pnl: number | null
+  returnPct: number | null
+  balance: number | null
+}
+
+const finiteOrNull = (v: any): number | null => {
+  const n = typeof v === 'number' ? v : v == null ? NaN : Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+/**
+ * `trades_data` is the engine's round-trip sheet: one row per closed trade, in
+ * close order, with EntryTime/ExitTime/EntryPrice/ExitPrice/PnL and the
+ * direction carried by the sign of Size (negative = short), exactly as
+ * compute_stats splits longs from shorts. There is no Type or Balance column —
+ * the table used to read those as if this were a broker deal list, so they were
+ * always N/A and the exit side of every trade was never shown (ANY-364).
+ *
+ * Dev-mode results saved before 2026-08-14 hold the executor's raw lowercase
+ * dicts instead (`side`, `entry_time`, and a `return_pct` that is already a
+ * percent), and are still reachable from Backtest History.
+ *
+ * Balance is rebuilt from the run's final equity: every trade is closed by the
+ * end of a run, so final equity minus the sum of PnL is the starting cash, and
+ * the running sum in close order is the balance after each trade.
+ */
+function toTradeRows(trades: any[], finalEquity: any): TradeRow[] {
+  const rows: TradeRow[] = trades.map((t) => {
+    const legacy = t.EntryTime === undefined && t.entry_time !== undefined
+    const size = finiteOrNull(legacy ? t.size : t.Size)
+    const side = legacy
+      ? (String(t.side ?? '').toLowerCase() === 'sell' ? 'Sell' : t.side ? 'Buy' : null)
+      : size == null || size === 0 ? null : size < 0 ? 'Sell' : 'Buy'
+    const returnPct = finiteOrNull(legacy ? t.return_pct : t.ReturnPct)
+    return {
+      side,
+      entryTime: (legacy ? t.entry_time : t.EntryTime) ?? null,
+      exitTime: (legacy ? t.exit_time : t.ExitTime) ?? null,
+      size: size == null ? null : Math.abs(size),
+      entryPrice: finiteOrNull(legacy ? t.entry_price : t.EntryPrice),
+      exitPrice: finiteOrNull(legacy ? t.exit_price : t.ExitPrice),
+      pnl: finiteOrNull(legacy ? t.pnl : t.PnL),
+      returnPct: returnPct == null ? null : legacy ? returnPct : returnPct * 100,
+      balance: null,
+    }
+  })
+
+  const final = finiteOrNull(finalEquity)
+  if (final != null && rows.every((r) => r.pnl != null)) {
+    let balance = final - rows.reduce((sum, r) => sum + (r.pnl as number), 0)
+    for (const r of rows) {
+      balance += r.pnl as number
+      r.balance = balance
+    }
+  }
+  return rows
 }
 
 export default function StrategyTestingPage() {
@@ -474,8 +572,6 @@ export default function StrategyTestingPage() {
   const [commission, setCommission] = useState(0.00007)
   const [assetType, setAssetType] = useState("gold")
   const [positionSize, setPositionSize] = useState("1") // Default value is 1
-  // Developer-Mode only: the visual pipeline has no slippage field.
-  const [slippage, setSlippage] = useState("0")
 
   // New states for OptimisationTab
   const [selectedMaximiseOption, setSelectedMaximiseOption] = useState<string>("")
@@ -865,7 +961,13 @@ export default function StrategyTestingPage() {
       // Also load last optimization result. Only ever hydrates from a finished
       // run, and every write is re-gated on the in-flight refs below so a slow
       // response can never land on top of a run the user just started.
-      getStrategyOptimizationResults(strategy_id, { page: 1, page_size: 1 })
+      // Not for a Developer-Mode strategy: its history holds only cloud jobs,
+      // which open on /optimization-results. Fetched here as an optimisation
+      // result, a job id 404s or loads an unrelated result.
+      const latestOptimisations = localStorage.getItem("is_custom_strategy") === "true"
+        ? Promise.resolve([])
+        : getStrategyOptimizationResults(strategy_id, { page: 1, page_size: 1 })
+      latestOptimisations
         .then(async (response: any) => {
           if (isCancelled || isOptimisationInFlightRef.current) return
 
@@ -1077,20 +1179,7 @@ export default function StrategyTestingPage() {
 
             // Calculate leverage from margin
             if (parsed.TradingType.margin) {
-              const margin = parsed.TradingType.margin
-              const leverage = margin === 1.0 ? "1:1" :
-                margin === 0.5 ? "1:2" :
-                  margin === 0.2 ? "1:5" :
-                    margin === 0.1 ? "1:10" :
-                      margin === 0.05 ? "1:20" :
-                        margin === 0.04 ? "1:25" :
-                          margin === 0.033 ? "1:30" :
-                            margin === 0.02 ? "1:50" :
-                              margin === 0.013 ? "1:75" :
-                                margin === 0.01 ? "1:100" :
-                                  margin === 0.005 ? "1:200" :
-                                    margin === 0.002 ? "1:500" : "1:1"
-              setLeverage(leverage)
+              setLeverage(leverageFromMargin(parsed.TradingType.margin))
             }
           }
         } catch (err) {
@@ -1162,15 +1251,24 @@ export default function StrategyTestingPage() {
               const customStrategy = await getCustomStrategy(Number(id))
               console.log("🔍 Loaded custom strategy:", customStrategy)
 
-              // Which data variable the code reads each timeframe from. The
-              // record has no field for it, so Developer Mode leaves it on this
-              // device; a strategy saved before the mapping existed falls back
-              // to the single `data` series the template uses.
-              const storedMapping = normalizeDataMapping(customStrategy.data_mapping)
+              // Backtest settings saved on the strategy, under the keys a
+              // no-code statement uses (TradingType, date_range, ...). Every
+              // dev-mode run starts from them and the statement posted with the
+              // run overrides them, so this object has to start from them too.
+              const savedSettings =
+                customStrategy.settings && typeof customStrategy.settings === "object"
+                  ? customStrategy.settings
+                  : {}
+
+              // Which data variable the code reads each timeframe from.
+              // Developer Mode keeps the mapping on this device only, so that
+              // copy is the freshest; the one saved with the backtest settings
+              // covers another device, and a strategy saved before the mapping
+              // existed falls back to the single `data` series the template uses.
+              const savedMapping = normalizeDataMapping(savedSettings.data_mapping)
               const customDataMapping =
-                storedMapping.length > 0
-                  ? storedMapping
-                  : loadDataMapping(customStrategy.id) ?? defaultDataMapping()
+                loadDataMapping(customStrategy.id) ??
+                (savedMapping.length > 0 ? savedMapping : defaultDataMapping())
 
               // Transform custom strategy data to match expected format
               strategyData = {
@@ -1181,11 +1279,13 @@ export default function StrategyTestingPage() {
                 parameters: customStrategy.parameters,
                 status: customStrategy.status,
                 type: "custom_strategy",
-                // Set default values for backtesting
-                side: "buy",
-                saveresult: "true",
+                // No `side` or `saveresult` placeholders: the backend reads both
+                // off the statement. `side` is a direction filter, so "buy"
+                // dropped every short the code takes, and `saveresult` names the
+                // CSV folder, which defaults to the strategy's name.
                 strategy: [], // Custom strategies don't use the visual builder format
-                instrument: "XAUUSD",
+                instrument: customStrategy.instrument || savedSettings.instrument || "XAUUSD",
+                // Defaults for backtesting, under whatever the strategy has saved
                 TradingType: {
                   NewTrade: "MTOOTAAT",
                   commission: 0.00007,
@@ -1193,7 +1293,9 @@ export default function StrategyTestingPage() {
                   lot: "mini",
                   cash: 100000,
                   nTrade_max: 1,
+                  ...(savedSettings.TradingType || {}),
                 },
+                ...(savedSettings.date_range ? { date_range: savedSettings.date_range } : {}),
                 // Mark as custom strategy for backtest handling
                 is_custom_strategy: true,
                 custom_strategy_id: customStrategy.id,
@@ -1314,6 +1416,23 @@ export default function StrategyTestingPage() {
             setStrID(JSON.stringify(strategyData))
             setStrategy(JSON.stringify(strategyData))
             setParsedStatement(strategyData)
+
+            // A code strategy's Trading Configuration fields are sent flat on
+            // every run, over the statement, so the form must show this
+            // strategy's settings. The mount-time read came from localStorage,
+            // which Developer Mode does not write before opening the tester, so
+            // it still holds whichever strategy was tested last.
+            if (isCustomStrategy) {
+              const tradingType = strategyData.TradingType || {}
+              setSelectedTradingMode(tradingType.NewTrade || "MTOOTAAT")
+              setMaxTrades(tradingType.nTrade_max?.toString() || "1")
+              setAccountDeposit(tradingType.cash?.toString() || "100000")
+              setLot(tradingType.lot || "mini")
+              setCommission(tradingType.commission || 0.00007)
+              setAssetType(tradingType.asset_type || "gold")
+              setPositionSize(tradingType.position_size?.toString() || "1")
+              if (tradingType.margin) setLeverage(leverageFromMargin(tradingType.margin))
+            }
 
             // Load date range if available
             if (strategyData.date_range) {
@@ -1942,19 +2061,8 @@ export default function StrategyTestingPage() {
       const devDataMapping =
         strategyType === "dev_mode" ? normalizeDataMapping(parsedStatement?.data_mapping) : []
 
-      // Execution settings the Developer-Mode engine honours. The visual
-      // pipeline carries these inside the statement's TradingType instead, so
-      // sending them flat would duplicate — hence dev_mode only.
-      const devTradingType =
-        strategyType === "dev_mode"
-          ? {
-            commission,
-            slippage: Number(slippage) || 0,
-            lot_type: lot,
-            position_size: Number(positionSize) || 1,
-            asset_type: assetType,
-          }
-          : null
+      // Execution settings the Developer-Mode engine honours — see devModeTradingType.
+      const devTradingType = strategyType === "dev_mode" ? devModeTradingType() : null
 
       let startData: any
       if (useMetaAPI) {
@@ -3000,7 +3108,9 @@ export default function StrategyTestingPage() {
     try {
       const results = await getStrategyOptimizationResults(strategy_id, {
         page: 1,
-        page_size: 50
+        page_size: 50,
+        is_custom_strategy: parsedStatement?.is_custom_strategy ||
+          localStorage.getItem("is_custom_strategy") === "true",
       })
       setOptimizationResults(results.results || [])
 
@@ -3193,6 +3303,24 @@ export default function StrategyTestingPage() {
     return ratio ? 1.0 / ratio : 0.09 // Default to 0.09 if parsing fails
   }
 
+  // Execution settings the Developer-Mode engine honours, sent flat on a
+  // dev-mode run or cloud job so the form's values apply without a save; they
+  // override the statement's TradingType. The visual pipeline carries these
+  // inside the statement's TradingType instead, so sending them flat would
+  // duplicate — hence dev_mode only. Commission is the only execution cost:
+  // the backend dropped dev-mode slippage.
+  const devModeTradingType = () => {
+    const cash = Number.parseFloat(accountDeposit.replace(/,/g, ""))
+    return {
+      commission,
+      lot_type: lot,
+      position_size: Number(positionSize) || 1,
+      asset_type: assetType,
+      margin: getLeverageMargin(leverage),
+      ...(Number.isFinite(cash) && cash > 0 ? { initial_equity: cash } : {}),
+    }
+  }
+
   // Handle leverage change from dropdown
   const handleLeverageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedValue = e.target.value
@@ -3308,6 +3436,30 @@ export default function StrategyTestingPage() {
           parsedStatement.execution_timeframe
           ? { execution_timeframe: parsedStatement.execution_timeframe }
           : {}),
+      }
+
+      // Developer-Mode strategy: /edit/ writes the settings onto its
+      // CustomComponent and answers with that record ("type": "developer"),
+      // not a statement. Taking the response as the strategy dropped
+      // is_custom_strategy / custom_strategy_id / data_mapping, so the next run
+      // went out as no_code and failed. Send only the settings, flagged as
+      // dev-mode, and keep the tester's own object.
+      const isCustomStrategyRun = parsedStatement?.is_custom_strategy ||
+        localStorage.getItem("is_custom_strategy") === "true"
+      if (isCustomStrategyRun) {
+        const settingsBody: Record<string, any> = {
+          is_custom_strategy: true,
+          custom_strategy_id: Number(parsedStatement?.custom_strategy_id || strategy_id),
+        }
+        for (const key of DEV_MODE_SAVED_SETTINGS) {
+          const value = (updatedStrategyData as any)[key]
+          if (value != null) settingsBody[key] = value
+        }
+        await editStrategy(strategy_id, settingsBody)
+        setParsedStatement(updatedStrategyData)
+        localStorage.setItem("savedStrategy", JSON.stringify(updatedStrategyData))
+        showToast("Backtest settings saved successfully!", 'success')
+        return
       }
 
       console.log("🔍 DEBUG: updatedStrategyData being sent to editStrategy:", updatedStrategyData)
@@ -3906,10 +4058,12 @@ export default function StrategyTestingPage() {
       const optimisationFormString = localStorage.getItem("optimisation_form")
       let parametersObject: Record<string, any> = {}
       let constraintsArray: string[] = []
+      let storedOptimisationForm: any = null
 
       if (optimisationFormString) {
         try {
           const optimisationForm = JSON.parse(optimisationFormString)
+          storedOptimisationForm = optimisationForm
           parametersObject = optimisationForm.Parameters || {}
           constraintsArray = optimisationForm.Constraints || []
 
@@ -3961,11 +4115,49 @@ export default function StrategyTestingPage() {
         throw new Error("Strategy ID is required to create an optimization job")
       }
 
+      // Developer-Mode strategies are custom components, whose ids are a separate
+      // sequence from no-code strategies' and collide with them — say which this is.
+      const isCustomStrategyRun = parsedStatement?.is_custom_strategy ||
+        localStorage.getItem("is_custom_strategy") === "true"
+      const customStrategyId = parsedStatement?.custom_strategy_id || parsedStatement?.id || strategy_id
+
       // Prepare API call parameters
       // ❌ DO NOT send statement - backend fetches from database!
       const apiParams: any = {
-        strategy_statement_id: Number(strategy_id), // ✅ REQUIRED - backend fetches strategy from DB
+        strategy_statement_id: Number(isCustomStrategyRun ? customStrategyId : strategy_id), // ✅ REQUIRED - backend fetches strategy from DB
         type: optimizationType, // ✅ REQUIRED - 'regular' or 'walk_forward'
+      }
+      if (isCustomStrategyRun) {
+        apiParams.custom_strategy_id = Number(customStrategyId)
+        // The run's backtest settings and data binding, sent the way a
+        // dev-mode backtest sends them. Without them the droplet only gets
+        // what is saved on the strategy.
+        apiParams.statement = parsedStatement
+        apiParams.trading_type = devModeTradingType()
+        apiParams.data_mapping = normalizeDataMapping(parsedStatement?.data_mapping)
+        const isoRange = toIsoDateRange(dateRange)
+        if (isoRange) Object.assign(apiParams, isoRange)
+      }
+
+      // The search the user configured, in the shape /api/optimisation/save/
+      // takes; the backend turns it into the droplet's optimiser statement.
+      // Without it a cloud run searched a built-in stop-loss/take-profit default.
+      if (storedOptimisationForm) {
+        const rows = Array.isArray(storedOptimisationForm.parameters)
+          ? storedOptimisationForm.parameters
+          : []
+        apiParams.optimisation_form = {
+          ...storedOptimisationForm,
+          // A dev-mode run searches only its own parameters (the rows the
+          // Properties tab synthesised for this strategy), as the local run does.
+          parameters: isCustomStrategyRun
+            ? rows.filter((p: any) =>
+                typeof p?.encoding === "string" && p.encoding.startsWith("custom:strategy:"))
+            : rows,
+          selected_algorithm: selectedAlgorithm,
+          selected_maximise: selectedMaximiseOption,
+          algorithm_params: hyperParameters,
+        }
       }
 
       // Add walk forward settings if needed
@@ -4065,7 +4257,7 @@ export default function StrategyTestingPage() {
         showToast("Authentication failed. Please login again.", 'error')
         // Redirect to login
         router.push('/auth')
-      } else if (error.message.includes('400')) {
+      } else if (error.status === 400 || error.message.includes('400')) {
         // Check if this is a MetaAPI-related error
         const errorMessage = error.message || "Unknown error"
         const isMetaAPIError = useMetaAPI && metaAPIConfig && (
@@ -4508,6 +4700,7 @@ export default function StrategyTestingPage() {
       {strategy_id ? (
         <OptimisationHistoryList
           strategyId={strategy_id}
+          isCustomStrategy={isDevModeStrategy}
           onSelect={async (id) => {
             try {
               const detail = await getOptimizationResultDetail(id as any)
@@ -4938,12 +5131,15 @@ export default function StrategyTestingPage() {
                           <h3 className="text-xs font-black text-gray-500 mb-6 uppercase tracking-[0.4em]">Current Trades</h3>
                           {backtestDetail.trades_data && backtestDetail.trades_data.length > 0 ? (
                             (() => {
-                              const totalTrades = backtestDetail.trades_data.length
+                              // Balance is a running sum, so it is built over every trade
+                              // before paging, not per page.
+                              const tradeRows = toTradeRows(backtestDetail.trades_data, backtestDetail.final_equity)
+                              const totalTrades = tradeRows.length
                               const totalPages = Math.max(1, Math.ceil(totalTrades / TRADES_PAGE_SIZE))
                               const currentPage = Math.min(tradesPage, totalPages)
                               const startIdx = (currentPage - 1) * TRADES_PAGE_SIZE
                               const endIdx = Math.min(startIdx + TRADES_PAGE_SIZE, totalTrades)
-                              const pageTrades = backtestDetail.trades_data.slice(startIdx, endIdx)
+                              const pageTrades = tradeRows.slice(startIdx, endIdx)
                               return (
                                 <>
                                   <div className="bg-[#080A10] rounded-lg overflow-hidden border border-gray-800">
@@ -4952,26 +5148,34 @@ export default function StrategyTestingPage() {
                                         <thead className="bg-[#000000] text-gray-400 sticky top-0 uppercase tracking-widest font-black">
                                           <tr>
                                             <th className="px-4 py-3 text-left">#</th>
-                                            <th className="px-4 py-3 text-left">Time</th>
-                                            <th className="px-4 py-3 text-left">Type</th>
+                                            <th className="px-4 py-3 text-left">Side</th>
+                                            <th className="px-4 py-3 text-left">Entry Time</th>
+                                            <th className="px-4 py-3 text-left">Exit Time</th>
                                             <th className="px-4 py-3 text-left">Size</th>
-                                            <th className="px-4 py-3 text-left">Price</th>
+                                            <th className="px-4 py-3 text-left">Entry Price</th>
+                                            <th className="px-4 py-3 text-left">Exit Price</th>
                                             <th className="px-4 py-3 text-left">Profit</th>
+                                            <th className="px-4 py-3 text-left">Return</th>
                                             <th className="px-4 py-3 text-left">Balance</th>
                                           </tr>
                                         </thead>
                                         <tbody>
-                                          {pageTrades.map((trade: any, index: number) => (
+                                          {pageTrades.map((trade, index) => (
                                             <tr key={startIdx + index} className="border-t border-gray-900 hover:bg-[#121420]">
                                               <td className="px-4 py-3 text-white">{startIdx + index + 1}</td>
-                                              <td className="px-4 py-3 text-white">{trade.EntryTime || trade.Time || 'N/A'}</td>
-                                              <td className="px-4 py-3 text-white">{trade.Type || 'N/A'}</td>
-                                              <td className="px-4 py-3 text-white">{trade.Size ?? 'N/A'}</td>
-                                              <td className="px-4 py-3 text-white">{trade.EntryPrice != null ? trade.EntryPrice.toFixed(5) : trade.Price != null ? trade.Price.toFixed(5) : 'N/A'}</td>
-                                              <td className={`px-4 py-3 font-semibold ${(trade.PnL || trade.Profit || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                                {trade.PnL != null ? `$${trade.PnL.toFixed(2)}` : trade.Profit != null ? `$${trade.Profit.toFixed(2)}` : 'N/A'}
+                                              <td className={`px-4 py-3 font-semibold ${trade.side === 'Sell' ? 'text-red-400' : 'text-green-400'}`}>{trade.side ?? 'N/A'}</td>
+                                              <td className="px-4 py-3 text-white">{trade.entryTime ?? 'N/A'}</td>
+                                              <td className="px-4 py-3 text-white">{trade.exitTime ?? 'N/A'}</td>
+                                              <td className="px-4 py-3 text-white">{trade.size ?? 'N/A'}</td>
+                                              <td className="px-4 py-3 text-white">{trade.entryPrice != null ? trade.entryPrice.toFixed(5) : 'N/A'}</td>
+                                              <td className="px-4 py-3 text-white">{trade.exitPrice != null ? trade.exitPrice.toFixed(5) : 'N/A'}</td>
+                                              <td className={`px-4 py-3 font-semibold ${(trade.pnl ?? 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                                {trade.pnl != null ? `$${trade.pnl.toFixed(2)}` : 'N/A'}
                                               </td>
-                                              <td className="px-4 py-3 text-white">{trade.Balance != null ? `$${trade.Balance.toFixed(2)}` : 'N/A'}</td>
+                                              <td className={`px-4 py-3 ${(trade.returnPct ?? 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                                {trade.returnPct != null ? `${trade.returnPct.toFixed(2)}%` : 'N/A'}
+                                              </td>
+                                              <td className="px-4 py-3 text-white">{trade.balance != null ? `$${trade.balance.toFixed(2)}` : 'N/A'}</td>
                                             </tr>
                                           ))}
                                         </tbody>
@@ -5371,8 +5575,6 @@ export default function StrategyTestingPage() {
                     assetType={assetType}
                     setAssetType={setAssetType}
                     isDevMode={isDevModeStrategy}
-                    slippage={slippage}
-                    setSlippage={setSlippage}
                     showTradesSummary={showTradesSummary}
                     onShowTradesSummary={() => setShowTradesSummary(true)}
                     initialTradingSession={parsedStatement?.TradingSession}
@@ -5459,8 +5661,11 @@ export default function StrategyTestingPage() {
                       setSelectedAlgorithm={setSelectedAlgorithm} // New prop
                       saveOptimisationInput={saveOptimisationInput} // API function for saving
                       parsedStatement={parsedStatement} // Strategy statement for API calls
-                      onRunWalkForwardOptimisation={() => handleWalkForwardOptimisation(false)}
-                      onRunWalkForwardOptimisationDroplets={() => handleOptimizationWithDroplets('walk_forward')}
+                      // No walk-forward for Developer-Mode strategies: the cloud
+                      // route refuses them, and the local route has no dev-mode
+                      // path and would run the code strategy as a no-code statement.
+                      onRunWalkForwardOptimisation={isDevModeStrategy ? undefined : () => handleWalkForwardOptimisation(false)}
+                      onRunWalkForwardOptimisationDroplets={isDevModeStrategy ? undefined : () => handleOptimizationWithDroplets('walk_forward')}
                       onCancelWalkForward={cancelWalkForward}
                       isLoading3={isLoading3}
                     />

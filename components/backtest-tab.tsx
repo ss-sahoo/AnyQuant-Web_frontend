@@ -45,13 +45,10 @@ interface BacktestTabProps {
   tradeTiming?: TradeTimingSettings
   onTradeTimingSave?: (settings: TradeTimingSettings) => void
   /**
-   * Developer-Mode (custom Python) strategy. The engine honours a different
-   * subset of these settings, so the tab hides what it would ignore rather
-   * than showing controls that do nothing.
+   * Developer-Mode (custom Python) strategy. The tab shows a notice for it and
+   * hides the trading session, execution timing and trading mode panels.
    */
   isDevMode?: boolean
-  slippage: string
-  setSlippage: React.Dispatch<React.SetStateAction<string>>
 }
 
 export function BacktestTab({
@@ -84,8 +81,6 @@ export function BacktestTab({
   assetType,
   setAssetType,
   isDevMode = false,
-  slippage,
-  setSlippage,
   showTradesSummary = false,
   onShowTradesSummary,
   initialTradingSession,
@@ -150,16 +145,18 @@ export function BacktestTab({
 
   return (
     <div className="p-6 ml-[63px]">
-      {/* Developer-Mode strategies run their own entry/exit logic in Python, so
-          the engine takes execution settings but not session windows, position
-          limits or bar-vs-tick timing. Those panels are hidden rather than
-          shown inert. */}
+      {/* Developer-Mode strategies run their own entry/exit logic in Python.
+          The session window, position-limit and bar-vs-tick timing panels stay
+          hidden for them; the engine now accepts those settings, but offering
+          them is a separate decision. */}
       {isDevMode && (
         <div className="mb-6 p-4 bg-[#85e1fe]/10 rounded-md border border-[#85e1fe]/30">
           <div className="text-white font-medium">Developer-Mode strategy</div>
           <div className="text-xs text-gray-300 mt-1">
-            Commission, slippage, lot definition, position size and asset type now affect the
-            simulation. Runs saved before this change ignored them, so results will differ.
+            Account deposit, leverage, commission, lot definition, position size and asset type
+            affect the simulation the same way they do for a no-code strategy. Results saved before
+            this update used 10× the configured position size and ignored margin, so don't compare
+            them with new runs.
           </div>
         </div>
       )}
@@ -293,20 +290,18 @@ export function BacktestTab({
           </div>
         </div>
 
-        {/* Leverage/Margin Assumptions — accepted by the dev-mode serializer
-            but still inert in the engine, so it stays disabled there. */}
+        {/* Leverage/Margin Assumptions — the dev-mode engine enforces margin
+            now too: an order the account cannot fund is cancelled. */}
         <div className="w-[35%]">
           <label className="block text-sm text-gray-400 mb-2">
             Leverage/Margin Assumptions
-            {isDevMode && <span className="ml-2 text-xs text-gray-500">(not yet applied in Developer Mode)</span>}
           </label>
-          <div className={`space-y-2 ${isDevMode ? "opacity-50" : ""}`}>
+          <div className="space-y-2">
             <div className="relative">
               <select
                 value={leverage}
                 onChange={handleLeverageChange}
-                disabled={isDevMode}
-                className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white appearance-none cursor-pointer disabled:cursor-not-allowed"
+                className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white appearance-none cursor-pointer"
               >
                 <option value="1:1">1:1</option>
                 <option value="1:2">1:2</option>
@@ -442,23 +437,14 @@ export function BacktestTab({
               onChange={(e) => setCommission(parseFloat(e.target.value) || 0)}
               className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
             />
+            {/* Developer Mode used to have a separate Slippage input; commission
+                is now the only execution cost in both engines. */}
+            {isDevMode && (
+              <p className="text-xs text-gray-400 mt-1">
+                Charged once on entry. Include the spread here, e.g. 0.0002 for forex.
+              </p>
+            )}
           </div>
-
-          {/* Slippage — only reaches the engine on the Developer-Mode path. */}
-          {isDevMode && (
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">Slippage</label>
-              <input
-                type="number"
-                step="0.0001"
-                min="0"
-                value={slippage}
-                onChange={(e) => setSlippage(e.target.value)}
-                placeholder="Default: 0"
-                className="w-full bg-[#141721] border border-[#2b2e38] rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-[#85e1fe] text-white"
-              />
-            </div>
-          )}
 
           {/* Lot Definition */}
           <div>
