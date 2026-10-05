@@ -25,12 +25,17 @@ interface BacktestResult {
 
 interface BacktestHistoryListProps {
   strategyId: string
+  /**
+   * `strategyId` is a Developer-Mode strategy's. The two id sequences collide,
+   * so the backend needs telling, or it lists a same-id no-code strategy's runs.
+   */
+  isCustomStrategy?: boolean
   onClose?: () => void
   onSelect?: (id: string) => void
   isInline?: boolean
 }
 
-export function BacktestHistoryList({ strategyId, onClose, onSelect, isInline }: BacktestHistoryListProps) {
+export function BacktestHistoryList({ strategyId, isCustomStrategy = false, onClose, onSelect, isInline }: BacktestHistoryListProps) {
   const router = useRouter()
   const [backtestResults, setBacktestResults] = useState<BacktestResult[]>([])
   const [loading, setLoading] = useState(true)
@@ -48,7 +53,7 @@ export function BacktestHistoryList({ strategyId, onClose, onSelect, isInline }:
 
   useEffect(() => {
     loadBacktestResults()
-  }, [strategyId])
+  }, [strategyId, isCustomStrategy])
 
   const loadBacktestResults = async () => {
     try {
@@ -56,7 +61,8 @@ export function BacktestHistoryList({ strategyId, onClose, onSelect, isInline }:
       setError(null)
       const response = await getStrategyBacktestResults(strategyId, {
         page: 1,
-        page_size: 50
+        page_size: 50,
+        is_custom_strategy: isCustomStrategy,
       })
       // The backend creates a "running" placeholder row when a job starts and
       // a separate completed/failed row when it finishes. The running one is

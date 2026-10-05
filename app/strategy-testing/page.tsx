@@ -845,10 +845,22 @@ export default function StrategyTestingPage() {
     }
   }
 
-  const loadBacktestResult = async (backtestId: string, fallbackResult: any = null) => {
+  // Bumped whenever a strategy loads, the user opens a backtest or a run starts,
+  // so the auto-loaded latest result never lands on top of something newer.
+  const backtestShownRef = useRef(0)
+
+  // `quiet`: the latest result, loaded when the strategy opens. No spinner,
+  // toast or tab switch, and dropped if anything else was shown meanwhile.
+  const loadBacktestResult = async (
+    backtestId: string,
+    fallbackResult: any = null,
+    { quiet = false }: { quiet?: boolean } = {},
+  ) => {
+    const token = quiet ? backtestShownRef.current : ++backtestShownRef.current
     try {
-      setIsLoading(true)
+      if (!quiet) setIsLoading(true)
       const raw = await getBacktestResultDetail(backtestId)
+      if (quiet && token !== backtestShownRef.current) return
       const normalized = normalizeBacktestResult(raw)
       // The detail endpoint can return a sparse record (missing summary_stats and
       // several scalar metrics). Fill any gaps from the richer backtest run response,
@@ -863,16 +875,18 @@ export default function StrategyTestingPage() {
         console.warn("[summary_stats] missing after merge. Detail keys:", Object.keys(raw || {}))
       }
       setBacktestDetail(normalized)
-      setBacktestResultTab('chart')
+      if (!quiet) setBacktestResultTab('chart')
       if (normalized.plot_html) {
         setPlotHtml(normalized.plot_html)
       }
+      if (quiet) return
       setActiveTab('backtest')
       showToast("Backtest details loaded successfully", 'success')
     } catch (err: any) {
-      showToast("Failed to load backtest results: " + err.message, 'error')
+      if (quiet) console.warn("Could not auto-load the latest backtest:", err)
+      else showToast("Failed to load backtest results: " + err.message, 'error')
     } finally {
-      setIsLoading(false)
+      if (!quiet) setIsLoading(false)
     }
   }
 
@@ -974,19 +988,30 @@ export default function StrategyTestingPage() {
         stderr: ''
       })
 
-      // Do not auto-load the most recent backtest chart on navigation — users
-      // pick a run from the sidebar list explicitly.
+      // Set before strategy_id changes, so it describes this id. No-code and
+      // Developer-Mode ids collide; the history endpoints need telling which.
+      const isCustomStrategy = localStorage.getItem("is_custom_strategy") === "true"
+
+      // Load the latest backtest, as the history list shows it: "running"
+      // placeholder rows are hidden there, and only a finished run has a
+      // result to show.
+      backtestShownRef.current++
+      getStrategyBacktestResults(strategy_id, { page: 1, page_size: 10, is_custom_strategy: isCustomStrategy })
+        .then((response: any) => {
+          if (isCancelled || backtestRunIdRef.current) return
+          const rows = (Array.isArray(response) ? response : (response?.results || []))
+            .filter((row: any) => String(row.status || '').toLowerCase() !== 'running')
+          const latest = rows[0]
+          if (!latest || String(latest.status || '').toLowerCase() !== 'completed') return
+          console.log("🚀 Auto-loading latest backtest result:", latest.id)
+          loadBacktestResult(String(latest.id), null, { quiet: true })
+        })
+        .catch(err => console.error("Error fetching initial backtest results:", err))
 
       // Also load last optimization result. Only ever hydrates from a finished
       // run, and every write is re-gated on the in-flight refs below so a slow
       // response can never land on top of a run the user just started.
-      // Not for a Developer-Mode strategy: its history holds only cloud jobs,
-      // which open on /optimization-results. Fetched here as an optimisation
-      // result, a job id 404s or loads an unrelated result.
-      const latestOptimisations = localStorage.getItem("is_custom_strategy") === "true"
-        ? Promise.resolve([])
-        : getStrategyOptimizationResults(strategy_id, { page: 1, page_size: 1 })
-      latestOptimisations
+      getStrategyOptimizationResults(strategy_id, { page: 1, page_size: 1, is_custom_strategy: isCustomStrategy })
         .then(async (response: any) => {
           if (isCancelled || isOptimisationInFlightRef.current) return
 
@@ -2084,6 +2109,7 @@ export default function StrategyTestingPage() {
 
     try {
       setIsLoading(true)
+      backtestShownRef.current++
 
       // One endpoint, one flow. All three strategy kinds go to
       // POST /api/run-backtest/, which always answers 202 { run_id } and
@@ -2313,13 +2339,17 @@ export default function StrategyTestingPage() {
     return "final_equity"
   }
 
-  // Adapt the custom optimiser's result rows ({ params, final_equity, ... })
-  // to the backtesting.py-style keys renderResultsTable expects. param_<name>
-  // entries feed the "Inputs" column.
+  // Adapt the custom optimiser's result rows ({ params, final_equity, ...,
+  // metrics }) to the backtesting.py-style keys renderResultsTable expects.
+  // `metrics` is every statistic the row was recorded with, by engine name —
+  // including the objective when it is none of the seven flat keys (SQN,
+  // Sortino, Calmar, Return (Ann.), Expectancy). param_<name> entries feed the
+  // "Inputs" column.
   const adaptCustomOptimisationRows = (rows: any[]): any[] => {
     if (!Array.isArray(rows)) return []
     return rows.map((r: any) => {
       const out: Record<string, any> = {
+        ...(r.metrics || {}),
         'Equity Final [$]': r.final_equity,
         'Return [%]': r.total_return,
         '# Trades': r.num_trades,
@@ -2406,12 +2436,21 @@ export default function StrategyTestingPage() {
 
     if (!hasCompleteOptimisationRanges(strategyRows)) return
 
+    // Same check as the other optimisation paths: without MetaAPI the run's
+    // market data is the uploaded CSVs, one per timeframe.
+    if (!useMetaAPI && requiredTimeframes.length > uploadedFiles.length) {
+      showToast("Not enough files uploaded for the required timeframes", 'error')
+      return
+    }
+
     try {
       setIsLoading2(true)
 
       const symbol = metaAPIConfig?.symbol || "XAUUSD"
       const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
       const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
+      // Which data variable each file fills, as a dev-mode backtest sends it.
+      const devDataMapping = normalizeDataMapping(parsedStatement?.data_mapping)
 
       const startData = await runCustomStrategyOptimisation({
         strategy_id: Number(customStrategyId),
@@ -2427,9 +2466,10 @@ export default function StrategyTestingPage() {
         },
         symbol,
         initial_equity: Number(accountDeposit.replace(/,/g, "")) || 10000,
-        ...(useMetaAPI && token && accountId
-          ? { metaapi_token: token, metaapi_account_id: accountId }
-          : {}),
+        data_mapping: devDataMapping.length > 0 ? devDataMapping : null,
+        ...(useMetaAPI
+          ? (token && accountId ? { metaapi_token: token, metaapi_account_id: accountId } : {})
+          : { files: buildTimeframeFiles() }),
       })
 
       console.log("✅ Custom strategy optimisation started:", startData)
@@ -4566,8 +4606,8 @@ export default function StrategyTestingPage() {
         </div>
       )
     }
-    // A missing value is a bare "-", without its unit. A dev-mode grid or
-    // Bayesian run reports only the objective, so most of its cells are null.
+    // A missing value is a bare "-", without its unit. A Bayesian run reports
+    // only the objective, so most of its cells are null.
     const fmt = (v: any, prefix = '', suffix = '') =>
       (v === undefined || v === null || v === '' ? '-' : `${prefix}${v}${suffix}`)
 
@@ -4592,10 +4632,12 @@ export default function StrategyTestingPage() {
             <th className="px-4 py-3 text-left">Equity Final [$]</th>
             <th className="px-4 py-3 text-left">Equity Peak [$]</th>
             <th className="px-4 py-3 text-left">Return [%]</th>
+            <th className="px-4 py-3 text-left">Return (Ann.) [%]</th>
             <th className="px-4 py-3 text-left">Profit Factor</th>
             <th className="px-4 py-3 text-left">Drawdown %</th>
             <th className="px-4 py-3 text-left">Sharpe</th>
             <th className="px-4 py-3 text-left">Sortino</th>
+            <th className="px-4 py-3 text-left">Calmar</th>
             <th className="px-4 py-3 text-left">SQN</th>
             <th className="px-4 py-3 text-left">Win Rate [%]</th>
             <th className="px-4 py-3 text-left">Best Trade [%]</th>
@@ -4623,10 +4665,12 @@ export default function StrategyTestingPage() {
               <td className="px-4 py-3 font-mono text-white">{fmt(row['Equity Final [$]'], '$')}</td>
               <td className="px-4 py-3 font-mono text-white">{fmt(row['Equity Peak [$]'], '$')}</td>
               <td className="px-4 py-3 font-mono">{fmt(row['Return [%]'], '', '%')}</td>
+              <td className="px-4 py-3 font-mono">{fmt(row['Return (Ann.) [%]'], '', '%')}</td>
               <td className="px-4 py-3 font-mono">{fmt(row['Profit Factor'])}</td>
               <td className="px-4 py-3 font-mono text-red-500">{fmt(row['Max. Drawdown [%]'], '', '%')}</td>
               <td className="px-4 py-3 font-mono text-white">{fmt(row['Sharpe Ratio'])}</td>
               <td className="px-4 py-3 font-mono text-white">{fmt(row['Sortino Ratio'])}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Calmar Ratio'])}</td>
               <td className="px-4 py-3 font-mono text-white">{fmt(row['SQN'])}</td>
               <td className="px-4 py-3 font-mono text-white">{fmt(row['Win Rate [%]'], '', '%')}</td>
               <td className="px-4 py-3 font-mono text-green-400">{fmt(row['Best Trade [%]'], '', '%')}</td>
@@ -5194,6 +5238,7 @@ export default function StrategyTestingPage() {
                           <h3 className="text-xs font-black text-gray-500 mb-6 uppercase tracking-[0.4em]">Backtest History</h3>
                           <BacktestHistoryList
                             strategyId={strategy_id || ''}
+                            isCustomStrategy={isDevModeStrategy}
                             onSelect={loadBacktestResult}
                             isInline={true}
                           />
@@ -5429,6 +5474,7 @@ export default function StrategyTestingPage() {
                     {strategy_id ? (
                       <BacktestHistoryList
                         strategyId={strategy_id}
+                        isCustomStrategy={isDevModeStrategy}
                         onSelect={loadBacktestResult}
                         isInline={true}
                       />
@@ -6112,6 +6158,7 @@ export default function StrategyTestingPage() {
               {showBacktestHistory && (
                 <BacktestHistoryList
                   strategyId={strategy_id || ''}
+                  isCustomStrategy={isDevModeStrategy}
                   onClose={() => setShowBacktestHistory(false)}
                   onSelect={loadBacktestResult}
                 />
@@ -6356,6 +6403,7 @@ export default function StrategyTestingPage() {
         showBacktestHistory && (
           <BacktestHistoryList
             strategyId={strategy_id || ""}
+            isCustomStrategy={isDevModeStrategy}
             onClose={() => setShowBacktestHistory(false)}
             onSelect={loadBacktestResult}
           />

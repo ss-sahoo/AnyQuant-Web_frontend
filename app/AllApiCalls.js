@@ -1822,6 +1822,12 @@ export const getBacktestResults = async (params = {}) => {
  * @param {number} [params.page] - Page number for pagination
  * @param {number} [params.page_size] - Results per page
  */
+/**
+ * @param {number|string} strategyStatementId
+ * @param {{ page?: number, page_size?: number, is_custom_strategy?: boolean }} [params]
+ *   `is_custom_strategy`: as for getStrategyOptimizationResults. The backend
+ *   does not read it yet, so a colliding id still lists the no-code strategy's runs.
+ */
 export const getStrategyBacktestResults = async (strategyStatementId, params = {}) => {
   const queryParams = new URLSearchParams();
 
@@ -1830,6 +1836,9 @@ export const getStrategyBacktestResults = async (strategyStatementId, params = {
   }
   if (params.page_size) {
     queryParams.append('page_size', params.page_size);
+  }
+  if (params.is_custom_strategy) {
+    queryParams.append('is_custom_strategy', 'true');
   }
 
   const response = await Fetch(`/api/strategies/${strategyStatementId}/backtest-results/?${queryParams}`, {
@@ -2340,7 +2349,12 @@ export const runCustomStrategyBacktest = async ({ strategy_id, params = {}, init
  * @param {number} [params.commission]
  * @param {string} [params.start_date]
  * @param {string} [params.end_date]
- * @param {string} [params.metaapi_token] - Optional; sample-data fallback when absent
+ * @param {Object|null} [params.files] - { timeframe: File }, one CSV per timeframe in
+ *   data_mapping. Sent as multipart, the way a dev-mode backtest sends them
+ * @param {Array<{name: string, timeframe: string}>|null} [params.data_mapping] - which
+ *   data variable each uploaded file fills (see runBacktest)
+ * @param {string} [params.metaapi_token] - With metaapi_account_id, the market data
+ *   source when no files are sent. With neither, the run fails for lack of data
  * @param {string} [params.metaapi_account_id]
  * @returns {Promise} Promise with the 202 start payload
  */
@@ -2358,6 +2372,8 @@ export const runCustomStrategyOptimisation = async ({
   commission = 0.00007,
   start_date = null,
   end_date = null,
+  files = null,
+  data_mapping = null,
   metaapi_token = null,
   metaapi_account_id = null,
 }) => {
@@ -2376,18 +2392,36 @@ export const runCustomStrategyOptimisation = async ({
   }
   if (algorithm) body.algorithm = algorithm
   if (algorithm_params) body.algorithm_params = algorithm_params
+  if (data_mapping && data_mapping.length > 0) body.data_mapping = data_mapping
   if (metaapi_token && metaapi_account_id) {
     body.metaapi_token = metaapi_token
     body.metaapi_account_id = metaapi_account_id
   }
 
-  const response = await Fetch("/api/custom-strategies/optimise/", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  })
+  // CSVs go multipart, one part per timeframe key. Every other field rides
+  // along as a string; the backend decodes the JSON-valued ones.
+  let request
+  if (files && Object.keys(files).length > 0) {
+    const formData = new FormData()
+    for (const [key, value] of Object.entries(body)) {
+      if (value == null) continue
+      formData.append(key, typeof value === "object" ? JSON.stringify(value) : String(value))
+    }
+    for (const [tf, file] of Object.entries(files)) {
+      formData.append(tf, file)
+    }
+    request = { method: "POST", body: formData }
+  } else {
+    request = {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    }
+  }
+
+  const response = await Fetch("/api/custom-strategies/optimise/", request)
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}))
