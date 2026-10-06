@@ -83,6 +83,7 @@ import {
 import { AdvancedSettingsModalContent } from "@/components/advanced-settings-modal-content"
 import { PreviousOptimisationView } from '@/components/PreviousOptimisationView'
 import { OptimisationHistoryList } from '@/components/OptimisationHistoryList'
+import { OptimisationProgressPanel } from '@/components/optimisation-progress-panel'
 import { WalkForwardOptimizationResults } from '@/components/walk-forward-optimization-results'
 import { WalkForwardOptimisationView } from "@/components/walk-forward-optimization-results-view";
 import { TradesSummary } from "@/components/trades-summary";
@@ -185,131 +186,6 @@ function ComingSoonPanel({ title, subtitle }: { title: string; subtitle?: string
         <div className="mt-3 max-w-md text-center text-gray-600 text-[11px] font-medium tracking-wide">
           {subtitle}
         </div>
-      )}
-    </div>
-  )
-}
-
-// "~6m remaining". Returns null when the backend has no estimate, so the
-// caller can omit the row entirely rather than render a placeholder.
-function formatEta(seconds: any): string | null {
-  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return null
-  if (seconds < 60) return `~${Math.round(seconds)}s remaining`
-  if (seconds < 3600) return `~${Math.round(seconds / 60)}m remaining`
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.round((seconds % 3600) / 60)
-  return minutes > 0 ? `~${hours}h ${minutes}m remaining` : `~${hours}h remaining`
-}
-
-function minutesSince(timestamp: any): number | null {
-  if (!timestamp) return null
-  const then = new Date(timestamp).getTime()
-  if (!Number.isFinite(then)) return null
-  return Math.max(0, Math.floor((Date.now() - then) / 60000))
-}
-
-/**
- * Live progress for an optimisation run, from the `progress` block on
- * GET /api/job-status/<run_id>/. Every field is optional — the panel renders
- * whatever the backend reports and silently omits the rest.
- */
-function OptimisationProgressPanel({
-  progress,
-  stale,
-  percent,
-  label,
-  onCancel,
-}: {
-  progress: any
-  stale?: boolean
-  percent: number
-  label: string
-  onCancel?: () => void
-}) {
-  const phaseTotal = Number(progress?.phase_total) || 0
-  const phaseIndex = Number(progress?.phase_index) || 0
-  const phaseLabel = progress?.phase_label || progress?.phase || null
-  const done = Number(progress?.done)
-  const total = Number(progress?.total)
-  const hasCounts = Number.isFinite(done) && Number.isFinite(total) && total > 0
-  const eta = formatEta(progress?.eta_seconds)
-  const staleMinutes = stale ? minutesSince(progress?.updated_at) : null
-
-  return (
-    <div className="mb-8 rounded-lg border border-gray-800 bg-[#080A10] p-6">
-      <div className="flex items-start justify-between gap-4 mb-5">
-        <div>
-          <div className="text-[10px] font-black uppercase tracking-[0.4em] text-[#85e1fe]">{label}</div>
-          {phaseLabel && (
-            <div className="mt-2 text-sm font-semibold text-white">
-              {phaseLabel}
-              {phaseTotal > 0 && (
-                <span className="ml-2 text-[11px] font-medium text-gray-500">
-                  Phase {phaseIndex} of {phaseTotal}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-        {onCancel && (
-          <button
-            type="button"
-            onClick={onCancel}
-            className="shrink-0 px-4 py-1.5 rounded-full border border-red-500 text-red-500 bg-red-500/10 hover:bg-red-500/20 text-[10px] font-black uppercase tracking-widest transition-colors"
-          >
-            Cancel
-          </button>
-        )}
-      </div>
-
-      {/* Phase stepper */}
-      {phaseTotal > 0 && (
-        <div className="flex items-center gap-1.5 mb-5">
-          {Array.from({ length: phaseTotal }).map((_, idx) => {
-            const step = idx + 1
-            const isDone = step < phaseIndex
-            const isCurrent = step === phaseIndex
-            return (
-              <div
-                key={step}
-                className={`h-1.5 flex-1 rounded-full transition-colors ${
-                  isCurrent ? 'bg-[#85e1fe]' : isDone ? 'bg-[#85e1fe]/40' : 'bg-gray-800'
-                }`}
-                title={isCurrent && phaseLabel ? phaseLabel : `Phase ${step}`}
-              />
-            )
-          })}
-        </div>
-      )}
-
-      {stale ? (
-        <div className="rounded-md border border-yellow-600/40 bg-yellow-500/10 px-4 py-3 text-[11px] font-semibold text-yellow-400">
-          Still running — no update
-          {staleMinutes != null ? ` for ${staleMinutes}m` : ' recently'}
-        </div>
-      ) : (
-        <div className="w-full h-2 rounded-full bg-gray-800 overflow-hidden">
-          <div
-            className="h-full bg-[#85e1fe] transition-all duration-500"
-            style={{ width: `${Math.max(0, Math.min(100, percent))}%` }}
-          />
-        </div>
-      )}
-
-      <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px]">
-        {hasCounts && (
-          <span className="font-mono text-white">
-            {progress?.phase === 'running_ga' ? 'Generation' : 'Step'} {done} of {total}
-          </span>
-        )}
-        {typeof progress?.percent === 'number' && (
-          <span className="font-mono text-gray-400">{Math.round(progress.percent)}%</span>
-        )}
-        {eta && <span className="text-gray-400">{eta}</span>}
-      </div>
-
-      {progress?.detail && (
-        <div className="mt-3 text-[11px] text-gray-400 font-mono break-words">{progress.detail}</div>
       )}
     </div>
   )
@@ -4030,12 +3906,13 @@ export default function StrategyTestingPage() {
               console.log(`   Actual: $${jobData.actual_cost}`)
               console.log(`   Droplet Size: ${jobData.droplet_size}`)
 
+              // The verdict reads the sign of z: p < 0.05 alone can be a
+              // strategy that reliably loses.
               const decision = jobData.results?.hypothesis_decision || 'Completed'
-              const pValue = jobData.results?.p_value
-              const isProfitable = pValue && pValue < 0.05
+              const isProfitable = /significantly profitable/i.test(decision)
 
               showToast(
-                `Walk Forward Optimization completed! ${isProfitable ? '✅ Profitable' : '⚠️ ' + decision.substring(0, 50)}`,
+                `Walk Forward Optimization completed! ${decision}`,
                 isProfitable ? 'success' : 'warning'
               )
             } else {
@@ -4826,6 +4703,19 @@ export default function StrategyTestingPage() {
               setOptimisationTab('results')
             } catch (err: any) {
               console.error('Failed to load optimisation result:', err)
+              showToast(err?.message || 'Failed to load optimisation result', 'error')
+            }
+          }}
+          onSelectCloudRun={async (jobId) => {
+            // A finished cloud run opens here in the Results tab, like a local
+            // one. `job_id` keeps the file downloads on this job.
+            try {
+              const job = await getOptimizationJob(jobId as any)
+              setOptimisationResult({ ...normalizeOptimisationResult(job.results), job_id: job.id })
+              setShowOptimisationResults(true)
+              setOptimisationTab('results')
+            } catch (err: any) {
+              console.error('Failed to load cloud optimisation result:', err)
               showToast(err?.message || 'Failed to load optimisation result', 'error')
             }
           }}
@@ -6202,14 +6092,19 @@ export default function StrategyTestingPage() {
                             <p className="text-gray-400 text-sm">Avg Validation Return</p>
                             <p className={`font-semibold text-lg ${(dropletJobResults.results.avg_validation_return || 0) > 0 ? 'text-green-500' : 'text-red-500'
                               }`}>
-                              {dropletJobResults.results.avg_validation_return?.toFixed(2) || 'N/A'}%
+                              {typeof dropletJobResults.results.avg_validation_return === 'number'
+                                ? `${dropletJobResults.results.avg_validation_return.toFixed(4)}%`
+                                : 'N/A'}
                             </p>
                           </div>
                           <div className="bg-[#141721] rounded-lg p-4">
                             <p className="text-gray-400 text-sm">Decision</p>
-                            <p className={`font-semibold text-sm ${(dropletJobResults.results.p_value || 1) < 0.05 ? 'text-green-500' : 'text-yellow-500'
+                            {/* The verdict reads the sign: significant can mean reliably losing. */}
+                            <p className={`font-semibold text-sm ${/unprofitable/i.test(dropletJobResults.results.hypothesis_decision || '')
+                              ? 'text-red-500'
+                              : /significantly profitable/i.test(dropletJobResults.results.hypothesis_decision || '') ? 'text-green-500' : 'text-yellow-500'
                               }`}>
-                              {(dropletJobResults.results.p_value || 1) < 0.05 ? '✅ Profitable' : '⚠️ Not Profitable'}
+                              {dropletJobResults.results.hypothesis_decision || 'No decision available'}
                             </p>
                           </div>
                         </div>

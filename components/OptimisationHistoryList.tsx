@@ -16,6 +16,12 @@ interface OptimisationHistoryListProps {
    */
   isCustomStrategy?: boolean;
   onSelect: (id: string | number) => void;
+  /**
+   * A finished regular run that ran on a droplet: its results live on the
+   * optimisation job, not on an OptimizationResult. When absent the list opens
+   * the job's own results page.
+   */
+  onSelectCloudRun?: (jobId: string | number) => void;
   onClose?: () => void;
   isInline?: boolean;
   /**
@@ -36,7 +42,8 @@ interface OptimisationHistoryListProps {
   activeRun?: { kind: OptimisationKind; startedAt?: number } | null;
 }
 
-const RUNNING_STATUSES = ['running', 'started', 'pending', 'in_progress', 'queued'];
+// `creating_droplet` is a cloud job's first state; it is as unfinished as `running`.
+const RUNNING_STATUSES = ['running', 'started', 'pending', 'in_progress', 'queued', 'creating_droplet'];
 
 type OptimisationKind = 'regular' | 'walk_forward';
 
@@ -67,22 +74,36 @@ const toTime = (value: string | null) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = ({ strategyId, isCustomStrategy = false, onSelect, onClose, isInline = false, onSelectRunning, refreshToken, activeRun }) => {
+export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = ({ strategyId, isCustomStrategy = false, onSelect, onSelectCloudRun, onClose, isInline = false, onSelectRunning, refreshToken, activeRun }) => {
   const router = useRouter();
   const [rows, setRows] = useState<HistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [page, setPage] = useState(1);
+  // Bumped while a cloud run is unfinished, so its row turns "completed" here
+  // without a reload: nothing in this browser is following that run.
+  const [cloudPollTick, setCloudPollTick] = useState(0);
 
   useEffect(() => {
     if (!expanded) setPage(1);
   }, [expanded]);
 
+  const hasUnfinishedCloudRun = rows.some(
+    (row) => row.throughDroplet && RUNNING_STATUSES.includes((row.status || '').toLowerCase()),
+  );
+  useEffect(() => {
+    if (!hasUnfinishedCloudRun) return;
+    const timer = setInterval(() => setCloudPollTick((tick) => tick + 1), 15000);
+    return () => clearInterval(timer);
+  }, [hasUnfinishedCloudRun]);
+
   useEffect(() => {
     if (!strategyId) return;
     let isCancelled = false;
-    setLoading(true);
+    // A background re-poll refreshes the rows in place rather than blanking
+    // the table behind a spinner every 15s.
+    if (cloudPollTick === 0) setLoading(true);
     setError(null);
 
     // Regular and walk-forward runs live on separate endpoints. Fetch both and
@@ -141,12 +162,18 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
     return () => {
       isCancelled = true;
     };
-  }, [strategyId, isCustomStrategy, refreshToken]);
+  }, [strategyId, isCustomStrategy, refreshToken, cloudPollTick]);
 
   const handleItemClick = (row: HistoryRow) => {
     // A run still in progress has no result to open. Send the user to where
     // the live progress is instead of a results page that would be empty.
     if (RUNNING_STATUSES.includes((row.status || '').toLowerCase())) {
+      // A cloud run reports its own progress on its job page, from any browser.
+      if (row.throughDroplet) {
+        router.push(`/optimization-results?job_id=${row.id}&type=droplet`);
+        if (onClose) onClose();
+        return;
+      }
       if (onSelectRunning) {
         onSelectRunning();
         if (onClose) onClose();
@@ -156,13 +183,17 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
       return;
     }
     if (row.kind === 'walk_forward') {
-      router.push(`/walk-forward-results?id=${row.id}`);
+      // A cloud job's id can also be some local run's: say which this row is.
+      router.push(`/walk-forward-results?id=${row.id}${row.throughDroplet ? '&source=droplet' : ''}`);
       if (onClose) onClose();
       return;
     }
     if (row.throughDroplet) {
-      // Droplet runs are served by the dedicated results page
-      router.push(`/optimization-results?job_id=${row.id}&type=droplet`);
+      if (onSelectCloudRun) {
+        onSelectCloudRun(row.id);
+      } else {
+        router.push(`/optimization-results?job_id=${row.id}&type=droplet`);
+      }
       if (onClose) onClose();
       return;
     }

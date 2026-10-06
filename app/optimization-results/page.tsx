@@ -8,6 +8,7 @@ import { MobileSidebar } from "@/components/mobile-sidebar"
 import {
   getOptimizationJob,
   getOptimizationResultDetail,
+  getWalkForwardOptimizationResultDetail,
   listOptimizationFiles,
   downloadOptimizationFile,
   downloadOptimizationZip,
@@ -15,6 +16,38 @@ import {
 import { Fetch } from "../usefetch"
 import { ArrowLeft, RefreshCw } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
+import { OptimisationProgressPanel } from "@/components/optimisation-progress-panel"
+
+const ACTIVE_STATUSES = ['pending', 'creating', 'creating_droplet', 'running']
+const FINISHED_STATUSES = ['completed', 'failed', 'cancelled', 'success']
+
+// Billing details come from the job record, not job-status: a poll keeps
+// the ones an earlier fetch filled in rather than blanking them.
+const JOB_DETAIL_FIELDS = ['estimated_cost', 'actual_cost', 'runtime_minutes', 'droplet_size',
+  'droplet_id', 'started_at', 'completed_at']
+
+const keepJobDetails = (previous: any, next: any) => {
+  if (!previous) return next
+  const merged = { ...next }
+  for (const field of JOB_DETAIL_FIELDS) {
+    if (merged[field] == null && previous[field] != null) merged[field] = previous[field]
+  }
+  return merged
+}
+
+// Percent with enough decimals for the near-zero fold returns a small
+// contract size produces (-0.0005%), which toFixed(2) shows as -0.00.
+const formatPercent = (value: any) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-'
+  return `${value.toFixed(Math.abs(value) < 0.1 && value !== 0 ? 4 : 2)}%`
+}
+
+const decisionColour = (decision: string | null | undefined) => {
+  const text = (decision || '').toLowerCase()
+  if (text.includes('unprofitable')) return 'text-red-400'
+  if (text.includes('significantly profitable')) return 'text-green-400'
+  return 'text-yellow-400'
+}
 
 function OptimizationResultsContent() {
   const router = useRouter()
@@ -32,7 +65,11 @@ function OptimizationResultsContent() {
   const [downloadableFiles, setDownloadableFiles] = useState<any[]>([])
   const [filesError, setFilesError] = useState<string | null>(null)
   const [pendingDownload, setPendingDownload] = useState<string | null>(null)
+  const [walkForwardDetail, setWalkForwardDetail] = useState<any>(null)
   const isDroplet = type === 'droplet'
+  // job-status says `optimization_type`; the job record spells the type out.
+  const isWalkForward =
+    jobData?.optimization_type === 'walk_forward' || jobData?.type === 'Walk Forward Optimization'
 
   /**
    * The download routes key off the numeric optimization-job id. For
@@ -131,7 +168,20 @@ function OptimizationResultsContent() {
 
       // If job is completed, process results
       if (['completed', 'success'].includes(normalizedStatus)) {
-        if (data.results) {
+        if (isDroplet && data.optimization_type === 'walk_forward') {
+          // Folds, per-fold parameters and plots come from the walk-forward
+          // view, which reads the job by its numeric id.
+          const walkForwardId = [data.job_id, data.id, jobId].find(
+            (value) => value != null && /^\d+$/.test(String(value)),
+          )
+          if (walkForwardId != null) {
+            try {
+              setWalkForwardDetail(await getWalkForwardOptimizationResultDetail(walkForwardId, { throughDroplet: true }))
+            } catch (err) {
+              console.warn("Could not load walk forward results for job", walkForwardId, err)
+            }
+          }
+        } else if (data.results) {
           // ✅ Use full optimization results instead of preview (which is limited to 20 rows)
           const tableData = data.results.optimisation_results || data.results.full_optimization_results || data.results.optimisation_preview || data.results.convergence_data || []
           
@@ -199,8 +249,12 @@ function OptimizationResultsContent() {
           
           const data = await response.json()
           const normalizedStatus = (data.status || '').toLowerCase()
-          
-          if (['completed', 'failed', 'cancelled', 'success'].includes(normalizedStatus)) {
+
+          // Every poll lands on screen: status and progress move while the
+          // droplet works, and used to show only after a page refresh.
+          setJobData((previous: any) => keepJobDetails(previous, data))
+
+          if (FINISHED_STATUSES.includes(normalizedStatus)) {
             clearInterval(interval)
             setPollingInterval(null)
             fetchJobData()
@@ -532,8 +586,10 @@ function OptimizationResultsContent() {
               <div className="flex justify-between items-start mb-4">
                 <div>
                   <h2 className="text-xl font-semibold text-white mb-2">{jobData.strategy_name || jobData.strategy_statement_name}</h2>
-                  <p className="text-gray-400">Job ID: {jobData.id}</p>
-                  <p className="text-gray-400">Type: {isDroplet ? jobData.type : 'Legacy Optimization'}</p>
+                  <p className="text-gray-400">Job ID: {jobData.job_id ?? jobData.id}</p>
+                  <p className="text-gray-400">
+                    Type: {isDroplet ? (isWalkForward ? 'Walk Forward Optimization' : 'Optimization') : 'Legacy Optimization'}
+                  </p>
                   <p className="text-gray-400">
                     Method: {isDroplet ? (
                       <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-[#85e1fe] text-black ml-2">
@@ -554,7 +610,7 @@ function OptimizationResultsContent() {
                     jobData.status?.toLowerCase() === 'cancelled' ? 'bg-yellow-500 text-black' :
                     'bg-gray-500 text-white'
                   }`}>
-                    {jobData.status}
+                    {String(jobData.status || '').replace(/_/g, ' ')}
                   </span>
                   {isLoading && (
                     <RefreshCw className="w-5 h-5 animate-spin text-[#85e1fe]" />
@@ -562,7 +618,17 @@ function OptimizationResultsContent() {
                 </div>
               </div>
 
-              {/* Progress Bar */}
+              {/* Live progress while the droplet works; the bar below once it is done */}
+              {isDroplet && ACTIVE_STATUSES.includes((jobData.status || '').toLowerCase()) ? (
+                <OptimisationProgressPanel
+                  progress={jobData.progress}
+                  stale={Boolean(jobData.stale)}
+                  percent={typeof jobData.progress?.percent === 'number' ? jobData.progress.percent : getProgressPercentage()}
+                  label={(jobData.status || '').toLowerCase() === 'creating_droplet'
+                    ? 'Creating droplet'
+                    : isWalkForward ? 'Walk forward in progress' : 'Optimisation in progress'}
+                />
+              ) : (
               <div className="mb-4">
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-sm text-gray-400">Progress</span>
@@ -586,12 +652,8 @@ function OptimizationResultsContent() {
                     style={{ width: `${getProgressPercentage()}%` }}
                   ></div>
                 </div>
-                {jobData.status?.toLowerCase() === 'running' && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    Estimated time: 5-15 minutes depending on complexity
-                  </p>
-                )}
               </div>
+              )}
 
               {/* Job Details */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -649,125 +711,151 @@ function OptimizationResultsContent() {
           )}
 
           {/* Walk Forward Optimization Results */}
-          {jobData && jobData.type === 'Walk Forward Optimization' && jobData.results && (
+          {jobData && isWalkForward && ['completed', 'success'].includes((jobData.status || '').toLowerCase()) && (() => {
+            const wf = walkForwardDetail || jobData.results || {}
+            const folds: any[] = Array.isArray(wf.fold_results) ? wf.fold_results : []
+            const plots = [
+              ['Train / Validation Split', wf.split_graph_html],
+              ['Equity Final [$] by Fold', wf.equity_trend_html],
+              ['Return (Ann.) [%] by Fold', wf.return_trend_html],
+            ].filter(([, html]) => typeof html === 'string' && html.length > 0)
+            const resultsId = jobData.job_id ?? jobData.id
+            return (
             <div className="bg-[#000000] rounded-lg p-6">
               {/* Hypothesis Testing Results */}
               <div className="mb-6">
-                <h3 className="text-lg font-semibold text-white mb-4">Hypothesis Testing</h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-white">Hypothesis Testing (out-of-sample)</h3>
+                  {resultsId != null && (
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/walk-forward-results?id=${resultsId}&source=droplet`)}
+                      className="px-4 py-2 bg-[#85e1fe] text-black rounded-lg text-sm font-semibold hover:bg-[#6bcae2] transition-colors"
+                    >
+                      Open full walk-forward results
+                    </button>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="bg-[#141721] rounded-lg p-4">
                     <p className="text-gray-400 text-sm">Z-Statistic</p>
                     <p className="text-white font-semibold text-lg">
-                      {jobData.results.z_statistic?.toFixed(4) || 'N/A'}
+                      {typeof wf.z_statistic === 'number' ? wf.z_statistic.toFixed(4) : 'N/A'}
                     </p>
                   </div>
                   <div className="bg-[#141721] rounded-lg p-4">
                     <p className="text-gray-400 text-sm">P-Value</p>
                     <p className="text-white font-semibold text-lg">
-                      {jobData.results.p_value?.toFixed(4) || 'N/A'}
+                      {typeof wf.p_value === 'number' ? wf.p_value.toFixed(4) : 'N/A'}
                     </p>
                   </div>
                   <div className="bg-[#141721] rounded-lg p-4">
                     <p className="text-gray-400 text-sm">Avg Validation Return</p>
                     <p className={`font-semibold text-lg ${
-                      (jobData.results.avg_validation_return || 0) > 0 ? 'text-green-500' : 'text-red-500'
+                      (wf.avg_validation_return || 0) > 0 ? 'text-green-500' : 'text-red-500'
                     }`}>
-                      {jobData.results.avg_validation_return?.toFixed(2) || 'N/A'}%
+                      {formatPercent(wf.avg_validation_return)}
                     </p>
                   </div>
                   <div className="bg-[#141721] rounded-lg p-4">
                     <p className="text-gray-400 text-sm">Decision</p>
-                    <p className={`font-semibold text-sm ${
-                      (jobData.results.p_value || 1) < 0.05 ? 'text-green-500' : 'text-yellow-500'
-                    }`}>
-                      {(jobData.results.p_value || 1) < 0.05 ? '✅ Profitable' : '⚠️ Not Profitable'}
+                    {/* The verdict reads the sign: significant can mean reliably losing. */}
+                    <p className={`font-semibold text-sm ${decisionColour(wf.hypothesis_decision)}`}>
+                      {wf.hypothesis_decision || 'No decision available'}
                     </p>
                   </div>
                 </div>
-                
-                <div className="mt-4 bg-[#141721] rounded-lg p-4">
-                  <p className="text-gray-400 text-sm mb-2">Hypothesis Decision:</p>
-                  <p className="text-white text-sm">
-                    {jobData.results.hypothesis_decision || 'No decision available'}
-                  </p>
-                </div>
+                {wf.error_message && (
+                  <p className="mt-3 text-sm text-red-400">{wf.error_message}</p>
+                )}
               </div>
 
-              {/* Plot Files Information */}
-              {jobData.results.plot_files && (
+              {/* Per-fold results */}
+              {folds.length > 0 && (
                 <div className="mb-6">
-                  <h3 className="text-lg font-semibold text-white mb-4">
-                    Plot Files ({Object.keys(jobData.results.plot_files).length} available)
-                  </h3>
-                  <div className="grid grid-cols-1 gap-3">
-                    {Object.entries(jobData.results.plot_files).map(([type, info]: [string, any]) => (
-                      <div
-                        key={type}
-                        className="bg-[#141721] rounded-lg p-4 flex justify-between items-center"
-                      >
-                        <div>
-                          <p className="text-white font-semibold">
-                            {type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                          </p>
-                          <p className="text-gray-400 text-sm">{info.filename}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[#85e1fe] font-semibold">
-                            {(info.size / 1024 / 1024).toFixed(2)} MB
-                          </p>
-                          <p className="text-gray-400 text-xs">
-                            {info.available ? '✅ Available' : '❌ Not available'}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
+                  <h3 className="text-lg font-semibold text-white mb-4">Folds ({folds.length})</h3>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-xs border-separate border-spacing-y-1">
+                      <thead>
+                        <tr className="text-gray-400 text-left">
+                          <th className="px-2 py-2">Fold</th>
+                          <th className="px-2 py-2">Out-of-sample window</th>
+                          <th className="px-2 py-2">Training Return</th>
+                          <th className="px-2 py-2">OOS Return</th>
+                          <th className="px-2 py-2">OOS Max DD</th>
+                          <th className="px-2 py-2">OOS Trades</th>
+                          <th className="px-2 py-2">OOS Equity</th>
+                          <th className="px-2 py-2">Parameters</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {folds.map((fold: any) => (
+                          <tr key={fold.fold} className="bg-[#141721] text-white">
+                            <td className="px-2 py-2">{fold.fold}</td>
+                            <td className="px-2 py-2 whitespace-nowrap">
+                              {fold.validation_start ?? '-'} → {fold.validation_end ?? '-'}
+                            </td>
+                            <td className="px-2 py-2">{formatPercent(fold.training_return)}</td>
+                            <td className={`px-2 py-2 ${(fold.validation_return || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {formatPercent(fold.validation_return)}
+                            </td>
+                            <td className="px-2 py-2">{formatPercent(fold.validation_max_drawdown)}</td>
+                            <td className="px-2 py-2">{fold.validation_trades ?? '-'}</td>
+                            <td className="px-2 py-2">
+                              {typeof fold.validation_equity === 'number' ? `$${fold.validation_equity.toFixed(2)}` : '-'}
+                            </td>
+                            <td className="px-2 py-2 font-mono">
+                              {Object.entries(fold.parameters || {}).map(([k, v]) => `${k}=${v}`).join(', ') || '-'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                  <p className="text-gray-400 text-sm mt-3">
-                    ℹ️ Plots were generated on the droplet. Output directory: {jobData.results.output_dir}
-                  </p>
                 </div>
               )}
 
+              {/* Plots */}
+              {plots.map(([title, html]) => (
+                <div key={title as string} className="mb-6">
+                  <h3 className="text-lg font-semibold text-white mb-3">{title}</h3>
+                  <iframe
+                    title={title as string}
+                    srcDoc={html as string}
+                    className="w-full h-[450px] bg-white rounded-lg"
+                    style={{ border: 'none' }}
+                  />
+                </div>
+              ))}
+
               {/* Walk Forward Settings */}
-              {jobData.job_parameters?.walk_forward_settings && (
+              {wf.lookback_bars != null && (
                 <div className="mb-6">
                   <h3 className="text-lg font-semibold text-white mb-4">Walk Forward Settings</h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="bg-[#141721] rounded-lg p-4">
-                      <p className="text-gray-400 text-sm">Warmup Bars</p>
-                      <p className="text-white font-semibold">
-                        {jobData.job_parameters.walk_forward_settings.warmup_bars}
-                      </p>
-                    </div>
-                    <div className="bg-[#141721] rounded-lg p-4">
-                      <p className="text-gray-400 text-sm">Lookback Bars</p>
-                      <p className="text-white font-semibold">
-                        {jobData.job_parameters.walk_forward_settings.lookback_bars}
-                      </p>
-                    </div>
-                    <div className="bg-[#141721] rounded-lg p-4">
-                      <p className="text-gray-400 text-sm">Validation Bars</p>
-                      <p className="text-white font-semibold">
-                        {jobData.job_parameters.walk_forward_settings.validation_bars}
-                      </p>
-                    </div>
-                    <div className="bg-[#141721] rounded-lg p-4">
-                      <p className="text-gray-400 text-sm">Anchor</p>
-                      <p className="text-white font-semibold">
-                        {jobData.job_parameters.walk_forward_settings.anchor ? 'Yes' : 'No'}
-                      </p>
-                    </div>
+                    {[
+                      ['Warmup Bars', wf.warmup_bars],
+                      ['Lookback Bars', wf.lookback_bars],
+                      ['Validation Bars', wf.validation_bars],
+                      ['Anchor', wf.anchor ? 'Yes' : 'No'],
+                    ].map(([label, value]) => (
+                      <div key={label as string} className="bg-[#141721] rounded-lg p-4">
+                        <p className="text-gray-400 text-sm">{label}</p>
+                        <p className="text-white font-semibold">{value ?? '-'}</p>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
 
               {/* Output Files Listing */}
-              {renderGeneratedFiles(jobData.results.results_output_listing, jobData.results.output_dir)}
+              {renderGeneratedFiles(jobData.results?.results_output_listing, jobData.results?.output_dir)}
             </div>
-          )}
+            )
+          })()}
 
           {/* Regular Optimization Results */}
-          {optimisationResult && jobData?.type !== 'Walk Forward Optimization' && (
+          {optimisationResult && !isWalkForward && (
             <div className="bg-[#000000] rounded-lg p-6">
               {/* Optimized Parameters */}
               {optimisationResult.optimised_parameters && (

@@ -6,9 +6,12 @@
 // non-optimise params; see applyEdits in optimisation-form-persistence.ts).
 //
 // Merge rules per param (matched by paramMatchKey, never by `id`):
-//   - If the saved param has a numeric `range` or `step` or `default` that
-//     differs from the backend's, the saved values win (they reflect the
-//     user's intent).
+//   - If the saved param has a numeric `range` or `step` that differs from
+//     the backend's, the saved values win (they reflect the user's intent).
+//   - The saved `default` (Value) wins only for a param whose value is not
+//     saved in the strategy JSON (isValueSavedInStrategy). Otherwise the
+//     backend's is current: the stored form is shared by every strategy, and
+//     may predate an edit made in the builder.
 //   - All other fields (name, indicator, encoding, optimise flag, type, etc.)
 //     come from the backend — the backend is authoritative on the param's
 //     shape; the user only edits the numeric range.
@@ -19,6 +22,7 @@
 //   - A whole-number param (isWholeNumberParam) gets a whole-number range.
 
 import { BBANDS_OPTIMISABLE_PARAMS } from "./indicator-contract"
+import { isValueSavedInStrategy } from "./optimisation-form-persistence"
 
 export interface OptimisationFormParam {
   id: string
@@ -134,7 +138,7 @@ export function mergeOptimisationForm(
       out.step = sp.step
     }
 
-    if (sp.default !== undefined && sp.default !== "") {
+    if (sp.default !== undefined && sp.default !== "" && !isValueSavedInStrategy(bp.encoding)) {
       out.default = sp.default
     }
 

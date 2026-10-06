@@ -2,7 +2,21 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { getWalkForwardOptimizationResultDetail } from '../AllApiCalls';
+import {
+  downloadOptimizationFile,
+  downloadOptimizationZip,
+  getWalkForwardOptimizationResultDetail,
+  listOptimizationFiles,
+} from '../AllApiCalls';
+
+// Returns and drawdowns arrive in percent, as the engine's `[%]` statistics do.
+// Small contract sizes give fold returns like -0.0005%, which two decimals hide.
+const formatNumber = (value: any, digits = 2) =>
+  typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '-';
+const formatPercent = (value: any) =>
+  typeof value === 'number' && Number.isFinite(value)
+    ? `${value.toFixed(Math.abs(value) < 0.1 && value !== 0 ? 4 : 2)}%`
+    : '-';
 
 interface WalkForwardResultsPageProps {
   // This will be populated from URL params or state
@@ -21,6 +35,33 @@ function WalkForwardResultsContent() {
   const [plotImages, setPlotImages] = useState<{ [key: string]: string }>({});
   const [plotLoading, setPlotLoading] = useState<{ [key: string]: boolean }>({});
   const [plotErrors, setPlotErrors] = useState<{ [key: string]: string }>({});
+
+  // A cloud run's files (fold table, report, plots) are served by the
+  // optimisation-job download routes, keyed by the job id.
+  const cloudJobId = result?.through_droplet ? (result.job_id ?? result.id) : null;
+  const [cloudFiles, setCloudFiles] = useState<{ name: string; path: string }[]>([]);
+  const [pendingDownload, setPendingDownload] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (cloudJobId == null) return;
+    let isCancelled = false;
+    listOptimizationFiles(cloudJobId)
+      .then((files: any[]) => { if (!isCancelled) setCloudFiles(files); })
+      .catch((err: any) => console.warn('Could not list walk forward files:', err));
+    return () => { isCancelled = true; };
+  }, [cloudJobId]);
+
+  const downloadCloudFile = async (path: string) => {
+    setPendingDownload(path);
+    try {
+      await downloadOptimizationFile(cloudJobId, path);
+    } catch (err: any) {
+      console.error('Download failed:', err);
+      alert(err?.message || 'Failed to download file');
+    } finally {
+      setPendingDownload(null);
+    }
+  };
 
   // Debug: Log the entire result structure to understand how plots are stored
   useEffect(() => {
@@ -180,6 +221,8 @@ function WalkForwardResultsContent() {
   useEffect(() => {
     const resultParam = searchParams.get('result');
     const idParam = searchParams.get('id');
+    // A cloud job's id can also be a local run's; the history list says which.
+    const throughDroplet = searchParams.get('source') === 'droplet';
     
     console.log('🔍 DEBUG: URL params - resultParam:', resultParam, 'idParam:', idParam);
     
@@ -195,7 +238,7 @@ function WalkForwardResultsContent() {
         try {
           setIsLoading(true);
           console.log('Fetching WFO result by ID:', idParam);
-          const data = await getWalkForwardOptimizationResultDetail(parseInt(idParam));
+          const data = await getWalkForwardOptimizationResultDetail(parseInt(idParam), { throughDroplet });
           console.log('Fetched WFO result:', data);
           setResult(data);
         } catch (error) {
@@ -356,6 +399,21 @@ function WalkForwardResultsContent() {
             Reload Plots
           </button>
         )}
+        {cloudJobId != null && (
+          <button
+            onClick={async () => {
+              try {
+                await downloadOptimizationZip(cloudJobId);
+              } catch (err: any) {
+                console.error('Download failed:', err);
+                alert(err?.message || 'Failed to download results archive');
+              }
+            }}
+            className="bg-[#85e1fe] text-black px-3 py-1.5 rounded-md hover:bg-[#6bcae2] font-medium mt-2 text-sm"
+          >
+            Download all (ZIP)
+          </button>
+        )}
         <button 
           onClick={() => router.push('/strategy-testing')} 
           className="bg-[#85e1fe] text-black px-3 py-1.5 rounded-md hover:bg-[#6bcae2] font-medium mt-2 text-sm"
@@ -379,7 +437,7 @@ function WalkForwardResultsContent() {
                 </div>
                 <div className="bg-[#141721] rounded-lg p-4">
                   <div className="text-gray-400 text-sm mb-2">Execution Time</div>
-                  <div className="text-white font-semibold">{result.execution_time}s</div>
+                  <div className="text-white font-semibold">{result.execution_time ?? result.execution_time_seconds ?? '-'}s</div>
                 </div>
                 <div className="bg-[#141721] rounded-lg p-4">
                   <div className="text-gray-400 text-sm mb-2">z-statistic</div>
@@ -410,25 +468,47 @@ function WalkForwardResultsContent() {
               </div>
             </div>
 
+            {/* Downloadable files of a cloud run */}
+            {cloudFiles.length > 0 && (
+              <div className="mb-8">
+                <div className="mb-4 text-lg font-semibold text-[#85e1fe]">Files</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {cloudFiles.map((file) => (
+                    <div key={file.path} className="bg-[#141721] rounded-lg p-3 flex items-center justify-between gap-2">
+                      <span className="text-gray-300 text-sm truncate" title={file.name}>{file.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => downloadCloudFile(file.path)}
+                        disabled={pendingDownload === file.path}
+                        className="px-3 py-1 bg-[#85e1fe] text-black rounded text-xs font-semibold hover:bg-[#6bcae2] disabled:opacity-50 whitespace-nowrap"
+                      >
+                        {pendingDownload === file.path ? 'Downloading…' : 'Download'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Average Performance */}
             <div className="mb-8">
               <div className="mb-4 text-lg font-semibold text-[#85e1fe]">Average Performance</div>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div className="bg-[#141721] rounded-lg p-4">
                   <div className="text-gray-400 text-sm mb-2">Avg Training Equity</div>
-                  <div className="text-white font-semibold">${result.avg_training_equity?.toFixed(2) || 'N/A'}</div>
+                  <div className="text-white font-semibold">${formatNumber(result.avg_training_equity)}</div>
                 </div>
                 <div className="bg-[#141721] rounded-lg p-4">
                   <div className="text-gray-400 text-sm mb-2">Avg Validation Equity</div>
-                  <div className="text-white font-semibold">${result.avg_validation_equity?.toFixed(2) || 'N/A'}</div>
+                  <div className="text-white font-semibold">${formatNumber(result.avg_validation_equity)}</div>
                 </div>
                 <div className="bg-[#141721] rounded-lg p-4">
                   <div className="text-gray-400 text-sm mb-2">Avg Training Return</div>
-                  <div className="text-white font-semibold">{(result.avg_training_return * 100)?.toFixed(2) || '0.00'}%</div>
+                  <div className="text-white font-semibold">{formatPercent(result.avg_training_return)}</div>
                 </div>
                 <div className="bg-[#141721] rounded-lg p-4">
                   <div className="text-gray-400 text-sm mb-2">Avg Validation Return</div>
-                  <div className="text-white font-semibold">{(result.avg_validation_return * 100)?.toFixed(2) || '0.00'}%</div>
+                  <div className="text-white font-semibold">{formatPercent(result.avg_validation_return)}</div>
                 </div>
               </div>
             </div>
@@ -473,14 +553,15 @@ function WalkForwardResultsContent() {
                               <span className="font-medium">{fold.fold}</span>
                             </div>
                           </td>
-                          <td className="px-2 py-2">{get(fold, 'training_equity')?.toFixed(2)}</td>
-                          <td className="px-2 py-2">{get(fold, 'validation_equity')?.toFixed(2)}</td>
-                          <td className="px-2 py-2">{((get(fold, 'training_return') || 0) * 100).toFixed(2)}</td>
-                          <td className="px-2 py-2">{((get(fold, 'validation_return') || 0) * 100).toFixed(2)}</td>
-                          <td className="px-2 py-2">{get(fold, 'training_sharpe')?.toFixed(2)}</td>
-                          <td className="px-2 py-2">{get(fold, 'validation_sharpe')?.toFixed(2)}</td>
-                          <td className="px-2 py-2">{((get(fold, 'training_max_drawdown') || 0) * 100).toFixed(2)}</td>
-                          <td className="px-2 py-2">{((get(fold, 'validation_max_drawdown') || 0) * 100).toFixed(2)}</td>
+                          <td className="px-2 py-2">{formatNumber(fold.training_equity)}</td>
+                          <td className="px-2 py-2">{formatNumber(fold.validation_equity)}</td>
+                          <td className="px-2 py-2">{formatPercent(fold.training_return)}</td>
+                          <td className="px-2 py-2">{formatPercent(fold.validation_return)}</td>
+                          <td className="px-2 py-2">{formatNumber(fold.training_sharpe)}</td>
+                          {/* No out-of-sample Sharpe exists; the headline one counts warm-up bars. */}
+                          <td className="px-2 py-2">{formatNumber(fold.validation_sharpe)}</td>
+                          <td className="px-2 py-2">{formatPercent(fold.training_max_drawdown)}</td>
+                          <td className="px-2 py-2">{formatPercent(fold.validation_max_drawdown)}</td>
                           <td className="px-2 py-2">{get(fold, 'training_trades')}</td>
                           <td className="px-2 py-2">{get(fold, 'validation_trades')}</td>
                           <td className="px-2 py-2 max-w-[200px] truncate" title={JSON.stringify(fold.parameters)}>
@@ -833,15 +914,15 @@ function WalkForwardResultsContent() {
                 <div className="mb-2 flex flex-col gap-1">
                   {[
                     ['Status', result.status],
-                    ['Execution Time', `${result.execution_time}s`],
+                    ['Execution Time', `${result.execution_time ?? result.execution_time_seconds ?? '-'}s`],
                     ['z-statistic', result.z_statistic],
                     ['p-value', result.p_value],
                     ['Hypothesis Decision', result.hypothesis_decision],
                     ['Total Folds', foldResults.length],
                     ['Total Generations', generations.length],
-                    ['Avg Training Equity', `$${result.avg_training_equity?.toFixed(2) || 'N/A'}`],
-                    ['Avg Validation Equity', `$${result.avg_validation_equity?.toFixed(2) || 'N/A'}`],
-                    ['Avg Training Return', `${(result.avg_training_return * 100)?.toFixed(2) || '0.00'}%`],
+                    ['Avg Training Equity', `$${formatNumber(result.avg_training_equity)}`],
+                    ['Avg Validation Equity', `$${formatNumber(result.avg_validation_equity)}`],
+                    ['Avg Training Return', formatPercent(result.avg_training_return)],
                   ].map(([label, value]) => (
                     <div key={label} className="flex justify-between border-b border-gray-800 py-1 text-sm">
                       <span className="text-gray-400">{label}</span>
@@ -861,9 +942,9 @@ function WalkForwardResultsContent() {
                     ['Optimization Algorithm', 'Genetic Algorithm'],
                     ['Validation Method', 'Walk Forward'],
                     ['Statistical Significance', result.p_value < 0.05 ? 'Significant' : 'Not Significant'],
-                    ['Avg Validation Return', `${(result.avg_validation_return * 100)?.toFixed(2) || '0.00'}%`],
-                    ['Avg Training Sharpe', result.avg_training_sharpe?.toFixed(2) || 'N/A'],
-                    ['Avg Validation Sharpe', result.avg_validation_sharpe?.toFixed(2) || 'N/A'],
+                    ['Avg Validation Return', formatPercent(result.avg_validation_return)],
+                    ['Avg Training Sharpe', formatNumber(result.avg_training_sharpe)],
+                    ['Avg Validation Sharpe', formatNumber(result.avg_validation_sharpe)],
                   ].map(([label, value]) => (
                     <div key={label} className="flex justify-between border-b border-gray-800 py-1 text-sm">
                       <span className="text-gray-400">{label}</span>

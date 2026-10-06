@@ -1372,10 +1372,13 @@ export const getWalkForwardOptimizationResults = async (params = {}) => {
   return response.json();
 };
 
-export const getWalkForwardOptimizationResultDetail = async (optimizationId) => {
+export const getWalkForwardOptimizationResultDetail = async (optimizationId, { throughDroplet = false } = {}) => {
   console.log("API call: getWalkForwardOptimizationResultDetail for ID:", optimizationId)
 
-  const response = await Fetch(`/api/walkforward-optimization-results/${optimizationId}/`, {
+  // A cloud job and a local run are numbered independently, so an id can name
+  // one of each; without `source=droplet` the backend answers with the local run.
+  const query = throughDroplet ? "?source=droplet" : ""
+  const response = await Fetch(`/api/walkforward-optimization-results/${optimizationId}/${query}`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",

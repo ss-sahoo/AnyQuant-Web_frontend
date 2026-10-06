@@ -153,6 +153,20 @@ export function resolveEncoding(encoding: string, statement: any): ResolvedPath 
   return null
 }
 
+/**
+ * Is this row's value saved in the strategy JSON, so the backend's form
+ * already reports the current value? Mirrors the families resolveEncoding
+ * writes. Then/Accumulate counts, partial TPs and Developer-Mode
+ * ("custom:...") rows are not, so the stored form is their only record.
+ */
+export function isValueSavedInStrategy(encoding: string | undefined): boolean {
+  if (!encoding) return false
+  if (encoding === "StopLossPoint" || encoding === "TakeProfitPoint") return true
+  const [family, , slot] = encoding.split("_")
+  if (family === "param") return slot === "1" || slot === "2"
+  return ["value", "operator", "Equity", "behavior", "tm"].includes(family)
+}
+
 // Matches an SL/TP operator string, capturing (prefix)(value)(suffix) so only
 // the trailing number is replaced. Covers every structured form the FE emits:
 // "SL = Entry_Price - 90pips", "SL = Entry_Price * 0.95", "TP = inp2 + 150points".
