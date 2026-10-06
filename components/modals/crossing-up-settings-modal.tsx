@@ -171,10 +171,10 @@ export function CrossingUpSettingsModal({ onClose, currentInp1, initialSettings,
       options.push({ value: "rsi", label: "RSI" })
       options.push({ value: "rsi-ma", label: "RSI-MA" })
     } else if (currentInp1.name === "BBANDS") {
-      // Add OHLC options for BBANDS
-      options.push({ value: "high", label: "High" })
-      options.push({ value: "low", label: "Low" })
-      options.push({ value: "mid", label: "Mid" })
+      // The candle's price high / low against the band. There is no "mid":
+      // a price block's input must be open, high, low, close, volume or price.
+      options.push({ value: "high", label: "Price High" })
+      options.push({ value: "low", label: "Price Low" })
     } else if (currentInp1.name === "MACD") {
       options.push({ value: "macd", label: "MACD" })
     } else if (currentInp1.name === "ATR") {

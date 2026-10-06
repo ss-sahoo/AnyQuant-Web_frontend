@@ -3,6 +3,24 @@
 import { useState, useRef, useEffect } from "react"
 import { X } from "lucide-react"
 import { DraggableModal } from "./draggable-modal"
+import { BBANDS_MA_TYPES, BBANDS_SOURCES, bbandsInputParams, isRangeValue } from "@/lib/indicator-contract"
+
+// Older strategies saved the Basis MA dropdown's index ("2") instead of the
+// label; the engine decodes these with the same table.
+const LEGACY_MA_TYPE_CODES = ["SMA", "EMA", "WMA", "VWMA", "TEMA", "DEMA"]
+
+// A param ticked for optimisation is saved as { start, step, stop, value };
+// the backtest reads `value`, so that is what the field shows.
+const scalar = (v: any) => (isRangeValue(v) ? v.value : v)
+
+// Saving must not untick a ticked param. Its saved object is kept as is unless
+// the user changed the number here; a changed number stays ticked with the
+// new value, the range widening just enough to include it.
+function keepRange(saved: any, value: number) {
+  if (!isRangeValue(saved)) return value
+  if (Number(saved.value) === value) return saved
+  return { ...saved, value, start: Math.min(Number(saved.start), value), stop: Math.max(Number(saved.stop), value) }
+}
 
 interface BollingerBandsSettingsModalProps {
   onClose: () => void
@@ -22,13 +40,17 @@ export function BollingerBandsSettingsModal({ onClose, onSave, initialSettings }
   const [level, setLevel] = useState(
     initialSettings?.input === "upperband" ? "upper" : initialSettings?.input === "middleband" ? "basis" : "lower",
   )
-  const [length, setLength] = useState(String(initialSettings?.timeperiod ?? 20))
-  const [maType, setMaType] = useState(initialSettings?.ma_type ?? "SMA")
+  const [length, setLength] = useState(String(scalar(initialSettings?.timeperiod) ?? 20))
+  const [maType, setMaType] = useState(() => {
+    const saved = String(initialSettings?.ma_type ?? "SMA")
+    return /^\d$/.test(saved) ? (LEGACY_MA_TYPE_CODES[Number(saved)] ?? saved) : saved
+  })
   const [source, setSource] = useState(initialSettings?.source ?? "close")
-  const [stdDev, setStdDev] = useState(String(initialSettings?.nbdevup ?? initialSettings?.nbdevdn ?? 2))
-  const [offset, setOffset] = useState(String(initialSettings?.offset ?? 0))
+  const [stdDev, setStdDev] = useState(String(scalar(initialSettings?.nbdevup ?? initialSettings?.nbdevdn) ?? 2))
+  const [offset, setOffset] = useState(String(scalar(initialSettings?.offset) ?? 0))
   const [showMaTypeDropdown, setShowMaTypeDropdown] = useState(false)
   const [showSourceDropdown, setShowSourceDropdown] = useState(false)
+  const [errors, setErrors] = useState<{ length?: string; maType?: string; stdDev?: string; offset?: string }>({})
 
   const maTypeDropdownRef = useRef<HTMLDivElement>(null)
   const sourceDropdownRef = useRef<HTMLDivElement>(null)
@@ -51,9 +73,29 @@ export function BollingerBandsSettingsModal({ onClose, onSave, initialSettings }
   }, [])
 
   const handleSave = () => {
-    const timeperiod = Number.parseInt(length, 10) || 20
-    const stdDevValue = Number.parseFloat(stdDev) || 2.0
-    const offsetValue = Number.parseInt(offset, 10) || 0
+    const timeperiod = Number(length.trim())
+    const stdDevValue = Number(stdDev.trim())
+    const offsetValue = Number(offset.trim())
+
+    // The engine fails the run on an unsupported MA type, but accepts a
+    // negative offset (look-ahead) and a non-positive Std Dev silently, so
+    // all of them are caught here.
+    const nextErrors: typeof errors = {}
+    if (!/^\d+$/.test(length.trim()) || timeperiod < 2) {
+      nextErrors.length = "Length must be a whole number, 2 or more."
+    }
+    if (!(BBANDS_MA_TYPES as readonly string[]).includes(maType)) {
+      nextErrors.maType = `${maType} is not available for the Bollinger basis. Choose ${BBANDS_MA_TYPES.join(", ")}.`
+    }
+    // The middle band has no deviation key, so its Std Dev is never sent.
+    if (level !== "basis" && !(stdDev.trim() !== "" && Number.isFinite(stdDevValue) && stdDevValue > 0)) {
+      nextErrors.stdDev = "Std Dev must be a number greater than 0."
+    }
+    if (!/^\d+$/.test(offset.trim())) {
+      nextErrors.offset = "Offset must be a whole number of bars, 0 or more. A negative offset reads future prices."
+    }
+    setErrors(nextErrors)
+    if (Object.keys(nextErrors).length > 0) return
 
     // Determine input based on level
     let input = "lowerband"
@@ -63,25 +105,19 @@ export function BollingerBandsSettingsModal({ onClose, onSave, initialSettings }
       input = "middleband"
     }
 
-    // Build input_params based on band selection. ma_type and offset are
-    // persisted here so they round-trip through the strategy JSON.
-    const inputParams: any = {
-      timeperiod: timeperiod,
-      source: source,
-      ma_type: maType,
+    const inputParams: Record<string, unknown> = bbandsInputParams(input, {
+      timeperiod,
+      stdDev: stdDevValue,
+      maType,
+      source,
       offset: offsetValue,
-    }
-
-    // Add deviation parameters based on band selection
-    if (level === "upper") {
-      inputParams.nbdevup = stdDevValue
-    } else if (level === "lower") {
-      inputParams.nbdevdn = stdDevValue
-    } else if (level === "basis") {
-      // For basis, send both with default values
-      inputParams.nbdevup = 2.0
-      inputParams.nbdevdn = 2.0
-    }
+    })
+    // Only Length and the deviation can be ticked (offset is never searched).
+    // The deviation carries over when the band switches between upper and
+    // lower; the middle band has none.
+    inputParams.timeperiod = keepRange(initialSettings?.timeperiod, timeperiod)
+    const devKey = input === "upperband" ? "nbdevup" : input === "lowerband" ? "nbdevdn" : null
+    if (devKey) inputParams[devKey] = keepRange(initialSettings?.nbdevup ?? initialSettings?.nbdevdn, stdDevValue)
 
     onSave({
       timeperiod: timeperiod,
@@ -95,8 +131,8 @@ export function BollingerBandsSettingsModal({ onClose, onSave, initialSettings }
     })
   }
 
-  const maTypes = ["SMA", "EMA", "WMA", "VWMA", "TEMA", "DEMA"]
-  const sources = ["close", "open", "high", "low", "hl2", "hlc3", "ohlc4"]
+  const maTypes = BBANDS_MA_TYPES
+  const sources = BBANDS_SOURCES
 
   return (
     <DraggableModal onClose={onClose} className="bg-[#f1f1f1] rounded-lg shadow-lg w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden">
@@ -169,6 +205,7 @@ export function BollingerBandsSettingsModal({ onClose, onSave, initialSettings }
                   onChange={(e) => setLength(e.target.value)}
                   className="w-full p-3 border border-gray-300 rounded text-gray-700"
                 />
+                {errors.length && <p className="mt-1 text-sm text-red-600">{errors.length}</p>}
               </div>
 
               <div>
@@ -199,6 +236,7 @@ export function BollingerBandsSettingsModal({ onClose, onSave, initialSettings }
                     </div>
                   )}
                 </div>
+                {errors.maType && <p className="mt-1 text-sm text-red-600">{errors.maType}</p>}
               </div>
 
               <div>
@@ -239,6 +277,7 @@ export function BollingerBandsSettingsModal({ onClose, onSave, initialSettings }
                   onChange={(e) => setStdDev(e.target.value)}
                   className="w-full p-3 border border-gray-300 rounded text-gray-700"
                 />
+                {errors.stdDev && <p className="mt-1 text-sm text-red-600">{errors.stdDev}</p>}
               </div>
 
               <div>
@@ -249,6 +288,7 @@ export function BollingerBandsSettingsModal({ onClose, onSave, initialSettings }
                   onChange={(e) => setOffset(e.target.value)}
                   className="w-full p-3 border border-gray-300 rounded text-gray-700"
                 />
+                {errors.offset && <p className="mt-1 text-sm text-red-600">{errors.offset}</p>}
               </div>
             </div>
           </div>

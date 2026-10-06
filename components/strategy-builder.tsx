@@ -26,6 +26,7 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { createStatement, editStrategy, createCustomComponent, validateCustomComponentCode, activateCustomComponent, listCustomComponents, createCustomStrategy, validateCustomStrategyCode, getCustomStrategyTemplate, updateCustomStrategy, listCustomStrategies, deleteCustomStrategy, getCustomStrategy, updateCustomComponent, fetchStatementDetail, validateStrategy } from "@/app/AllApiCalls"
 import { mergeOptimisationForm } from "@/lib/optimisation-form-merge"
+import { bbandsInputParams } from "@/lib/indicator-contract"
 import type { JSX } from "react/jsx-runtime"
 import { PipsSettingsModal } from "@/components/modals/pips-settings-modal"
 import { SaveStrategyModal } from "@/components/modals/save-strategy-modal"
@@ -2587,22 +2588,15 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
             }
           } else {
             if (component === "Bollinger") {
-              // Check if inp1 is BBANDS to use special format
-              if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
-                // For BBANDS, use type "C" with input "close" format
-                lastCondition.inp2 = createConstantInput(lastCondition.inp1.input || "close", timeframe)
-              } else {
-                lastCondition.inp2 = {
-                  type: "I",
-                  name: "BBANDS",
-                  timeframe: timeframe,
-                  input: "lowerband", // Default to lowerband for inp2
-                  input_params: {
-                    timeperiod: 20,
-                    nbdevdn: 2.0, // Default for lowerband
-                    source: "close",
-                  },
-                }
+              // Always a real BBANDS operand, even when inp1 is BBANDS too:
+              // copying inp1's band name into a price block wrote
+              // { type: "C", input: "upperband" }, which validation rejects.
+              lastCondition.inp2 = {
+                type: "I",
+                name: "BBANDS",
+                timeframe: timeframe,
+                input: "lowerband", // Default to lowerband for inp2
+                input_params: bbandsInputParams("lowerband"),
               }
             } else if (["high", "low", "open", "close"].includes(component.toLowerCase())) {
               lastCondition.inp2 = createConstantInput(component.toLowerCase(), timeframe)
@@ -2786,11 +2780,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 name: "BBANDS",
                 timeframe: timeframe,
                 input: "upperband", // Default to upperband for inp1
-                input_params: {
-                  timeperiod: 20,
-                  nbdevup: 2.0, // Default for upperband
-                  source: "close",
-                },
+                input_params: bbandsInputParams("upperband"),
               }
             } else if (["high", "low", "open", "close"].includes(component.toLowerCase())) {
               // Keep the existing OHLC handling
@@ -5202,7 +5192,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
       if (condition.inp1) {
         // Indicators with light gray background
         let displayName = ""
-
+ 
         // Special handling for price indicators (type C with input like open, close, high, low)
         if (
           condition.inp1.type === "C" &&
@@ -6781,25 +6771,25 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                     // Handle OHLC price indicators
                     lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
                   } else if (settings.indicator === "bollinger") {
-                    // Check if inp1 is BBANDS to use special format
                     if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
-                      // For BBANDS, use type "C" with input "close" format
-                      lastCondition.inp2 = createConstantInput("close", "36min")
+                      // Price against the existing band, on the band's own
+                      // timeframe. A hard-coded timeframe here added one the
+                      // user never chose, which then needed its own data file.
+                      const bandTimeframe = "timeframe" in lastCondition.inp1 ? lastCondition.inp1.timeframe : undefined
+                      lastCondition.inp2 = createConstantInput("close", bandTimeframe || settings.timeframe || "3h")
                     } else {
                       // Default behavior for other cases
+                      const band = settings.band || "upperband"
                       lastCondition.inp2 = {
                         type: "I",
                         name: "BBANDS",
                         timeframe: settings.timeframe || "3h",
-                        input: settings.band || "upperband",
-                        input_params: {
+                        input: band,
+                        input_params: bbandsInputParams(band, {
                           timeperiod: settings.timeperiod || 20,
+                          stdDev: settings.bbStdDev || 2.0,
                           source: settings.bbSource || "close",
-                          // Add appropriate std dev parameter based on band type
-                          ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
-                          ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
-                          ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
-                        },
+                        }),
                       }
                     }
                   } else if (settings.indicator === "volume") {
@@ -6867,19 +6857,17 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 } else if (settings.valueType === "other" && settings.indicator) {
                   // Handle indicator type for "other" option
                   if (settings.indicator === "bollinger") {
+                    const band = settings.band || "upperband"
                     lastCondition.inp2 = {
                       type: "I",
                       name: "BBANDS",
                       timeframe: settings.timeframe || "3h",
-                      input: settings.band || "upperband",
-                      input_params: {
+                      input: band,
+                      input_params: bbandsInputParams(band, {
                         timeperiod: settings.timeperiod || 20,
+                        stdDev: settings.bbStdDev || 2.0,
                         source: settings.bbSource || "close",
-                        // Add appropriate std dev parameter based on band type
-                        ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
-                        ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
-                        ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
-                      },
+                      }),
                     }
                   } else if (settings.indicator === "rsi") {
                     lastCondition.inp2 = {
@@ -7146,25 +7134,25 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                     // Handle OHLC price indicators
                     lastCondition.inp2 = createConstantInput(settings.indicator, settings.timeframe || "3h")
                   } else if (settings.indicator === "bollinger") {
-                    // Check if inp1 is BBANDS to use special format
                     if (lastCondition.inp1 && "name" in lastCondition.inp1 && lastCondition.inp1.name === "BBANDS") {
-                      // For BBANDS, use type "C" with input "close" format
-                      lastCondition.inp2 = createConstantInput("close", "36min")
+                      // Price against the existing band, on the band's own
+                      // timeframe. A hard-coded timeframe here added one the
+                      // user never chose, which then needed its own data file.
+                      const bandTimeframe = "timeframe" in lastCondition.inp1 ? lastCondition.inp1.timeframe : undefined
+                      lastCondition.inp2 = createConstantInput("close", bandTimeframe || settings.timeframe || "3h")
                     } else {
                       // Default behavior for other cases
+                      const band = settings.band || "upperband"
                       lastCondition.inp2 = {
                         type: "I",
                         name: "BBANDS",
                         timeframe: settings.timeframe || "3h",
-                        input: settings.band || "upperband",
-                        input_params: {
+                        input: band,
+                        input_params: bbandsInputParams(band, {
                           timeperiod: settings.timeperiod || 20,
+                          stdDev: settings.bbStdDev || 2.0,
                           source: settings.bbSource || "close",
-                          // Add appropriate std dev parameter based on band type
-                          ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
-                          ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
-                          ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
-                        },
+                        }),
                       }
                     }
                   } else if (settings.indicator === "volume") {
@@ -7232,19 +7220,17 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                 } else if (settings.valueType === "other" && settings.indicator) {
                   // Handle indicator type for "other" option
                   if (settings.indicator === "bollinger") {
+                    const band = settings.band || "upperband"
                     lastCondition.inp2 = {
                       type: "I",
                       name: "BBANDS",
                       timeframe: settings.timeframe || "3h",
-                      input: settings.band || "upperband",
-                      input_params: {
+                      input: band,
+                      input_params: bbandsInputParams(band, {
                         timeperiod: settings.timeperiod || 20,
+                        stdDev: settings.bbStdDev || 2.0,
                         source: settings.bbSource || "close",
-                        // Add appropriate std dev parameter based on band type
-                        ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
-                        ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
-                        ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
-                      },
+                      }),
                     }
                   } else if (settings.indicator === "rsi") {
                     lastCondition.inp2 = {
@@ -7507,14 +7493,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                         name: "BBANDS",
                         timeframe: tf,
                         input: settings.band || "lowerband",
-                        input_params: {
+                        input_params: bbandsInputParams(settings.band || "lowerband", {
                           timeperiod: settings.timeperiod || 17,
+                          stdDev: settings.bbStdDev || 2.0,
                           source: settings.bbSource || "close",
-                          // Add appropriate std dev parameter based on band type
-                          ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
-                          ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
-                          ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
-                        },
+                        }),
                       }
                       break
 
@@ -7778,14 +7761,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                         name: "BBANDS",
                         timeframe: tf,
                         input: settings.band || "lowerband",
-                        input_params: {
+                        input_params: bbandsInputParams(settings.band || "lowerband", {
                           timeperiod: settings.timeperiod || 17,
+                          stdDev: settings.bbStdDev || 2.0,
                           source: settings.bbSource || "close",
-                          // Add appropriate std dev parameter based on band type
-                          ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
-                          ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
-                          ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
-                        },
+                        }),
                       }
                       break
 
@@ -8060,7 +8040,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                     input: indicator.input || "upperband",
                     nbdevup: indicator.input_params?.nbdevup,
                     nbdevdn: indicator.input_params?.nbdevdn,
-                    source: indicator.input_params?.source || "high",
+                    source: indicator.input_params?.source || "close",
                     ma_type: indicator.input_params?.ma_type || "SMA",
                     offset: indicator.input_params?.offset ?? 0,
                   }
@@ -8094,7 +8074,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                     input: indicator.input || "upperband",
                     nbdevup: indicator.input_params?.nbdevup,
                     nbdevdn: indicator.input_params?.nbdevdn,
-                    source: indicator.input_params?.source || "high",
+                    source: indicator.input_params?.source || "close",
                     ma_type: indicator.input_params?.ma_type || "SMA",
                     offset: indicator.input_params?.offset ?? 0,
                   }
@@ -9118,13 +9098,11 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
                         name: "BBANDS",
                         timeframe: tf,
                         input: settings.band || "lowerband",
-                        input_params: {
-                          timeperiod: settings.timeperiod || 17,
+                        input_params: bbandsInputParams(settings.band || "lowerband", {
+                          timeperiod: settings.timeperiod || 20,
+                          stdDev: settings.bbStdDev || 2.0,
                           source: settings.bbSource || "close",
-                          ...(settings.band === "upperband" ? { nbdevup: settings.bbStdDev || 2.0 } : {}),
-                          ...(settings.band === "lowerband" ? { nbdevdn: settings.bbStdDev || 2.0 } : {}),
-                          ...(settings.band === "middleband" ? { nbdevup: 2.0, nbdevdn: 2.0 } : {}),
-                        },
+                        }),
                       }
                       break
 

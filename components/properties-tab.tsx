@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Plus, X, Trash2 } from "lucide-react"
 import { applyEdits, validateRows, type PersistableRow } from "@/lib/optimisation-form-persistence"
 import { parseFormNumber } from "@/lib/optimisation-range-validation"
+import { canOptimiseParam, isWholeNumberParam, wholeNumberRange } from "@/lib/optimisation-form-merge"
 import { editStrategy } from "@/app/AllApiCalls"
 
 interface Parameter {
@@ -103,7 +104,7 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
           const mappedParameters: Parameter[] = optimisationForm.parameters.map((param) => {
             const isNumberType = param.type === "number"
             const hasRange = Array.isArray(param.range) && param.range.length === 2
-            const isOptimisable = param.optimise
+            const isOptimisable = param.optimise && canOptimiseParam(param)
 
             return {
               id: param.id,
@@ -183,9 +184,12 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
         if (checked && param.type === "number") {
           const n = Number(param.default)
           if (Number.isFinite(n)) {
-            if (!param.start) updated.start = (n * 0.5).toString()
-            if (!param.step) updated.step = (n * 0.1).toString()
-            if (!param.stop) updated.stop = (n * 1.5).toString()
+            const seed = isWholeNumberParam(param)
+              ? wholeNumberRange(n * 0.5, n * 0.1, n * 1.5)
+              : { start: n * 0.5, step: n * 0.1, stop: n * 1.5 }
+            if (!param.start) updated.start = seed.start.toString()
+            if (!param.step) updated.step = seed.step.toString()
+            if (!param.stop) updated.stop = seed.stop.toString()
           }
         }
         return updated
@@ -331,6 +335,7 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
       start: p.start,
       step: p.step,
       stop: p.stop,
+      wholeNumber: isWholeNumberParam(p),
     }))
     const { errors } = validateRows(persistRows)
     if (Object.keys(errors).length > 0) {
@@ -632,7 +637,7 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
                       <Checkbox
                         checked={param.optimise}
                         onCheckedChange={(checked: boolean) => handleOptimiseChange(param.id, checked)}
-                        disabled={param.type !== "number"}
+                        disabled={!canOptimiseParam(param)}
                         className="border-[#85e1fe] data-[state=checked]:bg-[#85e1fe] data-[state=checked]:text-black disabled:opacity-30"
                       />
                     </td>

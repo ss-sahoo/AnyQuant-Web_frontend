@@ -18,9 +18,14 @@
 //   behavior_{name}_{key}_{indx}      -> behavior.params[key]
 //   tm_{name}_{key}_{indx}            -> equity.trade_management.params[key]  (lowercase equity)
 //
-// {key} is resolved via the trailing {indx} against the live params object
-// (sorted(keys)[indx]) rather than by string-splitting, because both the
-// component {name} and a {key} can contain underscores.
+// For param_ the {key} is read by name from between the fixed
+// param_{i}_{slot}_ prefix and the trailing _{indx}, and must exist in the
+// live params. {indx} is the key's position among the sorted keys of the
+// strategy the form was built from; once a key is added or dropped it points
+// at a different key, which wrote source: "2" and timeperiod: 0 into saved
+// strategies. The other families still resolve {key} via the trailing {indx}
+// against the live params object (sorted(keys)[indx]), because their
+// component {name} and {key} can both contain underscores.
 //
 // StopLossPoint / TakeProfitPoint are special: the value lives inside the
 // Equity block's `operator` STRING (e.g. "SL = Entry_Price - 90pips"), not a
@@ -52,6 +57,8 @@ export interface PersistableRow {
   start: string
   step: string
   stop: string
+  /** The engine reads it as a whole number of bars (isWholeNumberParam). */
+  wholeNumber?: boolean
 }
 
 export type StrategyRoot = "strategy" | "Equity" | "behavior" | "equity"
@@ -94,10 +101,9 @@ export function resolveEncoding(encoding: string, statement: any): ResolvedPath 
     // Then.count / Accumulate.forPeriod are string expressions -- not persistable here.
     if (slot === "then" || slot === "accumulate") return null
     if (slot !== "1" && slot !== "2") return null
-    const indx = Number(t[t.length - 1])
     const ip = statement?.strategy?.[i]?.[`inp${slot}`]?.input_params
-    const key = sortedKeyAt(ip, indx)
-    if (key === undefined) return null
+    const key = t.slice(3, -1).join("_")
+    if (!key || !ip || typeof ip !== "object" || !Object.prototype.hasOwnProperty.call(ip, key)) return null
     return { root: "strategy", path: ["strategy", i, `inp${slot}`, "input_params", key] }
   }
 
@@ -233,6 +239,12 @@ export function validateRows(rows: PersistableRow[]): ValidationResult {
     }
     if (value < start || value > stop) {
       errors[row.encoding] = `Value (${value}) must be within [${start}, ${stop}].`
+      continue
+    }
+    // The engine truncates a fractional candidate, so 12.5 … 37.5 in steps of
+    // 2.5 would run duplicates instead of the range shown.
+    if (row.wholeNumber && (![start, step, stop, value].every(Number.isInteger) || step < 1)) {
+      errors[row.encoding] = "Start, step, stop and value must be whole numbers, with a step of at least 1."
       continue
     }
   }

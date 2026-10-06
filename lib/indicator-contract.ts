@@ -99,6 +99,46 @@ export const CVD_RESET_PERIODS = ["D", "W", "M", "Q"] as const
 export const DERIVATIVE_COLS = ["RSI", "RSI_MA", "Close_MA", "Open_MA", "Volume_MA", "GENERAL_PA"] as const
 
 // ---------------------------------------------------------------------------
+// BBANDS (type "I") — the in-house Bollinger implementation
+// (CustomIndicatorHelper.BBANDS / _bb_basis).
+// ---------------------------------------------------------------------------
+
+/** BBANDS `input`: which line the condition reads. */
+export const BBANDS_BANDS = ["upperband", "middleband", "lowerband"] as const
+
+/** Basis MA types _bb_basis implements. VWMA, TEMA and DEMA fail the run.
+ *  Send the label; the engine also decodes codes "0"/"1"/"2". */
+export const BBANDS_MA_TYPES = ["SMA", "EMA", "WMA", "RMA"] as const
+
+/** Price series apply_price_source accepts as BBANDS `source`. */
+export const BBANDS_SOURCES = ["close", "open", "high", "low", "hl2", "hlc3", "ohlc4"] as const
+
+/** The only BBANDS keys an optimisation can search. The engine pops `offset`
+ *  before the optimiser's lookup, and `ma_type` / `source` are text. */
+export const BBANDS_OPTIMISABLE_PARAMS = ["timeperiod", "nbdevup", "nbdevdn"] as const
+
+/**
+ * Canonical BBANDS input_params. Every builder path writes this one key set,
+ * because the keys decide the optimisation-form encodings and the same
+ * strategy must not produce two shapes. The deviation key follows the band:
+ * upper → nbdevup, lower → nbdevdn, middle → neither.
+ */
+export function bbandsInputParams(
+  band: string,
+  opts: { timeperiod?: number; stdDev?: number; maType?: string; source?: string; offset?: number } = {},
+): Record<string, number | string> {
+  const params: Record<string, number | string> = {
+    timeperiod: opts.timeperiod ?? 20,
+    ma_type: opts.maType ?? "SMA",
+    source: opts.source ?? "close",
+    offset: opts.offset ?? 0,
+  }
+  if (band === "upperband") params.nbdevup = opts.stdDev ?? 2.0
+  else if (band === "lowerband") params.nbdevdn = opts.stdDev ?? 2.0
+  return params
+}
+
+// ---------------------------------------------------------------------------
 // CUSTOM_I contract — every built-in indicator, every parameter.
 // ---------------------------------------------------------------------------
 
@@ -291,7 +331,7 @@ export const BUILTIN_INDICATOR_NAMES = Object.keys(INDICATOR_CONTRACT)
 // ---------------------------------------------------------------------------
 
 /** Treat optimisable range objects { start, stop, step, value } as "a number". */
-function isRangeValue(v: unknown): boolean {
+export function isRangeValue(v: unknown): boolean {
   return !!v && typeof v === "object" && !Array.isArray(v) && "start" in (v as any) && "stop" in (v as any)
 }
 
@@ -337,9 +377,16 @@ export function validateIndicatorBlock(inp: any): void {
         throw new Error(`I block is missing an indicator 'name'`)
       }
       if (inp.name === "BBANDS" && inp.input != null) {
-        const bands = ["upperband", "middleband", "lowerband"]
-        if (!bands.includes(String(inp.input))) {
-          throw new Error(`BBANDS 'input' must be one of ${bands.join(", ")} (got '${inp.input}')`)
+        if (!(BBANDS_BANDS as readonly string[]).includes(String(inp.input))) {
+          throw new Error(`BBANDS 'input' must be one of ${BBANDS_BANDS.join(", ")} (got '${inp.input}')`)
+        }
+      }
+      if (inp.name === "BBANDS") {
+        // The engine accepts a negative offset and shifts the bands onto
+        // earlier bars, so signals read prices that had not happened yet.
+        const offset = inp.input_params?.offset
+        if (offset != null && !isRangeValue(offset) && !(Number.isInteger(Number(offset)) && Number(offset) >= 0)) {
+          throw new Error(`BBANDS offset must be a whole number of bars, 0 or more (got '${offset}')`)
         }
       }
       return
