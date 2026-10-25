@@ -7,6 +7,7 @@ import {
   getStrategyOptimizationResults,
   getStrategyWalkForwardOptimizationResults,
 } from '../app/AllApiCalls';
+import { formatOptimizationNumber, formatOptimizationValue } from '@/lib/optimization-formatting';
 
 interface OptimisationHistoryListProps {
   strategyId: string;
@@ -22,6 +23,11 @@ interface OptimisationHistoryListProps {
    * the job's own results page.
    */
   onSelectCloudRun?: (jobId: string | number) => void;
+  /**
+   * A finished walk-forward run, local or cloud (`throughDroplet`: the two are
+   * numbered independently). When absent the list opens /walk-forward-results.
+   */
+  onSelectWalkForward?: (id: string | number, throughDroplet: boolean) => void;
   onClose?: () => void;
   isInline?: boolean;
   /**
@@ -74,7 +80,7 @@ const toTime = (value: string | null) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = ({ strategyId, isCustomStrategy = false, onSelect, onSelectCloudRun, onClose, isInline = false, onSelectRunning, refreshToken, activeRun }) => {
+export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = ({ strategyId, isCustomStrategy = false, onSelect, onSelectCloudRun, onSelectWalkForward, onClose, isInline = false, onSelectRunning, refreshToken, activeRun }) => {
   const router = useRouter();
   const [rows, setRows] = useState<HistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -112,12 +118,9 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
     // history (and vice versa).
     Promise.allSettled([
       getStrategyOptimizationResults(strategyId, { page: 1, page_size: 50, is_custom_strategy: isCustomStrategy }),
-      // Developer-Mode strategies have no walk-forward runs, and this endpoint
-      // can't tell their ids from no-code ones: it would list the runs of the
-      // no-code strategy that shares the id.
-      isCustomStrategy
-        ? Promise.resolve([])
-        : getStrategyWalkForwardOptimizationResults(strategyId, { page: 1, page_size: 50 }),
+      getStrategyWalkForwardOptimizationResults(strategyId, {
+        page: 1, page_size: 50, is_custom_strategy: isCustomStrategy,
+      }),
     ])
       .then(([regularResult, walkForwardResult]) => {
         if (isCancelled) return;
@@ -183,6 +186,11 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
       return;
     }
     if (row.kind === 'walk_forward') {
+      if (onSelectWalkForward) {
+        onSelectWalkForward(row.id, row.throughDroplet);
+        if (onClose) onClose();
+        return;
+      }
       // A cloud job's id can also be some local run's: say which this row is.
       router.push(`/walk-forward-results?id=${row.id}${row.throughDroplet ? '&source=droplet' : ''}`);
       if (onClose) onClose();
@@ -326,9 +334,9 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-white whitespace-nowrap">
-                    {row.finalEquity != null ? `$${Number(row.finalEquity).toFixed(2)}` : '-'}
+                    {row.finalEquity != null ? `$${formatOptimizationNumber(row.finalEquity, 2)}` : '-'}
                     {row.kind === 'walk_forward' && row.pValue != null && (
-                      <span className="ml-2 text-gray-500">p={Number(row.pValue).toFixed(4)}</span>
+                      <span className="ml-2 text-gray-500">p={formatOptimizationValue(row.pValue, 'p_value')}</span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">

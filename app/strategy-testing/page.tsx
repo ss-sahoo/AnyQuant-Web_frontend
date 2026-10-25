@@ -49,6 +49,11 @@ import {
   listOptimizationFiles,
   downloadOptimizationFile,
   downloadOptimizationZip,
+  // Market simulation (V1)
+  runSimulation,
+  getSimulationStatus,
+  cancelSimulation,
+  getSimulationResult,
 } from "../AllApiCalls" // Import new functions
 import { X, ArrowLeft, Layout, Maximize2 } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
@@ -61,6 +66,7 @@ import {
 } from "@/lib/timeframe-match"
 import { mergeOptimisationForm } from "@/lib/optimisation-form-merge"
 import { findMissingOptimisationRanges, formatMissingRangeMessage } from "@/lib/optimisation-range-validation"
+import { formatOptimizationNumber, formatOptimizationPercent, formatOptimizationValue } from "@/lib/optimization-formatting"
 import { detectStrategyType, resolveCustomStrategyId } from "@/lib/builder-mode"
 import { StrategyTab } from "@/components/strategy-tab"
 import { BacktestTab } from "@/components/backtest-tab"
@@ -72,6 +78,7 @@ import {
   mergeOptimisationRows,
 } from "@/lib/custom-component-params-sync"
 import { normalizeTimeframe, normalizeStatementTimeframes } from "@/lib/custom-component-schema"
+import { volumeDeltaLowerTimeframes } from "@/lib/volume-delta"
 import {
   type DataBinding,
   dataMappingTimeframes,
@@ -98,6 +105,11 @@ import { BacktestSummaryStats } from "@/components/backtest-summary-stats"
 import { MetaAPIDebugModal } from "@/components/metaapi-debug-modal"
 // Custom strategy backtest results
 import { CustomStrategyBacktestResults } from "@/components/custom-strategy-backtest-results"
+import { RunCostSummary } from "@/components/run-cost-summary"
+import { SimulationResultsView } from "@/components/simulation-results-view"
+import { SimulationHistoryList } from "@/components/simulation-history-list"
+import { WalkForwardResultsView } from "@/components/walk-forward-results-view"
+import { runCostTimingFromJob, runCostTimingFromLocal } from "@/lib/run-cost-timing"
 
 /* ------------------------------------------------------------------ *
  * In-flight optimisation handoff
@@ -423,11 +435,6 @@ export default function StrategyTestingPage() {
   const optimisationPollerRef = useRef<(() => void) | null>(null)
   const walkForwardPollerRef = useRef<(() => void) | null>(null)
 
-  // Mirrors isLoading2 / isCreatingOptimizationJob so the mount-time hydration
-  // effect can check "is a run in flight?" at the moment its response lands.
-  // A state read there would be pinned to the value captured at mount.
-  const isOptimisationInFlightRef = useRef(false)
-
   const [isDragging, setIsDragging] = useState(false)
 
   const [strID, setStrID] = useState<string | null>(null)
@@ -474,6 +481,24 @@ export default function StrategyTestingPage() {
 
   // Add new states for optimisation result and heatmap
   const [optimisationResult, setOptimisationResult] = useState<any>(null)
+  // A walk-forward run shown in the Results / Graph / Summary tabs, in place of
+  // a regular one. Opening either kind closes the other.
+  const [walkForwardResult, setWalkForwardResult] = useState<any>(null)
+  useEffect(() => {
+    if (optimisationResult) setWalkForwardResult(null)
+  }, [optimisationResult])
+  // A market simulation report shown in the Results / Graph tabs, likewise in
+  // place of either kind of optimisation.
+  const [simulationResult, setSimulationResult] = useState<any>(null)
+  useEffect(() => {
+    if (optimisationResult || walkForwardResult) setSimulationResult(null)
+  }, [optimisationResult, walkForwardResult])
+  const [isSimulationRunning, setIsSimulationRunning] = useState(false)
+  const [simulationProgress, setSimulationProgress] = useState<any>(null)
+  // The run being polled. Polling stops as soon as this no longer matches,
+  // so a cancel or a newer run silences a request already in flight.
+  const simulationRunIdRef = useRef<string | null>(null)
+  const simulationPollerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [plotHeatmapHtml, setPlotHeatmapHtml] = useState<string | null>(null)
   const [showOptimisationResults, setShowOptimisationResults] = useState(false)
 
@@ -847,6 +872,9 @@ export default function StrategyTestingPage() {
       setBacktestDetail(null)
       setPlotHtml(null)
       setOptimisationResult(null)
+      setWalkForwardResult(null)
+      setSimulationResult(null)
+      stopSimulationPolling()
       setShowOptimisationResults(false)
       setPlotHeatmapHtml(null)
       setWalkForwardOptimizationResults([])
@@ -884,51 +912,8 @@ export default function StrategyTestingPage() {
         })
         .catch(err => console.error("Error fetching initial backtest results:", err))
 
-      // Also load last optimization result. Only ever hydrates from a finished
-      // run, and every write is re-gated on the in-flight refs below so a slow
-      // response can never land on top of a run the user just started.
-      getStrategyOptimizationResults(strategy_id, { page: 1, page_size: 1, is_custom_strategy: isCustomStrategy })
-        .then(async (response: any) => {
-          if (isCancelled || isOptimisationInFlightRef.current) return
-
-          const results = Array.isArray(response) ? response : (response?.results || [])
-          if (results.length > 0) {
-            // Sort by date descending
-            const sorted = [...results].sort((a, b) =>
-              new Date(b.optimization_date || b.created_at || b.date).getTime() -
-              new Date(a.optimization_date || a.created_at || a.date).getTime()
-            )
-            const latest = sorted[0]
-            // A cloud job's result lives on the job, not at
-            // /optimization-results/<id>/ — its id there 404s or loads an
-            // unrelated result. It opens from the history list instead.
-            if (latest.through_droplet) {
-              console.log("⏭️ Skipping auto-load, latest optimisation is a cloud job", latest.id)
-              return
-            }
-            const latestStatus = String(latest.status || '').toLowerCase()
-            // A running/failed row has no table to show — leave the tabs empty
-            // rather than hydrating a half-written result.
-            if (latestStatus && !['completed', 'success'].includes(latestStatus)) {
-              console.log("⏭️ Skipping auto-load, latest optimisation is", latestStatus)
-              return
-            }
-
-            const latestId = latest.id;
-            console.log("🚀 Auto-loading latest optimization result:", latestId);
-            try {
-              const detail = await getOptimizationResultDetail(latestId);
-              if (isCancelled || isOptimisationInFlightRef.current) return
-
-              setOptimisationResult(normalizeOptimisationResult(detail));
-              setShowOptimisationResults(true);
-              setOptimisationTab('results');
-            } catch (err) {
-              console.error("❌ Failed to load latest optimization detail:", err);
-            }
-          }
-        })
-        .catch(err => console.error("Error fetching initial optimization results:", err))
+      // The latest optimisation is not auto-loaded: its results show only
+      // once the user opens a run from the history list or a run finishes.
     }
 
     return () => {
@@ -1883,6 +1868,11 @@ export default function StrategyTestingPage() {
         ? parsedStatement.execution_timeframe.trim()
         : ""
     const merged = execTf && !tf.includes(execTf) ? [...tf, execTf] : tf
+    // Volume Delta / CVD read volume from their lower timeframe, which the
+    // backend's timeframes_required doesn't list yet.
+    for (const lowerTf of volumeDeltaLowerTimeframes(parsedStatement).map(normalizeTimeframe)) {
+      if (!merged.includes(lowerTf)) merged.push(lowerTf)
+    }
     setRequiredTimeframes(merged)
   }, [parsedStatement])
 
@@ -2370,15 +2360,25 @@ export default function StrategyTestingPage() {
       // the history list opens. The polled payload is shown as it is: its rows
       // are ranked best first, in the shape adaptCustomOptimisationRows reads.
       const adapted = adaptCustomOptimisationRows(polledResult?.results)
-      setOptimisationResult(normalizeOptimisationResult({
-        ...polledResult,
-        table: adapted,
-        // Don't let raw rows shadow the adapted table in previewRows. The
-        // first two would outrank `table`; neither is sent for dev mode today.
-        optimisation_results: undefined,
-        full_optimization_results: undefined,
-        results: undefined,
-      }))
+      // The polled payload has the run's duration but not its start; this
+      // browser recorded that when it launched the run.
+      const launchedAt = readActiveOptimisation()?.startedAt
+      setOptimisationResult({
+        ...normalizeOptimisationResult({
+          ...polledResult,
+          table: adapted,
+          // Don't let raw rows shadow the adapted table in previewRows. The
+          // first two would outrank `table`; neither is sent for dev mode today.
+          optimisation_results: undefined,
+          full_optimization_results: undefined,
+          results: undefined,
+        }),
+        runTiming: runCostTimingFromLocal({
+          status: 'completed',
+          optimization_date: launchedAt ? new Date(launchedAt).toISOString() : null,
+          elapsed_seconds: polledResult?.elapsed_seconds,
+        }),
+      })
       const runWarnings = polledResult?.warnings
       if (Array.isArray(runWarnings)) {
         runWarnings.forEach((w: string) => showToast(w, 'warning'))
@@ -2491,10 +2491,6 @@ export default function StrategyTestingPage() {
    * after the user navigated away and came back.
    */
   const resumeOptimisationRun = async (runId: string) => {
-    // Set the ref directly as well as the state: the mount-time hydration
-    // effect reads the ref when its own request lands, and a state update
-    // would not have committed by then.
-    isOptimisationInFlightRef.current = true
     setIsLoading2(true)
     setActiveTab("optimisation")
     setOptimisationTab('results')
@@ -2537,7 +2533,6 @@ export default function StrategyTestingPage() {
    * and let them open it from the history list.
    */
   const resumeWalkForwardRun = async (runId: string) => {
-    isOptimisationInFlightRef.current = true
     setIsLoading3(true)
     setActiveTab("optimisation")
     setOptimisationTab('results')
@@ -2819,10 +2814,12 @@ export default function StrategyTestingPage() {
       const optimisationFormString = localStorage.getItem("optimisation_form")
       let parametersObject: Record<string, any> = {}
       let constraintsArray: string[] = []
+      let storedOptimisationForm: any = null
 
       if (optimisationFormString) {
         try {
           const optimisationForm = JSON.parse(optimisationFormString)
+          storedOptimisationForm = optimisationForm
           parametersObject = optimisationForm.Parameters || {}
           constraintsArray = optimisationForm.Constraints || []
         } catch (error) {
@@ -2865,7 +2862,20 @@ export default function StrategyTestingPage() {
         wait,
       }
 
-      if (strategy_id && !isNaN(Number(strategy_id))) {
+      if (isDevModeStrategy) {
+        // A dev-mode id is a custom component's, a separate sequence that
+        // collides with no-code statement ids, so it is never sent as
+        // strategy_statement_id. The rest is what a dev-mode cloud job sends.
+        apiParams.strategy_type = "dev_mode"
+        apiParams.custom_strategy_id = Number(parsedStatement?.custom_strategy_id || parsedStatement?.id || strategy_id)
+        if (storedOptimisationForm) {
+          apiParams.optimisation_form = optimisationFormPayload(storedOptimisationForm, true, hyperParameters)
+        }
+        apiParams.trading_type = devModeTradingType()
+        apiParams.data_mapping = normalizeDataMapping(parsedStatement?.data_mapping)
+        const isoRange = toIsoDateRange(dateRange)
+        if (isoRange) Object.assign(apiParams, isoRange)
+      } else if (strategy_id && !isNaN(Number(strategy_id))) {
         apiParams.strategy_statement_id = Number(strategy_id)
       }
 
@@ -2925,65 +2935,17 @@ export default function StrategyTestingPage() {
       console.log("🔍 DEBUG: Full result data:", resultData);
       console.log("🔍 DEBUG: Available fields:", Object.keys(resultData || {}));
 
-      if (resultData && (resultData.status === 'success' || resultData.message?.toLowerCase().includes('success'))) {
-        console.log("Success detected, navigating to results page");
-        // Store only the optimization ID in sessionStorage and navigate to results page
-        const optimizationId = resultData.walkforward_optimization_id || resultData.optimization_id;
-        console.log("🔍 DEBUG: Found optimization ID:", optimizationId);
-
-        if (optimizationId) {
-          console.log("✅ Storing optimization ID:", optimizationId);
-          sessionStorage.setItem('walkForwardOptimizationId', optimizationId.toString());
-          // Add a small delay to ensure sessionStorage is set
-          setTimeout(() => {
-            router.push('/walk-forward-results');
-          }, 100);
-        } else {
-          // Fallback: store minimal data in sessionStorage
-          const minimalData = {
-            id: resultData.id || resultData.walkforward_optimization_id || resultData.optimization_id,
-            status: resultData.status,
-            message: resultData.message
-          };
-          console.log("⚠️ Storing minimal data:", minimalData);
-          sessionStorage.setItem('walkForwardMinimalData', JSON.stringify(minimalData));
-          // Add a small delay to ensure sessionStorage is set
-          setTimeout(() => {
-            router.push('/walk-forward-results');
-          }, 100);
-        }
-        return;
-      }
-
-      // If we have any result data, navigate to details page
       if (resultData) {
-        console.log("Result data found, navigating to results page");
-        // Store only the optimization ID in sessionStorage
-        const optimizationId = resultData.walkforward_optimization_id || resultData.optimization_id;
-        console.log("🔍 DEBUG: Found optimization ID:", optimizationId);
-
+        // Shown in the Optimisation section's Results / Graph / Summary tabs,
+        // as a regular run is. The saved row is the full result; the polled
+        // payload is the fallback when the run reports no row id.
+        const optimizationId = resultData.walkforward_optimization_id || resultData.optimization_id
         if (optimizationId) {
-          console.log("✅ Storing optimization ID:", optimizationId);
-          sessionStorage.setItem('walkForwardOptimizationId', optimizationId.toString());
-          // Add a small delay to ensure sessionStorage is set
-          setTimeout(() => {
-            router.push('/walk-forward-results');
-          }, 100);
+          await loadWalkForwardResult(optimizationId)
         } else {
-          // Fallback: store minimal data
-          const minimalData = {
-            id: resultData.id || resultData.walkforward_optimization_id || resultData.optimization_id,
-            status: resultData.status,
-            message: resultData.message
-          };
-          console.log("⚠️ Storing minimal data:", minimalData);
-          sessionStorage.setItem('walkForwardMinimalData', JSON.stringify(minimalData));
-          // Add a small delay to ensure sessionStorage is set
-          setTimeout(() => {
-            router.push('/walk-forward-results');
-          }, 100);
+          showWalkForwardResult(resultData)
         }
-        return;
+        return
       }
 
       console.log("No result data found");
@@ -3038,6 +3000,172 @@ export default function StrategyTestingPage() {
     }
     setIsLoading3(false)
     showToast("Walk Forward Optimisation cancelled", 'warning')
+  }
+
+  // The id the simulation routes take: a dev-mode strategy's is its custom
+  // component's, a sequence that collides with no-code statement ids.
+  const simulationStrategyType: "no_code" | "dev_mode" = isDevModeStrategy ? "dev_mode" : "no_code"
+  const simulationStrategyId = isDevModeStrategy
+    ? Number(parsedStatement?.custom_strategy_id || parsedStatement?.id || strategy_id)
+    : Number(strategy_id)
+
+  const stopSimulationPolling = () => {
+    if (simulationPollerRef.current) clearTimeout(simulationPollerRef.current)
+    simulationPollerRef.current = null
+    simulationRunIdRef.current = null
+    setIsSimulationRunning(false)
+  }
+
+  useEffect(() => () => {
+    if (simulationPollerRef.current) clearTimeout(simulationPollerRef.current)
+  }, [])
+
+  /** Show a market simulation report in the Optimisation section's Results / Graph tabs. */
+  const openSimulationResult = async (simulationId: number | string) => {
+    try {
+      const detail = await getSimulationResult(simulationId as any)
+      setOptimisationResult(null)
+      setWalkForwardResult(null)
+      setSimulationResult(detail)
+      setActiveTab("optimisation")
+      setOptimisationTab('results')
+    } catch (err: any) {
+      console.error('Failed to load market simulation result:', err)
+      showToast(err?.message || 'Failed to load market simulation result', 'error')
+    }
+  }
+
+  const SIMULATION_POLL_MS = 2500
+  // Consecutive failed status polls tolerated before giving up, so one
+  // network blip doesn't abandon a run that takes minutes.
+  const SIMULATION_POLL_RETRIES = 3
+
+  const pollSimulation = (runId: string) => {
+    let failures = 0
+    const tick = async () => {
+      if (simulationRunIdRef.current !== runId) return
+      try {
+        const status = await getSimulationStatus(runId as any)
+        if (simulationRunIdRef.current !== runId) return
+        failures = 0
+        if (status?.progress) setSimulationProgress(status.progress)
+        const state = String(status?.status || '').toLowerCase()
+        if (!['completed', 'failed', 'cancelled'].includes(state)) {
+          simulationPollerRef.current = setTimeout(tick, SIMULATION_POLL_MS)
+          return
+        }
+        stopSimulationPolling()
+        if (state === 'completed' && status.simulation_id != null) {
+          await openSimulationResult(status.simulation_id)
+        } else if (state === 'failed') {
+          // Data problems (e.g. too short a history) surface here, not as a 400.
+          showToast(status?.error || 'Market simulation failed', 'error')
+        } else if (state === 'cancelled') {
+          showToast('Market simulation was cancelled', 'warning')
+        }
+      } catch (err: any) {
+        if (simulationRunIdRef.current !== runId) return
+        failures += 1
+        if (failures <= SIMULATION_POLL_RETRIES && err?.message !== 'Not Found') {
+          simulationPollerRef.current = setTimeout(tick, SIMULATION_POLL_MS)
+          return
+        }
+        console.error('Market simulation status polling failed:', err)
+        stopSimulationPolling()
+        showToast(err?.message === 'Not Found'
+          ? 'This market simulation run could not be found'
+          : err?.message || 'Lost track of the market simulation', 'error')
+      }
+    }
+    simulationPollerRef.current = setTimeout(tick, SIMULATION_POLL_MS)
+  }
+
+  const followSimulationRun = (runId: string) => {
+    if (simulationPollerRef.current) clearTimeout(simulationPollerRef.current)
+    simulationRunIdRef.current = runId
+    setSimulationProgress(null)
+    setIsSimulationRunning(true)
+    setActiveTab("optimisation")
+    setOptimisationTab('results')
+    pollSimulation(runId)
+  }
+
+  const handleRunMarketSimulation = async () => {
+    if (!parsedStatement) {
+      showToast("Strategy statement is missing or not parsed!", 'error')
+      return
+    }
+    if (isSimulationRunning) return
+    // The backend rejects these up front; synthetic markets have no ticks.
+    if (parsedStatement.entry_at === "tick" || parsedStatement.exit_at === "tick") {
+      showToast("Market simulation needs bar-close execution: synthetic markets have no ticks", 'error')
+      return
+    }
+    if (!Number.isFinite(simulationStrategyId) || simulationStrategyId <= 0) {
+      showToast("Save the strategy before running a market simulation", 'error')
+      return
+    }
+    if (!useMetaAPI && requiredTimeframes.length > uploadedFiles.length) {
+      showToast("Not enough files uploaded for the required timeframes", 'error')
+      return
+    }
+
+    try {
+      const params: any = { strategy_type: simulationStrategyType }
+      if (isDevModeStrategy) {
+        params.custom_strategy_id = simulationStrategyId
+        // Settings overrides, layered on the saved settings as a dev-mode
+        // backtest does. The code itself always comes from the saved strategy.
+        const overrides: Record<string, any> = {}
+        for (const key of [...DEV_MODE_SAVED_SETTINGS, "side"]) {
+          if (parsedStatement[key] != null) overrides[key] = parsedStatement[key]
+        }
+        const mapping = normalizeDataMapping(parsedStatement?.data_mapping)
+        if (mapping.length > 0) overrides.data_mapping = mapping
+        params.statement = overrides
+      } else {
+        params.strategy_statement_id = simulationStrategyId
+        // Carries unsaved edits; overrides the saved statement.
+        params.statement = parsedStatement
+      }
+
+      if (useMetaAPI) {
+        const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
+        const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
+        if (!token || !accountId) {
+          throw new Error("MetaAPI credentials not configured. Please check environment variables.")
+        }
+        params.metaapi_token = token
+        params.metaapi_account_id = accountId
+        params.symbol = metaAPIConfig?.symbol || "XAUUSD"
+        const isoRange = toIsoDateRange(dateRange)
+        if (isoRange) Object.assign(params, isoRange)
+      } else {
+        // Uploaded files are simulated in full; the date range doesn't apply.
+        params.files = buildTimeframeFiles()
+      }
+
+      const start = await runSimulation(params)
+      if (!start?.run_id) throw new Error("The backend did not return a run id")
+      followSimulationRun(start.run_id)
+    } catch (error: any) {
+      console.error("Market simulation error:", error)
+      const message = error?.message === "Not Found"
+        ? "Strategy not found, or it isn't yours"
+        : error?.message || "Unknown error"
+      showToast("Market Simulation Error: " + message, 'error')
+    }
+  }
+
+  const cancelMarketSimulation = () => {
+    const runId = simulationRunIdRef.current
+    stopSimulationPolling()
+    if (runId) {
+      cancelSimulation(runId as any)
+        .then((r: any) => console.log("✅ cancel-simulation:", r))
+        .catch((e: any) => console.error("❌ cancel-simulation failed:", e))
+    }
+    showToast("Market simulation cancelled", 'warning')
   }
 
   // Add function to start status polling
@@ -3157,18 +3285,33 @@ export default function StrategyTestingPage() {
     }
   }
 
+  /**
+   * Show a walk-forward run in the Optimisation section's Results / Graph /
+   * Summary tabs, as a regular run is shown. `throughDroplet` says the id is a
+   * cloud job's: the two are numbered independently.
+   */
+  const showWalkForwardResult = (detail: any) => {
+    setOptimisationResult(null)
+    setWalkForwardResult(detail)
+    setActiveTab("optimisation")
+    setShowOptimisationResults(true)
+    setOptimisationTab('results')
+  }
+
+  const loadWalkForwardResult = async (id: number | string, { throughDroplet = false } = {}) => {
+    try {
+      showWalkForwardResult(await getWalkForwardOptimizationResultDetail(Number(id), { throughDroplet }))
+    } catch (err: any) {
+      console.error('Failed to load walk forward result:', err)
+      showToast(err?.message || 'Failed to load walk forward result', 'error')
+    }
+  }
+
   // Add function to view walk forward optimization result details
   const viewWalkForwardOptimizationResult = async (optimizationId: number) => {
     try {
-      console.log("Fetching WFO result detail for ID:", optimizationId)
-      const result = await getWalkForwardOptimizationResultDetail(optimizationId)
-      console.log("WFO result detail received:", result)
-
-      showToast("Loading walk forward optimization result details...", 'success')
-
-      // Navigate to the walk-forward-results page with the optimization ID
-      // The page will fetch the data directly using the ID
-      router.push(`/walk-forward-results?id=${optimizationId}`)
+      setShowWalkForwardOptimizationResults(false)
+      await loadWalkForwardResult(optimizationId)
     } catch (error) {
       console.error("Error in viewWalkForwardOptimizationResult:", error)
       showToast("Failed to load walk forward optimization result details", 'error')
@@ -3304,6 +3447,24 @@ export default function StrategyTestingPage() {
       new_trade_policy: selectedTradingMode,
       // Same rule as the saved TradingType: a trade cap only for MTOOTAAT.
       ...(selectedTradingMode === "MTOOTAAT" ? { n_trade_max: Number.parseInt(maxTrades) || 1 } : {}),
+    }
+  }
+
+  // The search the user configured, in the shape /api/optimisation/save/
+  // takes; the backend turns it into the run's optimiser statement. A dev-mode
+  // run searches only its own parameters (the rows the Properties tab
+  // synthesised for this strategy), as the local run does.
+  const optimisationFormPayload = (storedForm: any, devMode: boolean, hyperParameters: Record<string, number>) => {
+    const rows = Array.isArray(storedForm?.parameters) ? storedForm.parameters : []
+    return {
+      ...storedForm,
+      parameters: devMode
+        ? rows.filter((p: any) =>
+            typeof p?.encoding === "string" && p.encoding.startsWith("custom:strategy:"))
+        : rows,
+      selected_algorithm: selectedAlgorithm,
+      selected_maximise: selectedMaximiseOption,
+      algorithm_params: hyperParameters,
     }
   }
 
@@ -3734,9 +3895,6 @@ export default function StrategyTestingPage() {
   const hasFinalStatusRef = useRef(false)
   const dropletPollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  useEffect(() => {
-    isOptimisationInFlightRef.current = isLoading2 || isCreatingOptimizationJob
-  }, [isLoading2, isCreatingOptimizationJob])
 
   // New Optimization Droplets Flow Functions
 
@@ -3786,10 +3944,16 @@ export default function StrategyTestingPage() {
 
         if (initialJobData.status === 'Completed' || initialJobData.status === 'completed') {
           console.log('✅ Droplet job already completed:', initialJobData)
-          // Regular droplet runs belong in the Results/Graph tabs like every
-          // other producer. Walk-forward keeps its own panel below.
+          // Droplet runs belong in the Results/Graph/Summary tabs like every
+          // other producer, walk-forward included.
+          if (optimizationType === 'walk_forward') {
+            loadWalkForwardResult(initialJobData.id ?? jobId, { throughDroplet: true })
+          }
           if (optimizationType === 'regular') {
-            setOptimisationResult(normalizeOptimisationResult(initialJobData.results))
+            setOptimisationResult({
+              ...normalizeOptimisationResult(initialJobData.results),
+              runTiming: runCostTimingFromJob(initialJobData),
+            })
             setShowOptimisationResults(true)
             setOptimisationTab('results')
           }
@@ -3874,10 +4038,16 @@ export default function StrategyTestingPage() {
             console.log('✅ Droplet job completed successfully:', jobData)
             setDropletJobResults(jobData)  // Store entire job data, not just results
 
-            // Regular droplet runs belong in the Results/Graph tabs like every
-            // other producer. Walk-forward keeps its own panel below.
+            // Droplet runs belong in the Results/Graph/Summary tabs like every
+            // other producer, walk-forward included.
+            if (optimizationType === 'walk_forward') {
+              loadWalkForwardResult(jobData.id ?? jobId, { throughDroplet: true })
+            }
             if (optimizationType === 'regular') {
-              setOptimisationResult(normalizeOptimisationResult(jobData.results))
+              setOptimisationResult({
+                ...normalizeOptimisationResult(jobData.results),
+                runTiming: runCostTimingFromJob(jobData),
+              })
               setShowOptimisationResults(true)
               setOptimisationTab('results')
             }
@@ -4126,25 +4296,10 @@ export default function StrategyTestingPage() {
         if (isoRange) Object.assign(apiParams, isoRange)
       }
 
-      // The search the user configured, in the shape /api/optimisation/save/
-      // takes; the backend turns it into the droplet's optimiser statement.
       // Without it a cloud run searched a built-in stop-loss/take-profit default.
       if (storedOptimisationForm) {
-        const rows = Array.isArray(storedOptimisationForm.parameters)
-          ? storedOptimisationForm.parameters
-          : []
-        apiParams.optimisation_form = {
-          ...storedOptimisationForm,
-          // A dev-mode run searches only its own parameters (the rows the
-          // Properties tab synthesised for this strategy), as the local run does.
-          parameters: isCustomStrategyRun
-            ? rows.filter((p: any) =>
-                typeof p?.encoding === "string" && p.encoding.startsWith("custom:strategy:"))
-            : rows,
-          selected_algorithm: selectedAlgorithm,
-          selected_maximise: selectedMaximiseOption,
-          algorithm_params: hyperParameters,
-        }
+        apiParams.optimisation_form = optimisationFormPayload(
+          storedOptimisationForm, Boolean(isCustomStrategyRun), hyperParameters)
       }
 
       // Add walk forward settings if needed
@@ -4485,8 +4640,11 @@ export default function StrategyTestingPage() {
     }
     // A missing value is a bare "-", without its unit. A Bayesian run reports
     // only the objective, so most of its cells are null.
-    const fmt = (v: any, prefix = '', suffix = '') =>
-      (v === undefined || v === null || v === '' ? '-' : `${prefix}${v}${suffix}`)
+    const fmt = (v: any, prefix = '', suffix = '', key = '') => {
+      if (v === undefined || v === null || v === '') return '-'
+      const formatted = formatOptimizationValue(v, key)
+      return `${prefix}${formatted}${suffix}`
+    }
 
     // A GA of population 100 x 50 generations is 5000 rows; paginate rather
     // than committing all of them to one <table>.
@@ -4536,34 +4694,34 @@ export default function StrategyTestingPage() {
               onClick={() => { setSelectedOptimisationRow(row); setOptimisationTab('summary'); }}
             >
               <td className="px-4 py-3 font-black">{startIdx + idx + 1}</td>
-              <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{fmt(row['Start'])}</td>
-              <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{fmt(row['End'])}</td>
-              <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{fmt(row['Duration'])}</td>
-              <td className="px-4 py-3 font-mono text-white">{fmt(row['Equity Final [$]'], '$')}</td>
-              <td className="px-4 py-3 font-mono text-white">{fmt(row['Equity Peak [$]'], '$')}</td>
-              <td className="px-4 py-3 font-mono">{fmt(row['Return [%]'], '', '%')}</td>
-              <td className="px-4 py-3 font-mono">{fmt(row['Return (Ann.) [%]'], '', '%')}</td>
-              <td className="px-4 py-3 font-mono">{fmt(row['Profit Factor'])}</td>
-              <td className="px-4 py-3 font-mono text-red-500">{fmt(row['Max. Drawdown [%]'], '', '%')}</td>
-              <td className="px-4 py-3 font-mono text-white">{fmt(row['Sharpe Ratio'])}</td>
-              <td className="px-4 py-3 font-mono text-white">{fmt(row['Sortino Ratio'])}</td>
-              <td className="px-4 py-3 font-mono text-white">{fmt(row['Calmar Ratio'])}</td>
-              <td className="px-4 py-3 font-mono text-white">{fmt(row['SQN'])}</td>
-              <td className="px-4 py-3 font-mono text-white">{fmt(row['Win Rate [%]'], '', '%')}</td>
-              <td className="px-4 py-3 font-mono text-green-400">{fmt(row['Best Trade [%]'], '', '%')}</td>
-              <td className="px-4 py-3 font-mono text-red-400">{fmt(row['Worst Trade [%]'], '', '%')}</td>
-              <td className="px-4 py-3 font-mono text-white">{fmt(row['Avg. Trade [%]'], '', '%')}</td>
-              <td className="px-4 py-3 font-mono text-white">{fmt(row['Expectancy [%]'], '', '%')}</td>
-              <td className="px-4 py-3 font-mono text-white">{fmt(row['# Trades'])}</td>
-              <td className="px-4 py-3 font-mono text-white">{fmt(row['Exposure Time [%]'], '', '%')}</td>
-              <td className="px-4 py-3 font-mono text-white">{fmt(row['generation'])}</td>
+              <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{fmt(row['Start'], '', '', 'Start')}</td>
+              <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{fmt(row['End'], '', '', 'End')}</td>
+              <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{fmt(row['Duration'], '', '', 'Duration')}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Equity Final [$]'], '$', '', 'Equity Final [$]')}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Equity Peak [$]'], '$', '', 'Equity Peak [$]')}</td>
+              <td className="px-4 py-3 font-mono">{fmt(row['Return [%]'], '', '%', 'Return [%]')}</td>
+              <td className="px-4 py-3 font-mono">{fmt(row['Return (Ann.) [%]'], '', '%', 'Return (Ann.) [%]')}</td>
+              <td className="px-4 py-3 font-mono">{fmt(row['Profit Factor'], '', '', 'Profit Factor')}</td>
+              <td className="px-4 py-3 font-mono text-red-500">{fmt(row['Max. Drawdown [%]'], '', '%', 'Max. Drawdown [%]')}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Sharpe Ratio'], '', '', 'Sharpe Ratio')}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Sortino Ratio'], '', '', 'Sortino Ratio')}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Calmar Ratio'], '', '', 'Calmar Ratio')}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['SQN'], '', '', 'SQN')}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Win Rate [%]'], '', '%', 'Win Rate [%]')}</td>
+              <td className="px-4 py-3 font-mono text-green-400">{fmt(row['Best Trade [%]'], '', '%', 'Best Trade [%]')}</td>
+              <td className="px-4 py-3 font-mono text-red-400">{fmt(row['Worst Trade [%]'], '', '%', 'Worst Trade [%]')}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Avg. Trade [%]'], '', '%', 'Avg. Trade [%]')}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Expectancy [%]'], '', '%', 'Expectancy [%]')}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['# Trades'], '', '', '# Trades')}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['Exposure Time [%]'], '', '%', 'Exposure Time [%]')}</td>
+              <td className="px-4 py-3 font-mono text-white">{fmt(row['generation'], '', '', 'generation')}</td>
               <td className="px-4 py-3 max-w-[250px] truncate text-gray-400" title={JSON.stringify(row)}>
                 {Object.entries(row)
                   .filter(([k]) => k.startsWith('param_'))
-                  .map(([k, v]) => `${k}: ${v}`)
+                  .map(([k, v]) => `${k}: ${formatOptimizationValue(v, k)}`)
                   .join(', ') || Object.keys(row)
                     .filter(key => !STANDARD_STAT_COLUMNS.has(key))
-                    .map(key => `${key}=${row[key]}`)
+                    .map(key => `${key}=${formatOptimizationValue(row[key], key)}`)
                     .join(', ')}
               </td>
               <td className="px-4 py-3 text-right">
@@ -4683,12 +4841,20 @@ export default function StrategyTestingPage() {
     )
   }
 
+  // Estimated/actual cost, total time and start of the loaded optimisation.
+  // Cloud loads attach the job's timing; a local result row carries its own.
+  const renderRunCostSummary = () => optimisationResult
+    ? <RunCostSummary timing={optimisationResult.runTiming ?? runCostTimingFromLocal(optimisationResult)} />
+    : null
+
   /**
    * Optimisation history for this strategy, shown under the Results tab the
    * same way backtest history sits under Trades. Covers both regular and
-   * walk-forward runs; the list labels which is which.
+   * walk-forward runs; the list labels which is which. Market simulations
+   * follow in their own list, since they live on their own endpoint.
    */
   const renderOptimisationHistory = () => (
+    <>
     <div>
       <h3 className="text-xs font-black text-gray-500 mb-6 uppercase tracking-[0.4em]">Optimisation History</h3>
       {strategy_id ? (
@@ -4711,7 +4877,11 @@ export default function StrategyTestingPage() {
             // one. `job_id` keeps the file downloads on this job.
             try {
               const job = await getOptimizationJob(jobId as any)
-              setOptimisationResult({ ...normalizeOptimisationResult(job.results), job_id: job.id })
+              setOptimisationResult({
+                ...normalizeOptimisationResult(job.results),
+                job_id: job.id,
+                runTiming: runCostTimingFromJob(job),
+              })
               setShowOptimisationResults(true)
               setOptimisationTab('results')
             } catch (err: any) {
@@ -4719,6 +4889,7 @@ export default function StrategyTestingPage() {
               showToast(err?.message || 'Failed to load optimisation result', 'error')
             }
           }}
+          onSelectWalkForward={(id, throughDroplet) => loadWalkForwardResult(id, { throughDroplet })}
           onSelectRunning={() => {
             setActiveTab("optimisation")
             setOptimisationTab('results')
@@ -4759,6 +4930,26 @@ export default function StrategyTestingPage() {
         </p>
       )}
     </div>
+    {strategy_id && (
+      <SimulationHistoryList
+        strategyId={simulationStrategyId}
+        strategyType={simulationStrategyType}
+        onSelect={openSimulationResult}
+        onSelectRunning={(runId) => {
+          if (isSimulationRunning) {
+            showToast("This market simulation is in progress — see the panel above", 'success')
+            return
+          }
+          // A run started earlier (or in another tab): follow it from here.
+          if (runId) followSimulationRun(runId)
+        }}
+        refreshToken={`${isSimulationRunning}`}
+        onDeleted={(id) => {
+          if (simulationResult?.id === id) setSimulationResult(null)
+        }}
+      />
+    )}
+    </>
   )
 
 
@@ -4846,7 +5037,66 @@ export default function StrategyTestingPage() {
                         />
                       </div>
                     )}
+                    {isSimulationRunning && (
+                      <div className="px-6 pt-6">
+                        <OptimisationProgressPanel
+                          progress={simulationProgress}
+                          stale={Boolean(simulationProgress?.stale)}
+                          percent={Number(simulationProgress?.percent) || 0}
+                          label="Market simulation in progress"
+                          onCancel={cancelMarketSimulation}
+                        />
+                      </div>
+                    )}
                     {(() => {
+                      if (simulationResult) {
+                        const section = optimisationTab === 'graph' ? 'graph'
+                          : optimisationTab === 'results' ? 'results'
+                          : null
+                        return (
+                          <div className="p-6 bg-[#000] text-white space-y-12">
+                            {optimisationTab === 'results' && renderOptimisationHistory()}
+                            {section === null ? (
+                              <div className="min-h-[300px] flex items-center justify-center text-gray-500 text-[10px] font-black uppercase tracking-[0.4em] text-center">
+                                Market simulation results are in the Results and Graph tabs
+                              </div>
+                            ) : (
+                              <div>
+                                {section === 'results' && (
+                                  <h3 className="text-xs font-black text-gray-500 uppercase tracking-[0.4em] mb-8">
+                                    Current Results: Market Simulation
+                                  </h3>
+                                )}
+                                <SimulationResultsView result={simulationResult} section={section} />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+                      if (walkForwardResult) {
+                        // One view for all three tabs, so its plots and the
+                        // cloud job's files load once rather than per tab.
+                        const section = optimisationTab === 'graph' ? 'graph'
+                          : optimisationTab === 'summary' ? 'report'
+                          : optimisationTab === 'results' ? 'results'
+                          : null
+                        return (
+                          <div className="p-6 bg-[#000] text-white space-y-12">
+                            {optimisationTab === 'results' && renderOptimisationHistory()}
+                            {section === null && (
+                              <ComingSoonPanel title={optimisationTab === 'chart' ? 'Chart' : 'Data'} />
+                            )}
+                            <div className={section === null ? 'hidden' : ''}>
+                              {optimisationTab === 'results' && (
+                                <h3 className="text-xs font-black text-gray-500 uppercase tracking-[0.4em] mb-8">
+                                  Current Results: Walk Forward
+                                </h3>
+                              )}
+                              <WalkForwardResultsView result={walkForwardResult} section={section ?? 'results'} />
+                            </div>
+                          </div>
+                        );
+                      }
                       if (!optimisationResult) {
                         // History is worth showing before any run has loaded —
                         // it's how the user gets back to an earlier result.
@@ -4854,12 +5104,6 @@ export default function StrategyTestingPage() {
                           return (
                             <div className="p-6 bg-[#000] text-white space-y-12">
                               {renderOptimisationHistory()}
-                              <div className="space-y-8">
-                                <h3 className="text-xs font-black text-gray-500 uppercase tracking-[0.4em]">Current Results</h3>
-                                <div className="overflow-x-auto">
-                                  {renderResultsTable([])}
-                                </div>
-                              </div>
                             </div>
                           );
                         }
@@ -4913,6 +5157,7 @@ export default function StrategyTestingPage() {
                               {renderOptimisationHistory()}
                               <div className="space-y-8">
                                 <h3 className="text-xs font-black text-gray-500 uppercase tracking-[0.4em]">Current Results</h3>
+                                {renderRunCostSummary()}
                                 {renderOptimisationDownloads()}
                                 <div className="overflow-x-auto">
                                   {renderResultsTable(previewRows)}
@@ -4946,7 +5191,7 @@ export default function StrategyTestingPage() {
                                       ].map(([l, v]) => (
                                         <div key={l} className="flex justify-between text-[11px] border-b border-gray-900/50 py-1">
                                           <span className="text-gray-500 font-medium">{l}</span>
-                                          <span className="text-white font-mono">{v ?? '-'}</span>
+                                          <span className="text-white font-mono">{formatOptimizationValue(v, l)}</span>
                                         </div>
                                       ))}
                                     </div>
@@ -4962,7 +5207,7 @@ export default function StrategyTestingPage() {
                                       ].map(([l, v]) => (
                                         <div key={l} className="flex justify-between text-[11px] border-b border-gray-900/50 py-1">
                                           <span className="text-gray-500 font-medium">{l}</span>
-                                          <span className="text-[#85e1fe] font-mono">{v ?? '-'}</span>
+                                          <span className="text-[#85e1fe] font-mono">{formatOptimizationValue(v, l)}</span>
                                         </div>
                                       ))}
                                     </div>
@@ -4978,7 +5223,7 @@ export default function StrategyTestingPage() {
                                       ].map(([l, v]) => (
                                         <div key={l} className="flex justify-between text-[11px] border-b border-gray-800/50 py-1">
                                           <span className="text-gray-500 font-medium">{l}</span>
-                                          <span className="text-white font-mono">{v ?? '-'}</span>
+                                          <span className="text-white font-mono">{formatOptimizationValue(v, l)}</span>
                                         </div>
                                       ))}
                                     </div>
@@ -5345,13 +5590,16 @@ export default function StrategyTestingPage() {
                     {backtestResultTab === 'results' && (
                       <div className="p-6 bg-[#000] text-white space-y-12">
                         {renderOptimisationHistory()}
-                        <div className="space-y-8">
-                          <h3 className="text-xs font-black text-gray-500 uppercase tracking-[0.4em]">Current Results</h3>
-                          {renderOptimisationDownloads()}
-                          <div className="overflow-x-auto">
-                            {renderResultsTable(previewRows)}
+                        {optimisationResult && (
+                          <div className="space-y-8">
+                            <h3 className="text-xs font-black text-gray-500 uppercase tracking-[0.4em]">Current Results</h3>
+                            {renderRunCostSummary()}
+                            {renderOptimisationDownloads()}
+                            <div className="overflow-x-auto">
+                              {renderResultsTable(previewRows)}
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </div>
                     )}
 
@@ -5380,13 +5628,16 @@ export default function StrategyTestingPage() {
                   backtestResultTab === 'results' ? (
                     <div className="w-full p-6 bg-[#000] text-white space-y-12">
                       {renderOptimisationHistory()}
-                      <div className="space-y-8">
-                        <h3 className="text-xs font-black text-gray-500 uppercase tracking-[0.4em]">Current Results</h3>
-                        {renderOptimisationDownloads()}
-                        <div className="overflow-x-auto">
-                          {renderResultsTable(previewRows)}
+                      {optimisationResult && (
+                        <div className="space-y-8">
+                          <h3 className="text-xs font-black text-gray-500 uppercase tracking-[0.4em]">Current Results</h3>
+                          {renderRunCostSummary()}
+                          {renderOptimisationDownloads()}
+                          <div className="overflow-x-auto">
+                            {renderResultsTable(previewRows)}
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   ) : optimisationResult ? (
                     <div className="w-full">{renderOptimisationGraphs()}</div>
@@ -5674,13 +5925,15 @@ export default function StrategyTestingPage() {
                       setSelectedAlgorithm={setSelectedAlgorithm} // New prop
                       saveOptimisationInput={saveOptimisationInput} // API function for saving
                       parsedStatement={parsedStatement} // Strategy statement for API calls
-                      // No walk-forward for Developer-Mode strategies: the cloud
-                      // route refuses them, and the local route has no dev-mode
-                      // path and would run the code strategy as a no-code statement.
-                      onRunWalkForwardOptimisation={isDevModeStrategy ? undefined : () => handleWalkForwardOptimisation(false)}
-                      onRunWalkForwardOptimisationDroplets={isDevModeStrategy ? undefined : () => handleOptimizationWithDroplets('walk_forward')}
+                      // Both kinds walk forward; each handler sends the dev-mode
+                      // fields for a code strategy, as its optimisation does.
+                      onRunWalkForwardOptimisation={() => handleWalkForwardOptimisation(false)}
+                      onRunWalkForwardOptimisationDroplets={() => handleOptimizationWithDroplets('walk_forward')}
                       onCancelWalkForward={cancelWalkForward}
                       isLoading3={isLoading3}
+                      onRunMarketSimulationV1={handleRunMarketSimulation}
+                      onCancelMarketSimulation={cancelMarketSimulation}
+                      isMarketSimulationRunning={isSimulationRunning}
                     />
                   </>
                 )}
@@ -5809,25 +6062,25 @@ export default function StrategyTestingPage() {
                                   <div className="text-center">
                                     <p className="text-gray-400 text-sm">Final Equity</p>
                                     <p className="text-white font-semibold">
-                                      ${result.final_equity?.toFixed(2) || "N/A"}
+                                      ${formatOptimizationNumber(result.final_equity, 2, "N/A")}
                                     </p>
                                   </div>
                                   <div className="text-center">
                                     <p className="text-gray-400 text-sm">Return (Ann.)</p>
                                     <p className="text-white font-semibold text-lg">
-                                      {result.return_ann_percent?.toFixed(2) || "N/A"}%
+                                      {formatOptimizationPercent(result.return_ann_percent, "N/A")}
                                     </p>
                                   </div>
                                   <div className="text-center">
                                     <p className="text-gray-400 text-sm">Win Rate</p>
                                     <p className="text-white font-semibold text-lg">
-                                      {result.win_rate_percent?.toFixed(2) || "N/A"}%
+                                      {formatOptimizationPercent(result.win_rate_percent, "N/A")}
                                     </p>
                                   </div>
                                   <div className="text-center">
                                     <p className="text-gray-400 text-sm">Max Drawdown</p>
                                     <p className="text-white font-semibold text-lg">
-                                      {result.max_drawdown_percent?.toFixed(2) || "N/A"}%
+                                      {formatOptimizationPercent(result.max_drawdown_percent, "N/A")}
                                     </p>
                                   </div>
                                 </div>
@@ -5884,37 +6137,37 @@ export default function StrategyTestingPage() {
                         <div className="text-center">
                           <p className="text-gray-400 text-sm">Final Equity</p>
                           <p className="text-white font-semibold text-lg">
-                            ${selectedOptimizationResult.final_equity?.toFixed(2) || "N/A"}
+                            ${formatOptimizationNumber(selectedOptimizationResult.final_equity, 2, "N/A")}
                           </p>
                         </div>
                         <div className="text-center">
                           <p className="text-gray-400 text-sm">Return (Ann.)</p>
                           <p className="text-white font-semibold text-lg">
-                            {selectedOptimizationResult.return_ann_percent?.toFixed(2) || "N/A"}%
+                            {formatOptimizationPercent(selectedOptimizationResult.return_ann_percent, "N/A")}
                           </p>
                         </div>
                         <div className="text-center">
                           <p className="text-gray-400 text-sm">Win Rate</p>
                           <p className="text-white font-semibold text-lg">
-                            {selectedOptimizationResult.win_rate_percent?.toFixed(2) || "N/A"}%
+                            {formatOptimizationPercent(selectedOptimizationResult.win_rate_percent, "N/A")}
                           </p>
                         </div>
                         <div className="text-center">
                           <p className="text-gray-400 text-sm">Max Drawdown</p>
                           <p className="text-white font-semibold text-lg">
-                            {selectedOptimizationResult.max_drawdown_percent?.toFixed(2) || "N/A"}%
+                            {formatOptimizationPercent(selectedOptimizationResult.max_drawdown_percent, "N/A")}
                           </p>
                         </div>
                         <div className="text-center">
                           <p className="text-gray-400 text-sm">Sharpe Ratio</p>
                           <p className="text-white font-semibold text-lg">
-                            {selectedOptimizationResult.sharpe_ratio?.toFixed(2) || "N/A"}
+                            {formatOptimizationNumber(selectedOptimizationResult.sharpe_ratio, 2, "N/A")}
                           </p>
                         </div>
                         <div className="text-center">
                           <p className="text-gray-400 text-sm">Number of Trades</p>
                           <p className="text-white font-semibold text-lg">
-                            {selectedOptimizationResult.num_trades || "N/A"}
+                            {formatOptimizationValue(selectedOptimizationResult.num_trades, 'num_trades', "N/A")}
                           </p>
                         </div>
                       </div>
@@ -6055,7 +6308,8 @@ export default function StrategyTestingPage() {
               )}
 
               {/* Walk Forward Droplet Results Modal */}
-              {dropletJobResults && dropletJobResults.results && (
+              {/* A walk-forward job opens in the Results / Graph / Summary tabs instead. */}
+              {dropletJobResults && dropletJobResults.results && dropletJobResults.optimization_type !== 'walk_forward' && (
                 <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
                   <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-5xl max-h-[90vh] overflow-hidden">
                     <div className="flex justify-between items-center p-6 border-b border-gray-700">
@@ -6079,22 +6333,20 @@ export default function StrategyTestingPage() {
                           <div className="bg-[#141721] rounded-lg p-4">
                             <p className="text-gray-400 text-sm">Z-Statistic</p>
                             <p className="text-white font-semibold text-lg">
-                              {dropletJobResults.results.z_statistic?.toFixed(4) || 'N/A'}
+                              {formatOptimizationValue(dropletJobResults.results.z_statistic, 'z_statistic')}
                             </p>
                           </div>
                           <div className="bg-[#141721] rounded-lg p-4">
                             <p className="text-gray-400 text-sm">P-Value</p>
                             <p className="text-white font-semibold text-lg">
-                              {dropletJobResults.results.p_value?.toFixed(4) || 'N/A'}
+                              {formatOptimizationValue(dropletJobResults.results.p_value, 'p_value')}
                             </p>
                           </div>
                           <div className="bg-[#141721] rounded-lg p-4">
                             <p className="text-gray-400 text-sm">Avg Validation Return</p>
                             <p className={`font-semibold text-lg ${(dropletJobResults.results.avg_validation_return || 0) > 0 ? 'text-green-500' : 'text-red-500'
                               }`}>
-                              {typeof dropletJobResults.results.avg_validation_return === 'number'
-                                ? `${dropletJobResults.results.avg_validation_return.toFixed(4)}%`
-                                : 'N/A'}
+                              {formatOptimizationPercent(dropletJobResults.results.avg_validation_return, 'N/A')}
                             </p>
                           </div>
                           <div className="bg-[#141721] rounded-lg p-4">
@@ -6200,7 +6452,7 @@ export default function StrategyTestingPage() {
                             </div>
                             <div className="flex justify-between">
                               <span className="text-gray-400">Runtime:</span>
-                              <span className="text-white font-semibold">{dropletJobResults.runtime_minutes} min</span>
+                              <span className="text-white font-semibold">{formatOptimizationNumber(dropletJobResults.runtime_minutes, 2)} min</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-gray-400">Droplet Size:</span>
@@ -6210,11 +6462,11 @@ export default function StrategyTestingPage() {
                           <div className="space-y-2 text-sm">
                             <div className="flex justify-between">
                               <span className="text-gray-400">Estimated Cost:</span>
-                              <span className="text-white font-semibold">${dropletJobResults.estimated_cost}</span>
+                              <span className="text-white font-semibold">${formatOptimizationNumber(dropletJobResults.estimated_cost, 2)}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-gray-400">Actual Cost:</span>
-                              <span className="text-green-500 font-semibold">${dropletJobResults.actual_cost}</span>
+                              <span className="text-green-500 font-semibold">${formatOptimizationNumber(dropletJobResults.actual_cost, 2)}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-gray-400">Droplet ID:</span>

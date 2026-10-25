@@ -7,6 +7,8 @@ import { Sidebar } from "@/components/sidebar"
 import { MobileSidebar } from "@/components/mobile-sidebar"
 import {
   getOptimizationJob,
+  cancelOptimizationJob,
+  cancelOptimisationRun,
   getOptimizationResultDetail,
   getWalkForwardOptimizationResultDetail,
   listOptimizationFiles,
@@ -17,6 +19,8 @@ import { Fetch } from "../usefetch"
 import { ArrowLeft, RefreshCw } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
 import { OptimisationProgressPanel } from "@/components/optimisation-progress-panel"
+import { RunCostSummary } from "@/components/run-cost-summary"
+import { runCostTimingFromJob, runCostTimingFromLocal } from "@/lib/run-cost-timing"
 
 const ACTIVE_STATUSES = ['pending', 'creating', 'creating_droplet', 'running']
 const FINISHED_STATUSES = ['completed', 'failed', 'cancelled', 'success']
@@ -66,6 +70,7 @@ function OptimizationResultsContent() {
   const [filesError, setFilesError] = useState<string | null>(null)
   const [pendingDownload, setPendingDownload] = useState<string | null>(null)
   const [walkForwardDetail, setWalkForwardDetail] = useState<any>(null)
+  const [isCancelling, setIsCancelling] = useState(false)
   const isDroplet = type === 'droplet'
   // job-status says `optimization_type`; the job record spells the type out.
   const isWalkForward =
@@ -301,6 +306,36 @@ function OptimizationResultsContent() {
       isCancelled = true
     }
   }, [fileJobRef, jobData?.status])
+
+  /**
+   * Stop a cloud job and destroy its droplet. Once the job has a row it is
+   * cancelled by its numeric id; before that (still preparing its data) the URL
+   * only has the run_id, which /api/cancel-optimisation/ takes instead. The
+   * status change itself arrives through the poll.
+   */
+  const handleCancelJob = async () => {
+    if (!jobId) return
+    if (!window.confirm("Cancel this optimisation? Its droplet is destroyed and the run can't be resumed.")) return
+
+    setIsCancelling(true)
+    try {
+      if (numericJobId != null) {
+        await cancelOptimizationJob(numericJobId)
+      } else {
+        const result = await cancelOptimisationRun(jobId)
+        if (result?.status !== 'cancelled') {
+          throw new Error(result?.message || result?.error || 'No active optimisation found')
+        }
+      }
+      showToast('Optimisation cancelled', 'warning')
+      fetchJobData()
+    } catch (err: any) {
+      console.error('Cancel failed:', err)
+      showToast(err?.message || 'Failed to cancel optimisation', 'error')
+    } finally {
+      setIsCancelling(false)
+    }
+  }
 
   const handleFileDownload = async (path: string) => {
     setPendingDownload(path)
@@ -612,6 +647,15 @@ function OptimizationResultsContent() {
                   }`}>
                     {String(jobData.status || '').replace(/_/g, ' ')}
                   </span>
+                  {isDroplet && ACTIVE_STATUSES.includes((jobData.status || '').toLowerCase()) && (
+                    <button
+                      onClick={handleCancelJob}
+                      disabled={isCancelling}
+                      className="px-4 py-2 rounded-full text-sm font-semibold bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
+                    >
+                      {isCancelling ? 'Cancelling...' : 'Cancel Optimisation'}
+                    </button>
+                  )}
                   {isLoading && (
                     <RefreshCw className="w-5 h-5 animate-spin text-[#85e1fe]" />
                   )}
@@ -656,41 +700,10 @@ function OptimizationResultsContent() {
               )}
 
               {/* Job Details */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div>
-                  <p className="text-gray-400 text-sm">Estimated Cost</p>
-                  <p className="text-white font-semibold">
-                    {jobData.estimated_cost ? `$${jobData.estimated_cost}` : 
-                     jobData.status?.toLowerCase() === 'running' ? '$0.10 - $0.50' : '-'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-400 text-sm">Actual Cost</p>
-                  <p className="text-white font-semibold">
-                    {jobData.actual_cost ? `$${jobData.actual_cost}` : 
-                     ['completed', 'success'].includes(jobData.status?.toLowerCase()) ? 'Calculating...' : '-'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-400 text-sm">Runtime</p>
-                  <p className="text-white font-semibold">
-                    {jobData.runtime_minutes ? `${jobData.runtime_minutes} min` : 
-                     jobData.started_at ? (() => {
-                       const startTime = new Date(jobData.started_at).getTime();
-                       const now = Date.now();
-                       const minutes = Math.floor((now - startTime) / 60000);
-                       const seconds = Math.floor(((now - startTime) % 60000) / 1000);
-                       return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
-                     })() : '-'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-400 text-sm">Started At</p>
-                  <p className="text-white font-semibold">
-                    {jobData.started_at ? new Date(jobData.started_at).toLocaleTimeString() : '-'}
-                  </p>
-                </div>
-              </div>
+              <RunCostSummary
+                timing={isDroplet ? runCostTimingFromJob(jobData) : runCostTimingFromLocal(jobData)}
+                tileClassName=""
+              />
             </div>
           )}
 

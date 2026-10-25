@@ -7,15 +7,14 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DraggableModal } from "./draggable-modal"
 import { CustomTimeframeModal } from "./custom-timeframe-modal"
+import { DEFAULT_LOWER_TIMEFRAME, isLowerTimeframeValid } from "@/lib/volume-delta"
 
 interface VolumeDeltaSettingsModalProps {
   onClose: () => void
-  onSave: (settings: { timeframe: string }) => void
-  initialSettings?: { timeframe?: string }
+  onSave: (settings: { timeframe: string; lowerTimeframe: string }) => void
+  initialSettings?: { timeframe?: string; lowerTimeframe?: string }
 }
 
-// The indicator's timeframe. `lower_timeframe` is bound to the same value by
-// the builder, so there is a single control here.
 const TIMEFRAME_OPTIONS = [
   { value: "1min", label: "1 min" },
   { value: "5min", label: "5 min" },
@@ -41,11 +40,43 @@ export function VolumeDeltaSettingsModal({ onClose, onSave, initialSettings }: V
   // Seeded from the operand's current timeframe — the builder always passes it,
   // for both the create and the edit flow.
   const [timeframe, setTimeframe] = useState(initialSettings?.timeframe || "3h")
-  const [showCustomTimeframeModal, setShowCustomTimeframeModal] = useState(false)
+  const [lowerTimeframe, setLowerTimeframe] = useState(initialSettings?.lowerTimeframe || DEFAULT_LOWER_TIMEFRAME)
+  const [customTarget, setCustomTarget] = useState<"timeframe" | "lowerTimeframe" | null>(null)
+
+  const lowerTimeframeValid = isLowerTimeframeValid(lowerTimeframe, timeframe)
 
   const handleSave = () => {
-    onSave({ timeframe })
+    if (!lowerTimeframeValid) return
+    onSave({ timeframe, lowerTimeframe })
   }
+
+  const renderTimeframeSelect = (
+    id: string,
+    value: string,
+    onChange: (tf: string) => void,
+    target: "timeframe" | "lowerTimeframe",
+  ) => (
+    <Select
+      value={value}
+      onValueChange={(v) => {
+        if (v === "add-custom") setCustomTarget(target)
+        else onChange(v)
+      }}
+    >
+      <SelectTrigger id={id} className="w-full border border-gray-300 text-black bg-white">
+        <SelectValue placeholder="Select timeframe" />
+      </SelectTrigger>
+      <SelectContent className="bg-white text-black">
+        {TIMEFRAME_OPTIONS.map((opt) => (
+          <SelectItem key={opt.value} value={opt.value}>
+            {opt.label}
+          </SelectItem>
+        ))}
+        {!isPresetTimeframe(value) && <SelectItem value={value}>{value}</SelectItem>}
+        <SelectItem value="add-custom">Add Custom</SelectItem>
+      </SelectContent>
+    </Select>
+  )
 
   return (
     <DraggableModal
@@ -63,41 +94,36 @@ export function VolumeDeltaSettingsModal({ onClose, onSave, initialSettings }: V
         <div>
           <h3 className="text-lg font-medium text-gray-800 mb-4">Define Settings</h3>
 
-          <div>
-            <Label htmlFor="vd-timeframe" className="block text-sm font-medium text-gray-700 mb-2">
-              Timeframe
-            </Label>
-            <Select
-              value={timeframe}
-              onValueChange={(v) => {
-                if (v === "add-custom") setShowCustomTimeframeModal(true)
-                else setTimeframe(v)
-              }}
-            >
-              <SelectTrigger id="vd-timeframe" className="w-full border border-gray-300 text-black bg-white">
-                <SelectValue placeholder="Select timeframe" />
-              </SelectTrigger>
-              <SelectContent className="bg-white text-black">
-                {TIMEFRAME_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-                {!isPresetTimeframe(timeframe) && <SelectItem value={timeframe}>{timeframe}</SelectItem>}
-                <SelectItem value="add-custom">Add Custom</SelectItem>
-              </SelectContent>
-            </Select>
-            {showCustomTimeframeModal && (
-              <CustomTimeframeModal
-                onClose={() => setShowCustomTimeframeModal(false)}
-                onSave={(tf) => setTimeframe(tf)}
-              />
-            )}
-            <p className="text-xs text-gray-500 mt-1">
-              The signed volume delta is calculated on this timeframe — the indicator's lower timeframe is kept
-              identical to it.
-            </p>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="vd-timeframe" className="block text-sm font-medium text-gray-700 mb-2">
+                Timeframe
+              </Label>
+              {renderTimeframeSelect("vd-timeframe", timeframe, setTimeframe, "timeframe")}
+              <p className="text-xs text-gray-500 mt-1">The timeframe whose bars the volume delta is plotted on.</p>
+            </div>
+
+            <div>
+              <Label htmlFor="vd-lower-timeframe" className="block text-sm font-medium text-gray-700 mb-2">
+                Lower Timeframe
+              </Label>
+              {renderTimeframeSelect("vd-lower-timeframe", lowerTimeframe, setLowerTimeframe, "lowerTimeframe")}
+              <p className="text-xs text-gray-500 mt-1">
+                Each bar's delta adds up the signed volume of the lower-timeframe bars inside it, as TradingView does.
+                The Strategy Tester asks for a dataset at this timeframe.
+              </p>
+              {!lowerTimeframeValid && (
+                <p className="text-xs text-red-600 mt-1">The lower timeframe can't be longer than the timeframe.</p>
+              )}
+            </div>
           </div>
+
+          {customTarget && (
+            <CustomTimeframeModal
+              onClose={() => setCustomTarget(null)}
+              onSave={(tf) => (customTarget === "timeframe" ? setTimeframe(tf) : setLowerTimeframe(tf))}
+            />
+          )}
         </div>
       </div>
 
@@ -111,6 +137,7 @@ export function VolumeDeltaSettingsModal({ onClose, onSave, initialSettings }: V
         </Button>
         <Button
           onClick={handleSave}
+          disabled={!lowerTimeframeValid}
           className="rounded-full px-6 bg-[#85e1fe] text-black hover:bg-[#6bc8e3] border-none"
         >
           Save

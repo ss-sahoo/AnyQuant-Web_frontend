@@ -26,6 +26,9 @@ interface OptimisationTabProps {
   onRunWalkForwardOptimisationDroplets?: () => void // New callback for droplets
   onCancelWalkForward?: () => void // Callback to cancel walk forward
   isLoading3?: boolean // Loading state for walk forward optimisation
+  onRunMarketSimulationV1?: () => void // Callback to run optimisation with market simulation v1
+  onCancelMarketSimulation?: () => void // Callback to cancel the market simulation in flight
+  isMarketSimulationRunning?: boolean // Loading state for market simulation
 }
 
 interface OptimisationForm {
@@ -64,6 +67,9 @@ export function OptimisationTab({
   onRunWalkForwardOptimisationDroplets, // New callback for droplets
   onCancelWalkForward, // Callback to cancel walk forward
   isLoading3, // Loading state for walk forward optimisation
+  onRunMarketSimulationV1, // Callback to run optimisation with market simulation v1
+  onCancelMarketSimulation, // Callback to cancel the market simulation in flight
+  isMarketSimulationRunning, // Loading state for market simulation
 }: OptimisationTabProps) {
   // Remove local states for selectedMaximiseOption and selectedAlgorithm
   // const [selectedMaximiseOption, setSelectedMaximiseOption] = useState<string>("")
@@ -499,6 +505,27 @@ export function OptimisationTab({
             </div>
           </div>
         )}
+
+        {/* Market Simulation Optimisation Buttons (v2 is coming soon) */}
+        <div className="mt-3 flex gap-3">
+          <button
+            className={`flex-1 py-3 rounded-full font-medium disabled:opacity-50 disabled:cursor-not-allowed ${isMarketSimulationRunning
+              ? 'bg-red-600 hover:bg-red-700 text-white'
+              : 'bg-[#141721] text-white hover:bg-[#2B2E38]'
+            }`}
+            onClick={isMarketSimulationRunning ? onCancelMarketSimulation : onRunMarketSimulationV1}
+            disabled={!onRunMarketSimulationV1}
+          >
+            {isMarketSimulationRunning ? "Cancel Market Simulation" : "Run Optimisation with Market Simulation (V1)"}
+          </button>
+          <button
+            className="flex-1 py-3 rounded-full font-medium bg-[#141721] text-gray-500 cursor-not-allowed"
+            disabled
+            title="Coming soon"
+          >
+            Run Optimisation with Market Simulation (V2) · Coming Soon
+          </button>
+        </div>
       </div>
 
       {/* Walk Forward Optimisation Settings Modal */}

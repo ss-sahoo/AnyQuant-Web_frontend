@@ -685,6 +685,110 @@ export const pollJobStatus = (runId, { intervalMs = 3000, onStatus } = {}) => {
   return { promise, stop }
 }
 
+// ---------------------------------------------------------------------------
+// Market simulation (V1): backtests the strategy on synthetic markets
+// calibrated to the uploaded/MetaAPI history. POST answers 202 straight away;
+// the run is followed on its own status route, not /api/job-status/.
+// ---------------------------------------------------------------------------
+
+const simulationError = async (response, fallback) => {
+  const body = await response.json().catch(() => ({}))
+  return new Error(body?.error || body?.detail || fallback)
+}
+
+/**
+ * POST /api/run-simulation/ (multipart). One data source: `files` keyed by
+ * timeframe (as a backtest sends them) or the MetaAPI fields. `statement` is
+ * the full no-code statement, or the dev-mode settings overrides.
+ * Resolves with { status: "started", run_id, simulation_id, strategy_kind }.
+ */
+export const runSimulation = async ({
+  strategy_type,
+  strategy_statement_id = null,
+  custom_strategy_id = null,
+  statement = null,
+  files = null,
+  metaapi_token = null,
+  metaapi_account_id = null,
+  symbol = null,
+  start_date = null,
+  end_date = null,
+  n_paths = null,
+  seed = null,
+}) => {
+  const formData = new FormData()
+  formData.append("strategy_type", strategy_type)
+  if (strategy_statement_id != null) formData.append("strategy_statement_id", String(strategy_statement_id))
+  if (custom_strategy_id != null) formData.append("custom_strategy_id", String(custom_strategy_id))
+  if (statement) formData.append("statement", JSON.stringify(statement))
+  if (metaapi_token && metaapi_account_id) {
+    formData.append("metaapi_token", metaapi_token)
+    formData.append("metaapi_account_id", metaapi_account_id)
+    if (symbol) formData.append("symbol", symbol)
+    if (start_date && end_date) {
+      formData.append("start_date", start_date)
+      formData.append("end_date", end_date)
+    }
+  }
+  if (n_paths != null) formData.append("n_paths", String(n_paths))
+  if (seed != null) formData.append("seed", String(seed))
+  if (files) {
+    for (const [timeframe, file] of Object.entries(files)) {
+      formData.append(timeframe, file)
+    }
+  }
+
+  const response = await Fetch("/api/run-simulation/", { method: "POST", body: formData })
+  if (!response.ok) throw await simulationError(response, "Failed to start market simulation")
+  return response.json()
+}
+
+/** GET /api/simulation-status/<run_id>/: { status, simulation_id, progress, error }. */
+export const getSimulationStatus = async (runId) => {
+  const response = await Fetch(`/api/simulation-status/${runId}/`, { method: "GET" })
+  if (!response.ok) throw await simulationError(response, "Failed to get market simulation status")
+  return response.json()
+}
+
+export const cancelSimulation = async (runId) => {
+  const response = await Fetch("/api/cancel-simulation/", {
+    method: "POST",
+    body: JSON.stringify({ run_id: runId }),
+  })
+  if (!response.ok) throw await simulationError(response, "Failed to cancel market simulation")
+  return response.json()
+}
+
+/** GET /api/simulation-results/<simulation_id>/: the full report. */
+export const getSimulationResult = async (simulationId) => {
+  const response = await Fetch(`/api/simulation-results/${simulationId}/`, { method: "GET" })
+  if (!response.ok) throw await simulationError(response, "Failed to get market simulation result")
+  return response.json()
+}
+
+/**
+ * GET /api/simulation-results/: paginated, newest first.
+ * @param {{ strategy_type?: string|null, strategy_id?: string|number|null,
+ *   page?: number|null, page_size?: number|null }} [params]
+ */
+export const listSimulationResults = async ({ strategy_type = null, strategy_id = null, page = null, page_size = null } = {}) => {
+  const queryParams = new URLSearchParams()
+  if (strategy_type) queryParams.append("strategy_type", strategy_type)
+  if (strategy_id != null) queryParams.append("strategy_id", String(strategy_id))
+  if (page) queryParams.append("page", String(page))
+  if (page_size) queryParams.append("page_size", String(page_size))
+
+  const response = await Fetch(`/api/simulation-results/?${queryParams}`, { method: "GET" })
+  if (!response.ok) throw await simulationError(response, "Failed to list market simulations")
+  return response.json()
+}
+
+/** DELETE answers 204 with no body. */
+export const deleteSimulationResult = async (simulationId) => {
+  const response = await Fetch(`/api/simulation-results/${simulationId}/delete/`, { method: "DELETE" })
+  if (!response.ok) throw await simulationError(response, "Failed to delete market simulation")
+}
+
 // AllApiCalls.ts
 export const createStatement = async ({ statement }) => {
   const payload = {
@@ -1241,7 +1345,15 @@ export const runWalkForwardOptimisation = async ({
   walk_forward_setting = null,
   metaapi_token = null,
   metaapi_account_id = null,
-  symbol = null
+  symbol = null,
+  // Developer-Mode only, sent the way createOptimizationJob sends them.
+  strategy_type = null,
+  custom_strategy_id = null,
+  optimisation_form = null,
+  trading_type = null,
+  data_mapping = null,
+  start_date = null,
+  end_date = null,
 }) => {
   // Validate input: either files OR MetaAPI credentials must be provided
   const isMetaAPIMode = metaapi_token && metaapi_account_id && symbol;
@@ -1284,6 +1396,21 @@ export const runWalkForwardOptimisation = async ({
   // Attach strategy statement ID if provided
   if (strategy_statement_id) {
     formData.append("strategy_statement_id", strategy_statement_id)
+  }
+
+  if (strategy_type) formData.append("strategy_type", strategy_type)
+  if (custom_strategy_id != null) formData.append("custom_strategy_id", String(custom_strategy_id))
+  if (optimisation_form) formData.append("optimisation_form", JSON.stringify(optimisation_form))
+  if (trading_type) {
+    for (const [key, value] of Object.entries(trading_type)) {
+      if (value != null && value !== "") formData.append(key, String(value))
+    }
+  }
+  if (data_mapping && data_mapping.length > 0) formData.append("data_mapping", JSON.stringify(data_mapping))
+  // All-or-nothing: a lone bound is a 400.
+  if (start_date && end_date) {
+    formData.append("start_date", start_date)
+    formData.append("end_date", end_date)
   }
 
   // Attach wait if requested
