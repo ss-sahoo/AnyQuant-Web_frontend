@@ -516,7 +516,7 @@ export function OptimisationTab({
             onClick={isMarketSimulationRunning ? onCancelMarketSimulation : onRunMarketSimulationV1}
             disabled={!onRunMarketSimulationV1}
           >
-            {isMarketSimulationRunning ? "Cancel Market Simulation" : "Run Optimisation with Market Simulation (V1)"}
+            {isMarketSimulationRunning ? "Cancel Market Simulation" : "Run Market Simulation (Droplets)"}
           </button>
           <button
             className="flex-1 py-3 rounded-full font-medium bg-[#141721] text-gray-500 cursor-not-allowed"

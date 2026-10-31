@@ -34,12 +34,15 @@ export function OptimisationProgressPanel({
   percent,
   label,
   onCancel,
+  hint,
 }: {
   progress: any
   stale?: boolean
   percent: number
   label: string
   onCancel?: () => void
+  // Shown in place of the bar while it can't move yet (e.g. a droplet booting).
+  hint?: string | null
 }) {
   const phaseTotal = Number(progress?.phase_total) || 0
   const phaseIndex = Number(progress?.phase_index) || 0
@@ -97,7 +100,11 @@ export function OptimisationProgressPanel({
         </div>
       )}
 
-      {stale ? (
+      {hint ? (
+        <div className="rounded-md border border-[#85e1fe]/30 bg-[#85e1fe]/10 px-4 py-3 text-[11px] font-semibold text-[#85e1fe]">
+          {hint}
+        </div>
+      ) : stale ? (
         <div className="rounded-md border border-yellow-600/40 bg-yellow-500/10 px-4 py-3 text-[11px] font-semibold text-yellow-400">
           Still running — no update
           {staleMinutes != null ? ` for ${staleMinutes}m` : ' recently'}

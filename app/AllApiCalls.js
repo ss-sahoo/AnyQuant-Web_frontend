@@ -714,7 +714,7 @@ const simulationError = async (response, fallback) => {
  * POST /api/run-simulation/ (multipart). One data source: `files` keyed by
  * timeframe (as a backtest sends them) or the MetaAPI fields. `statement` is
  * the full no-code statement, or the dev-mode settings overrides.
- * Resolves with { status: "started", run_id, simulation_id, strategy_kind }.
+ * Resolves with { status: "started", run_id, simulation_id, execution, strategy_kind }.
  */
 export const runSimulation = async ({
   strategy_type,
@@ -732,6 +732,10 @@ export const runSimulation = async ({
 }) => {
   const formData = new FormData()
   formData.append("strategy_type", strategy_type)
+  // Always a droplet: up to 200 synthetic backtests slow the whole web server.
+  // Hard-coded, not a parameter, because the backend runs a request without
+  // this field on the web server.
+  formData.append("execution", "cloud")
   if (strategy_statement_id != null) formData.append("strategy_statement_id", String(strategy_statement_id))
   if (custom_strategy_id != null) formData.append("custom_strategy_id", String(custom_strategy_id))
   if (statement) formData.append("statement", JSON.stringify(statement))

@@ -8,23 +8,22 @@ interface OptimizationCostDialogProps {
   isOpen: boolean
   onClose: () => void
   onConfirm: () => void
-  optimizationType: 'regular' | 'walk_forward'
+  optimizationType: 'regular' | 'walk_forward' | 'simulation'
+}
+
+interface CostInfo {
+  estimated_cost: string
+  estimated_time_hours: number
+  droplet_size: string
+  description: string
 }
 
 interface CostEstimate {
   cost_estimates: {
-    regular: {
-      estimated_cost: string
-      estimated_time_hours: number
-      droplet_size: string
-      description: string
-    }
-    walk_forward: {
-      estimated_cost: string
-      estimated_time_hours: number
-      droplet_size: string
-      description: string
-    }
+    regular: CostInfo
+    walk_forward: CostInfo
+    // Missing from backends that predate cloud market simulations.
+    simulation?: CostInfo
   }
   pricing_info: {
     currency: string
@@ -68,12 +67,17 @@ export const OptimizationCostDialog: React.FC<OptimizationCostDialogProps> = ({
   if (!isOpen) return null
 
   const currentCostInfo = costs?.cost_estimates?.[optimizationType]
+  const runTitle = optimizationType === 'regular' ? 'Regular Optimization'
+    : optimizationType === 'walk_forward' ? 'Walk Forward Optimization'
+    : 'Market Simulation'
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-md p-6">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-bold text-white">Optimization Cost Estimate</h2>
+          <h2 className="text-2xl font-bold text-white">
+            {optimizationType === 'simulation' ? 'Market Simulation Cost Estimate' : 'Optimization Cost Estimate'}
+          </h2>
           <button 
             onClick={onClose}
             className="text-gray-400 hover:text-white"
@@ -101,11 +105,21 @@ export const OptimizationCostDialog: React.FC<OptimizationCostDialogProps> = ({
           </div>
         )}
 
-        {costs && currentCostInfo && (
+        {costs && (
           <div className="space-y-4">
+            {/* Until the backend prices a run type, say so rather than leave
+                the dialog without its Confirm button. */}
+            {!currentCostInfo ? (
+              <div className="bg-[#141721] rounded-lg p-4">
+                <h3 className="text-lg font-semibold text-white mb-3">{runTitle}</h3>
+                <p className="text-sm text-gray-300">
+                  The server has no cost estimate for this run yet. It runs on a billed droplet.
+                </p>
+              </div>
+            ) : (
             <div className="bg-[#141721] rounded-lg p-4">
               <h3 className="text-lg font-semibold text-white mb-3">
-                {optimizationType === 'regular' ? 'Regular Optimization' : 'Walk Forward Optimization'}
+                {runTitle}
               </h3>
               
               <div className="space-y-3">
@@ -135,6 +149,7 @@ export const OptimizationCostDialog: React.FC<OptimizationCostDialogProps> = ({
                 </div>
               </div>
             </div>
+            )}
 
             <div className="bg-yellow-900 border border-yellow-700 rounded-lg p-3">
               <p className="text-yellow-200 text-sm">

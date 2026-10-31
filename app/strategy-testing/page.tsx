@@ -516,6 +516,7 @@ export default function StrategyTestingPage() {
     if (optimisationResult || walkForwardResult) setSimulationResult(null)
   }, [optimisationResult, walkForwardResult])
   const [isSimulationRunning, setIsSimulationRunning] = useState(false)
+  const [showSimulationCostDialog, setShowSimulationCostDialog] = useState(false)
   const [simulationProgress, setSimulationProgress] = useState<any>(null)
   // The run being polled. Polling stops as soon as this no longer matches,
   // so a cancel or a newer run silences a request already in flight.
@@ -3121,7 +3122,7 @@ export default function StrategyTestingPage() {
     pollSimulation(runId)
   }
 
-  const handleRunMarketSimulation = async () => {
+  const handleRunMarketSimulation = () => {
     if (!parsedStatement) {
       showToast("Strategy statement is missing or not parsed!", 'error')
       return
@@ -3140,6 +3141,14 @@ export default function StrategyTestingPage() {
       showToast("Not enough files uploaded for the required timeframes", 'error')
       return
     }
+    // Checked before the cost dialog, as for a droplet optimisation: the run is
+    // billed, so a request the backend would reject never gets that far.
+    setShowSimulationCostDialog(true)
+  }
+
+  const handleSimulationCostConfirmation = async () => {
+    setShowSimulationCostDialog(false)
+    if (!parsedStatement || isSimulationRunning) return
 
     try {
       const params: any = { strategy_type: simulationStrategyType }
@@ -5175,12 +5184,17 @@ export default function StrategyTestingPage() {
                     )}
                     {isSimulationRunning && (
                       <div className="px-6 pt-6">
+                        {/* The droplet sits in preparing_data for 5 to 8 min while it
+                            boots, and can report stale meanwhile; that's expected. */}
                         <OptimisationProgressPanel
                           progress={simulationProgress}
-                          stale={Boolean(simulationProgress?.stale)}
+                          stale={Boolean(simulationProgress?.stale) && simulationProgress?.phase !== 'preparing_data'}
                           percent={Number(simulationProgress?.percent) || 0}
                           label="Market simulation in progress"
                           onCancel={cancelMarketSimulation}
+                          hint={simulationProgress?.phase === 'preparing_data'
+                            ? 'Starting a cloud server (about 5 to 8 min)…'
+                            : null}
                         />
                       </div>
                     )}
@@ -6425,6 +6439,12 @@ export default function StrategyTestingPage() {
                 onClose={() => setShowCostDialog(false)}
                 onConfirm={handleCostConfirmation}
                 optimizationType={optimizationType}
+              />
+              <OptimizationCostDialog
+                isOpen={showSimulationCostDialog}
+                onClose={() => setShowSimulationCostDialog(false)}
+                onConfirm={handleSimulationCostConfirmation}
+                optimizationType="simulation"
               />
 
               {/* Optimization Job Creation Loading Modal */}
