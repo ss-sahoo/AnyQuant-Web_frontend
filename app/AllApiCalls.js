@@ -257,6 +257,10 @@ export const sendOtp = async (email) => {
  * keyed by timeframe in this same form body, so a row binds `name` to the file
  * sent under `timeframe`. A no-code statement declares its timeframes on its
  * conditions and needs none of this.
+ *
+ * `params` is dev-mode only: `{ name: value }`, which the engine sets as class
+ * attributes of the strategy. Sent as a JSON string, which the multipart
+ * serializer decodes.
  */
 export const runBacktest = async ({
   statement,
@@ -270,6 +274,7 @@ export const runBacktest = async ({
   generate_plot = null,
   trading_type = null,
   data_mapping = null,
+  params = null,
   allow_sample_data = null,
 }) => {
   const formData = new FormData()
@@ -282,6 +287,9 @@ export const runBacktest = async ({
   if (allow_sample_data != null) formData.append("allow_sample_data", String(allow_sample_data))
   if (data_mapping && data_mapping.length > 0) {
     formData.append("data_mapping", JSON.stringify(data_mapping))
+  }
+  if (params && Object.keys(params).length > 0) {
+    formData.append("params", JSON.stringify(params))
   }
   if (start_date && end_date) {
     formData.append("start_date", start_date)
@@ -332,7 +340,8 @@ export const runBacktest = async ({
  * @param {{ strategy_type?: string|null, custom_strategy_id?: number|null, code?: string|null,
  *   start_date?: string|null, end_date?: string|null,
  *   generate_plot?: boolean|null, trading_type?: Object|null,
- *   data_mapping?: Array<{name: string, timeframe: string}>|null, allow_sample_data?: boolean|null }} [options]
+ *   data_mapping?: Array<{name: string, timeframe: string}>|null,
+ *   params?: Object|null, allow_sample_data?: boolean|null }} [options]
  */
 export const runBacktestWithMetaAPI = async (
   strategy,
@@ -349,6 +358,7 @@ export const runBacktestWithMetaAPI = async (
     generate_plot = null,
     trading_type = null,
     data_mapping = null,
+    params = null,
     allow_sample_data = null,
   } = {},
 ) => {
@@ -374,6 +384,10 @@ export const runBacktestWithMetaAPI = async (
   // See runBacktest: dev-mode only, binds data variables to timeframes.
   if (data_mapping && data_mapping.length > 0) {
     formData.append('data_mapping', JSON.stringify(data_mapping));
+  }
+  // See runBacktest: dev-mode only, the strategy's parameter values.
+  if (params && Object.keys(params).length > 0) {
+    formData.append('params', JSON.stringify(params));
   }
   // All-or-nothing: a lone bound is a 400.
   if (start_date && end_date) {

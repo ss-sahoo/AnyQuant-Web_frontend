@@ -4,7 +4,7 @@ import { useState, useEffect, Fragment } from "react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Plus, X, Trash2 } from "lucide-react"
-import { applyEdits, validateRows, type PersistableRow } from "@/lib/optimisation-form-persistence"
+import { applyEdits, validateRows, type AppliedEdits, type PersistableRow } from "@/lib/optimisation-form-persistence"
 import { parseFormNumber } from "@/lib/optimisation-range-validation"
 import { canOptimiseParam, isWholeNumberParam, wholeNumberRange } from "@/lib/optimisation-form-merge"
 import { editStrategy } from "@/app/AllApiCalls"
@@ -67,12 +67,29 @@ interface OptimisationForm {
   Parameters?: Record<string, any>
 }
 
+/** An optimised parameter set copied into the Value column and not saved yet. */
+export interface PendingParameterCopy {
+  /** The stored optimisation_form with the copied values applied. */
+  form: any
+  /** Where the set came from, e.g. "optimisation pass #3" or "WF fold 2 (OOS +4.10%)". */
+  label: string
+  /** Encodings of the rows the copy set. */
+  encodings: string[]
+  /** Why a backtest of the set may not reproduce the result it came from. */
+  note?: string
+}
+
 interface PropertiesTabProps {
   parsedStatement: any
   saveOptimisationInput: (jsonSt: any, ui_data: any) => Promise<any>
+  /** Shown in place of the stored form until Save Properties. Read on mount only. */
+  pendingCopy?: PendingParameterCopy | null
+  onDiscardCopy?: () => void
+  /** After a successful save, with the strategy roots the PATCH sent (none for Developer Mode). */
+  onSaved?: (savedRoots: AppliedEdits) => void
 }
 
-export function PropertiesTab({ parsedStatement, saveOptimisationInput }: PropertiesTabProps) {
+export function PropertiesTab({ parsedStatement, saveOptimisationInput, pendingCopy, onDiscardCopy, onSaved }: PropertiesTabProps) {
   const [parameters, setParameters] = useState<Parameter[]>([])
   const [constraintGroups, setConstraintGroups] = useState<ConstraintGroup[]>([])
   const [equityConstraints, setEquityConstraints] = useState<EquityConstraint[]>([
@@ -95,7 +112,10 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const optimisationFormString = localStorage.getItem("optimisation_form")
+      // A copied parameter set isn't stored until Save Properties.
+      const optimisationFormString = pendingCopy
+        ? JSON.stringify(pendingCopy.form)
+        : localStorage.getItem("optimisation_form")
       if (optimisationFormString) {
         try {
           const optimisationForm: OptimisationForm = JSON.parse(optimisationFormString)
@@ -354,6 +374,9 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
       (typeof window !== "undefined" && localStorage.getItem("is_custom_strategy") === "true")
 
     setIsSaving(true)
+    // The parent's copy of the strategy has to take these too: Run Backtest
+    // sends that copy, not the saved one.
+    let savedRoots: AppliedEdits = {}
     try {
       // Write the edited start/step/stop/value back into the strategy JSON at
       // the path each encoding maps to, then PATCH only the roots that changed.
@@ -363,6 +386,7 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
         const patchBody = applyEdits(parsedStatement, persistRows)
         if (strategyId && Object.keys(patchBody).length > 0) {
           await editStrategy(String(strategyId), patchBody)
+          savedRoots = patchBody
         } else if (!strategyId) {
           console.warn("PropertiesTab: no strategy id available; ranges not persisted to the strategy JSON.")
         }
@@ -491,6 +515,7 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
       }
       localStorage.setItem("optimisation_form", JSON.stringify(formForLocalStorage))
       console.log("Properties saved to localStorage:", formForLocalStorage)
+      onSaved?.(savedRoots)
 
       // Show success message
       const successMessage = document.createElement("div")
@@ -504,6 +529,8 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
       }, 3000)
     } catch (error: any) {
       console.error("Error saving properties:", error)
+      // The strategy PATCH may have gone through before a later step failed.
+      if (Object.keys(savedRoots).length > 0) onSaved?.(savedRoots)
       alert("Failed to save properties: " + (error.message || "Unknown error"))
     } finally {
       setIsSaving(false)
@@ -511,10 +538,32 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
   }
 
   const optimisableParameters = parameters.filter(p => p.optimise)
+  const copiedEncodings = new Set(pendingCopy?.encodings ?? [])
 
   return (
     <div className="bg-[#000000] text-[#ffffff] p-4">
       <div className="w-full max-w-7xl mx-auto">
+        {pendingCopy && (
+          <div className="mb-4 flex items-start justify-between gap-4 rounded-lg border border-[#85e1fe]/40 bg-[#85e1fe]/10 px-4 py-3">
+            <div className="text-sm">
+              <p className="font-semibold text-[#85e1fe]">
+                Copied from {pendingCopy.label}. Click Save Properties to apply.
+              </p>
+              <p className="mt-1 text-xs text-gray-400">
+                The highlighted values are not saved yet; the strategy and its backtests are unchanged until you save.
+              </p>
+              {pendingCopy.note && <p className="mt-1 text-xs text-gray-400">{pendingCopy.note}</p>}
+            </div>
+            {onDiscardCopy && (
+              <Button
+                onClick={onDiscardCopy}
+                className="shrink-0 px-3 py-1 bg-[#2b2e38] text-white rounded-md hover:bg-[#3a3e4a] text-xs"
+              >
+                Discard
+              </Button>
+            )}
+          </div>
+        )}
         {/* Constraint Groups Info */}
         <div className="mb-4">
           <div className="flex justify-between items-center">
@@ -632,7 +681,7 @@ export function PropertiesTab({ parsedStatement, saveOptimisationInput }: Proper
               <tbody>
                 {parameters.map((param) => (
                   <Fragment key={param.id}>
-                  <tr className={`border-b border-[#2b2e38] ${rowErrors[param.encoding] ? "bg-red-950/40" : ""}`}>
+                  <tr className={`border-b border-[#2b2e38] ${rowErrors[param.encoding] ? "bg-red-950/40" : copiedEncodings.has(param.encoding) ? "bg-[#85e1fe]/10" : ""}`}>
                     <td className="px-4 py-2">
                       <Checkbox
                         checked={param.optimise}

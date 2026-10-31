@@ -9,7 +9,13 @@ import {
 } from '@/app/AllApiCalls';
 import { RunCostSummary } from '@/components/run-cost-summary';
 import { WalkForwardInterpretation } from '@/components/walk-forward-interpretation';
+import { CopyToDefaultsButton } from '@/components/copy-to-defaults-button';
+import { extractParameterSet, type ParameterSet } from '@/lib/apply-optimised-parameters';
 import { runCostTimingFromJob, runCostTimingFromLocal } from '@/lib/run-cost-timing';
+
+// Why a backtest of a copied fold set won't match the fold's row.
+const FOLD_COPY_NOTE =
+  "A fold's statistics come from its own window, so a backtest over the full range won't reproduce them.";
 
 // Returns and drawdowns arrive in percent, as the engine's `[%]` statistics do.
 // Small contract sizes give fold returns like -0.0005%, which two decimals hide.
@@ -26,6 +32,10 @@ interface WalkForwardResultsViewProps {
   /** A walk-forward detail, local or cloud (`through_droplet`). */
   result: any;
   section: WalkForwardSection;
+  /** Copies a fold's optimised set into the Properties tab. Strategy Tester only. */
+  onCopyParameters?: (set: ParameterSet, label: string, note: string) => void;
+  /** Why a set can't be copied, or null if it can. */
+  copyBlocker?: (set: ParameterSet) => string | null;
 }
 
 /**
@@ -34,7 +44,7 @@ interface WalkForwardResultsViewProps {
  * page. Keep it mounted across section changes: it loads plots and the cloud
  * job's files once per result.
  */
-export function WalkForwardResultsView({ result, section }: WalkForwardResultsViewProps) {
+export function WalkForwardResultsView({ result, section, onCopyParameters, copyBlocker }: WalkForwardResultsViewProps) {
   const [showStdout, setShowStdout] = useState(false);
   // A cloud run's detail carries its costs but only a whole-minute runtime;
   // the job record has the exact start and end.
@@ -270,6 +280,27 @@ export function WalkForwardResultsView({ result, section }: WalkForwardResultsVi
   const foldResults = result.fold_results || [];
   const plots: Record<string, string> = result.plots_html || {};
 
+  // A fold's optimised set, as fold_results or optimized_parameters_per_fold
+  // carries it, keyed by encoding (no-code) or parameter name (Developer Mode).
+  const foldSet = (fold: any, idx: number): ParameterSet => extractParameterSet(fold?.parameters ?? folds[idx]);
+  const foldLabel = (fold: any, idx: number) => {
+    const oos = fold?.validation_return;
+    const sign = typeof oos === 'number' && oos > 0 ? '+' : '';
+    return `WF fold ${fold?.fold ?? idx + 1} (OOS ${sign}${formatPercent(oos)})`;
+  };
+  const copyButton = (fold: any, idx: number, label?: string) => {
+    const set = foldSet(fold, idx);
+    return (
+      <CopyToDefaultsButton
+        label={label}
+        title={`Copy fold ${fold?.fold ?? idx + 1}'s parameters to the Properties tab's Value column. ${FOLD_COPY_NOTE}`}
+        onCopy={() => onCopyParameters?.(set, foldLabel(fold, idx), FOLD_COPY_NOTE)}
+        disabledReason={copyBlocker?.(set)}
+      />
+    );
+  };
+  const latestFoldIdx = foldResults.length - 1;
+
   return (
     <div>
       <div className="pb-4 flex justify-end gap-2">
@@ -412,6 +443,14 @@ export function WalkForwardResultsView({ result, section }: WalkForwardResultsVi
           {foldResults.length > 0 && (
             <div className="mb-8">
               <div className="mb-4 text-lg font-semibold text-[#85e1fe]">Fold Results</div>
+              {onCopyParameters && (
+                <div className="mb-4 flex flex-wrap items-center gap-4">
+                  {copyButton(foldResults[latestFoldIdx], latestFoldIdx, 'Copy latest fold to defaults')}
+                  <span className="text-xs text-gray-500">
+                    The latest fold is the usual choice to trade forward. {FOLD_COPY_NOTE}
+                  </span>
+                </div>
+              )}
               <div className="overflow-x-auto">
                 <table className="min-w-full text-xs border-separate border-spacing-y-2">
                   <thead>
@@ -465,13 +504,28 @@ export function WalkForwardResultsView({ result, section }: WalkForwardResultsVi
                             .join(', ')}
                         </td>
                         <td className="px-2 py-2 text-right">
-                          <button className="p-1">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                              <circle cx="12" cy="5" r="1.5" fill="#fff"/>
-                              <circle cx="12" cy="12" r="1.5" fill="#fff"/>
-                              <circle cx="12" cy="19" r="1.5" fill="#fff"/>
-                            </svg>
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            {onCopyParameters && (
+                              <>
+                                {/* A fold passes out of sample when its validation window made money. */}
+                                {typeof fold.validation_return === 'number' && (
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${fold.validation_return > 0 ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400'}`}
+                                  >
+                                    OOS {fold.validation_return > 0 ? 'pass' : 'fail'}
+                                  </span>
+                                )}
+                                {copyButton(fold, idx)}
+                              </>
+                            )}
+                            <button className="p-1">
+                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="12" cy="5" r="1.5" fill="#fff"/>
+                                <circle cx="12" cy="12" r="1.5" fill="#fff"/>
+                                <circle cx="12" cy="19" r="1.5" fill="#fff"/>
+                              </svg>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}

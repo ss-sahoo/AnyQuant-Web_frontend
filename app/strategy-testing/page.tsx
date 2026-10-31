@@ -71,7 +71,17 @@ import { detectStrategyType, resolveCustomStrategyId } from "@/lib/builder-mode"
 import { StrategyTab } from "@/components/strategy-tab"
 import { BacktestTab } from "@/components/backtest-tab"
 import { OptimisationTab } from "@/components/optimisation-tab"
-import { PropertiesTab } from "@/components/properties-tab"
+import { PropertiesTab, type PendingParameterCopy } from "@/components/properties-tab"
+import { CopyToDefaultsButton } from "@/components/copy-to-defaults-button"
+import {
+  STANDARD_STAT_COLUMNS,
+  applyParameterSetToForm,
+  devModeBacktestParams,
+  extractParameterSet,
+  isResultForAnotherStrategy,
+  type ParameterSet,
+} from "@/lib/apply-optimised-parameters"
+import type { AppliedEdits } from "@/lib/optimisation-form-persistence"
 import {
   collectCustomComponentRows,
   buildCustomStrategyRows,
@@ -155,6 +165,16 @@ const readActiveOptimisation = (): ActiveOptimisationRecord | null => {
   }
 }
 
+/** The Properties tab's saved rows, or null before any strategy loaded a form. */
+const readStoredOptimisationForm = (): any => {
+  try {
+    const raw = localStorage.getItem("optimisation_form")
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
 const forgetActiveOptimisation = () => {
   try {
     localStorage.removeItem(ACTIVE_OPTIMISATION_KEY)
@@ -162,18 +182,6 @@ const forgetActiveOptimisation = () => {
     /* nothing to clean up */
   }
 }
-
-// Backtest-stat columns every optimisation row carries. Anything outside this
-// set is a strategy parameter the run was optimising over.
-const STANDARD_STAT_COLUMNS = new Set([
-  'Return [%]', 'Equity Final [$]', '# Trades', 'Win Rate [%]', 'Profit Factor',
-  'Max. Drawdown [%]', 'Sharpe Ratio', 'Sortino Ratio', 'Calmar Ratio',
-  'Return (Ann.) [%]', 'Volatility (Ann.) [%]', 'Start', 'End', 'Duration', 'SQN',
-  'Exposure Time [%]', 'Equity Peak [$]', 'Avg. Trade [%]', 'Best Trade [%]',
-  'Worst Trade [%]', 'Avg. Drawdown [%]', 'Avg. Drawdown Duration',
-  'Max. Drawdown Duration', 'Avg. Trade Duration', 'Max. Trade Duration',
-  'Buy & Hold Return [%]', 'Expectancy [%]', 'Unnamed: 0', 'generation',
-])
 
 // Engine statistics POST /api/custom-strategies/optimise/ takes by name as
 // `maximise`. Any other label goes through the route's older keys.
@@ -185,6 +193,14 @@ const DEV_MODE_OPTIMISATION_OBJECTIVES = [
 
 // The optimiser's algorithm names, exactly as the backend spells them.
 const OPTIMISATION_ALGORITHMS = ['Genetic Algorithm', 'Grid Search', 'Baysian Optimisation']
+
+// Why a backtest of a copied optimisation set can differ from its row. The
+// optimiser's backtests close each trade before the next (exclusive_orders);
+// a plain backtest doesn't.
+const OPTIMISATION_COPY_NOTE =
+  'The optimiser runs one trade at a time, so a strategy that allows several open trades ' +
+  '(MTOOTAAT, max trades above 1) can backtest differently from its row, as can a backtest ' +
+  'over other dates or data.'
 
 // Reusable "Coming Soon" placeholder for tabs that don't yet have content.
 function ComingSoonPanel({ title, subtitle }: { title: string; subtitle?: string }) {
@@ -451,6 +467,12 @@ export default function StrategyTestingPage() {
   // Drives which backtest settings the tab offers: the Developer-Mode engine
   // honours a different subset from the visual pipeline.
   const isDevModeStrategy = detectStrategyType(parsedStatement) === "dev_mode"
+  // An optimised parameter set copied into the Properties tab. It stays here,
+  // not in the stored form, until Save Properties: a Developer-Mode strategy's
+  // stored form is what its backtests read.
+  const [pendingParameterCopy, setPendingParameterCopy] = useState<PendingParameterCopy | null>(null)
+  // PropertiesTab reads its rows on mount only; bumping this remounts it.
+  const [propertiesFormVersion, setPropertiesFormVersion] = useState(0)
 
   // Add a state for tracking if the chart is expanded
   const [isChartExpanded, setIsChartExpanded] = useState(false)
@@ -873,6 +895,7 @@ export default function StrategyTestingPage() {
       setPlotHtml(null)
       setOptimisationResult(null)
       setWalkForwardResult(null)
+      setPendingParameterCopy(null)
       setSimulationResult(null)
       stopSimulationPolling()
       setShowOptimisationResults(false)
@@ -1994,6 +2017,12 @@ export default function StrategyTestingPage() {
       // Execution settings the Developer-Mode engine honours — see devModeTradingType.
       const devTradingType = strategyType === "dev_mode" ? devModeTradingType() : null
 
+      // The Properties tab's Value column. A code strategy has no statement to
+      // carry its parameter values, so they go as `params`, as saved there.
+      const devParams = strategyType === "dev_mode"
+        ? devModeBacktestParams(readStoredOptimisationForm(), customStrategyIdForRun)
+        : {}
+
       let startData: any
       if (useMetaAPI) {
         const symbol = metaAPIConfig?.symbol || "XAUUSD"
@@ -2016,6 +2045,7 @@ export default function StrategyTestingPage() {
           generate_plot: true,
           trading_type: devTradingType,
           data_mapping: devDataMapping.length > 0 ? devDataMapping : null,
+          params: devParams,
         })
       } else {
         startData = await (runBacktest as any)({
@@ -2031,6 +2061,7 @@ export default function StrategyTestingPage() {
           generate_plot: true,
           trading_type: devTradingType,
           data_mapping: devDataMapping.length > 0 ? devDataMapping : null,
+          params: devParams,
         })
       }
 
@@ -4629,6 +4660,85 @@ export default function StrategyTestingPage() {
     }
   }
 
+  // The loaded strategy's id in the sequence its results name it by.
+  const loadedStrategyId = isDevModeStrategy
+    ? (resolveCustomStrategyId(parsedStatement) ?? strategy_id)
+    : (parsedStatement?.id ?? strategy_id)
+
+  /**
+   * Why `set` can't be copied into the Properties tab, or null if it can.
+   * `owner` is the result the set came from.
+   */
+  const parameterCopyBlocker = (set: ParameterSet, owner: any, form = readStoredOptimisationForm()): string | null => {
+    if (!parsedStatement) return "Load a strategy first"
+    if (isResultForAnotherStrategy(owner, { id: loadedStrategyId, devMode: isDevModeStrategy })) {
+      return "These results belong to a different strategy than the one loaded"
+    }
+    if (!form) return "The Properties tab has no parameters for this strategy yet"
+    const { applied } = applyParameterSetToForm(form, set, { devMode: isDevModeStrategy, statement: parsedStatement })
+    return applied.length === 0 ? "None of these parameters matches a row in the Properties tab" : null
+  }
+
+  // Fills the Properties tab's Value column from `set` and opens the tab.
+  // Nothing is saved: the user reviews the values, then Save Properties.
+  const copyParameterSetToProperties = (set: ParameterSet, label: string, note: string) => {
+    const form = readStoredOptimisationForm()
+    if (!form) {
+      showToast("The Properties tab has no parameters for this strategy yet", 'error')
+      return
+    }
+    const { form: copied, applied, skipped, outOfRange } = applyParameterSetToForm(form, set, {
+      devMode: isDevModeStrategy,
+      statement: parsedStatement,
+    })
+    if (applied.length === 0) {
+      showToast("None of these parameters matches a row in the Properties tab", 'error')
+      return
+    }
+    setPendingParameterCopy({ form: copied, label, encodings: applied, note })
+    setPropertiesFormVersion((v) => v + 1)
+    handleTabChange("properties")
+    const lines = [
+      `${applied.length} parameter${applied.length === 1 ? '' : 's'} copied, ${skipped.length} skipped`,
+      ...skipped.map((s) => `Skipped ${s.key}: ${s.reason}`),
+      ...outOfRange.map((s) => `${s.key}: ${s.reason}. Widen the range or untick Optimise before saving.`),
+    ]
+    showToast(lines.join('\n'), skipped.length || outOfRange.length ? 'warning' : 'success')
+  }
+
+  // Save Properties PATCHed these roots of the strategy. Run Backtest sends
+  // parsedStatement, so it takes them too, as the other save paths do.
+  const handlePropertiesSaved = (savedRoots: AppliedEdits) => {
+    setPendingParameterCopy(null)
+    if (Object.keys(savedRoots).length === 0) return
+    const updated = { ...parsedStatement, ...savedRoots }
+    setParsedStatement(updated)
+    localStorage.setItem("savedStrategy", JSON.stringify(updated))
+  }
+
+  /**
+   * The winning set of an optimisation. A no-code run's rows are its population
+   * in generation order, not ranked (backend task2.py), so the first row is not
+   * the best; the run names its winner in optimised_parameters, which a history
+   * detail spells optimized_parameters. Failing that, Developer-Mode rows come
+   * ranked best first, and otherwise the backend's own pick is the row with the
+   * highest objective.
+   */
+  const bestOptimisationSet = (result: any): ParameterSet => {
+    const named = extractParameterSet(result?.optimised_parameters ?? result?.optimized_parameters)
+    if (Object.keys(named).length > 0) return named
+    const rows: any[] = result?.rows ?? []
+    if (rows.length === 0 || isDevModeStrategy) return extractParameterSet(rows[0])
+    const objective = typeof result?.objective === 'string' && rows.some((row) => typeof row?.[result.objective] === 'number')
+      ? result.objective
+      : 'Equity Final [$]'
+    let best = rows[0]
+    for (const row of rows) {
+      if (typeof row?.[objective] === 'number' && !(best?.[objective] >= row[objective])) best = row
+    }
+    return extractParameterSet(best)
+  }
+
   const renderResultsTable = (rows: any[]) => {
     if (!rows || rows.length === 0) {
       return (
@@ -4655,8 +4765,21 @@ export default function StrategyTestingPage() {
     const endIdx = Math.min(startIdx + OPTIMISATION_ROWS_PAGE_SIZE, totalRows)
     const pageRows = rows.slice(startIdx, endIdx)
 
+    // Read once for every row's copy button.
+    const copyForm = readStoredOptimisationForm()
+    const bestSet = bestOptimisationSet(optimisationResult)
+
     return (
       <>
+      <div className="flex flex-wrap items-center gap-4 mb-2">
+        <CopyToDefaultsButton
+          label="Copy best set to defaults"
+          title="Copy the winning parameter set to the Properties tab's Value column"
+          onCopy={() => copyParameterSetToProperties(bestSet, 'the best set of this optimisation', OPTIMISATION_COPY_NOTE)}
+          disabledReason={parameterCopyBlocker(bestSet, optimisationResult, copyForm)}
+        />
+        <span className="text-[10px] text-gray-500 max-w-3xl">{OPTIMISATION_COPY_NOTE}</span>
+      </div>
       <table className="min-w-full text-[10px] border-separate border-spacing-y-2">
         <thead>
           <tr className="bg-[#000] text-gray-500 font-black uppercase tracking-widest">
@@ -4725,9 +4848,22 @@ export default function StrategyTestingPage() {
                     .join(', ')}
               </td>
               <td className="px-4 py-3 text-right">
-                <button className="text-gray-500 hover:text-white transition-colors">
-                  <Maximize2 className="w-3 h-3" />
-                </button>
+                <div className="flex items-center justify-end gap-2">
+                  {(() => {
+                    const pass = startIdx + idx + 1
+                    const set = extractParameterSet(row)
+                    return (
+                      <CopyToDefaultsButton
+                        title={`Copy pass #${pass} to the Properties tab's Value column`}
+                        onCopy={() => copyParameterSetToProperties(set, `optimisation pass #${pass}`, OPTIMISATION_COPY_NOTE)}
+                        disabledReason={parameterCopyBlocker(set, optimisationResult, copyForm)}
+                      />
+                    )
+                  })()}
+                  <button className="text-gray-500 hover:text-white transition-colors">
+                    <Maximize2 className="w-3 h-3" />
+                  </button>
+                </div>
               </td>
             </tr>
           ))}
@@ -5092,7 +5228,12 @@ export default function StrategyTestingPage() {
                                   Current Results: Walk Forward
                                 </h3>
                               )}
-                              <WalkForwardResultsView result={walkForwardResult} section={section ?? 'results'} />
+                              <WalkForwardResultsView
+                                result={walkForwardResult}
+                                section={section ?? 'results'}
+                                onCopyParameters={copyParameterSetToProperties}
+                                copyBlocker={(set) => parameterCopyBlocker(set, walkForwardResult)}
+                              />
                             </div>
                           </div>
                         );
@@ -5175,9 +5316,23 @@ export default function StrategyTestingPage() {
                           {optimisationTab === 'summary' && (() => {
                             const preview = selectedOptimisationRow || previewRows[0] || null;
                             if (preview) {
+                              const pass = previewRows.indexOf(preview) + 1;
+                              const previewSet = extractParameterSet(preview);
                               return (
                                 <div className="space-y-12">
                                   <h3 className="text-[10px] font-black text-[#85e1fe] text-center uppercase tracking-[0.8em]">Detailed Report</h3>
+                                  <div className="flex justify-center">
+                                    <CopyToDefaultsButton
+                                      label={pass > 0 ? `Copy pass #${pass} to defaults` : 'Copy to defaults'}
+                                      title={OPTIMISATION_COPY_NOTE}
+                                      onCopy={() => copyParameterSetToProperties(
+                                        previewSet,
+                                        pass > 0 ? `optimisation pass #${pass}` : 'the selected optimisation pass',
+                                        OPTIMISATION_COPY_NOTE,
+                                      )}
+                                      disabledReason={parameterCopyBlocker(previewSet, optimisationResult)}
+                                    />
+                                  </div>
                                   <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
                                     <div className="space-y-6">
                                       <h4 className="text-[9px] font-black text-gray-500 uppercase tracking-widest border-b border-gray-900 pb-2">Execution</h4>
@@ -5939,7 +6094,17 @@ export default function StrategyTestingPage() {
                 )}
 
                 {activeTab === "properties" && (
-                  <PropertiesTab parsedStatement={parsedStatement} saveOptimisationInput={saveOptimisationInput} />
+                  <PropertiesTab
+                    key={propertiesFormVersion}
+                    parsedStatement={parsedStatement}
+                    saveOptimisationInput={saveOptimisationInput}
+                    pendingCopy={pendingParameterCopy}
+                    onDiscardCopy={() => {
+                      setPendingParameterCopy(null)
+                      setPropertiesFormVersion((v) => v + 1)
+                    }}
+                    onSaved={handlePropertiesSaved}
+                  />
                 )}
               </div>
 
