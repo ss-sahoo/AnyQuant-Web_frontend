@@ -5,10 +5,11 @@ import { DraggableModal } from "./draggable-modal"
 interface PriceSettingsModalProps {
   onClose: () => void
   onSave: (priceType: string) => void
+  initialValue?: string
 }
 
-export function PriceSettingsModal({ onClose, onSave }: PriceSettingsModalProps) {
-  const [selectedPrice, setSelectedPrice] = useState("")
+export function PriceSettingsModal({ onClose, onSave, initialValue }: PriceSettingsModalProps) {
+  const [selectedPrice, setSelectedPrice] = useState(initialValue ?? "")
 
   const handleSave = () => {
     if (selectedPrice) {

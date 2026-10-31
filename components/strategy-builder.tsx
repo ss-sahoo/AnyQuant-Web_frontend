@@ -395,6 +395,13 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
   }, [initialMode, initialCustomStrategyId, strategyId, isNewStrategy])
 
   const [showPriceSettingsModal, setShowPriceSettingsModal] = useState(false)
+  // Set only when an existing price chip is clicked: the operand to edit in
+  // place. Null means the modal is inserting a new price (last-condition flow).
+  const [priceModalTarget, setPriceModalTarget] = useState<{
+    statementIndex: number
+    conditionIndex: number
+    inputType: "inp1" | "inp2"
+  } | null>(null)
   const [showAtCandleModal, setShowAtCandleModal] = useState(false)
   const [selectedCandleNumber, setSelectedCandleNumber] = useState<number | null>(null)
 
@@ -1577,6 +1584,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           if (condition.inp1.input === "volume") {
             setShowVolumeModal(true)
           } else if (["open", "close", "high", "low"].includes(condition.inp1.input?.toLowerCase() || "")) {
+            setPriceModalTarget({ statementIndex, conditionIndex, inputType: "inp1" })
             setShowPriceSettingsModal(true)
           }
         }
@@ -1592,6 +1600,7 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
           if (condition.inp2.input === "volume") {
             setShowVolumeModal(true)
           } else if (typeof condition.inp2.input === "string" && ["open", "close", "high", "low"].includes(condition.inp2.input.toLowerCase())) {
+            setPriceModalTarget({ statementIndex, conditionIndex, inputType: "inp2" })
             setShowPriceSettingsModal(true)
           }
         }
@@ -4537,6 +4546,24 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
 
   const handlePriceSelection = (priceType: string) => {
     const newStatements = [...statements]
+
+    // Editing an existing price chip: change only its level, in place, keeping
+    // its timeframe and At Candle index. Routing an edit through the insert
+    // flow below wrote a new [Timeframe][Price] onto the last condition (ANY-369).
+    if (priceModalTarget) {
+      const condition = newStatements[priceModalTarget.statementIndex]?.strategy[priceModalTarget.conditionIndex]
+      const level = priceType.toLowerCase()
+      if (priceModalTarget.inputType === "inp1" && condition?.inp1) {
+        condition.inp1 = { ...condition.inp1, input: level, name: level }
+        setStatements(newStatements)
+      } else if (priceModalTarget.inputType === "inp2" && condition?.inp2 && typeof condition.inp2 === "object") {
+        condition.inp2 = { ...condition.inp2, input: level, name: level }
+        setStatements(newStatements)
+      }
+      setPriceModalTarget(null)
+      return
+    }
+
     const currentStatement = newStatements[activeStatementIndex]
     const lastCondition = currentStatement.strategy[currentStatement.strategy.length - 1]
 
@@ -9426,7 +9453,17 @@ export function StrategyBuilder({ initialName, initialInstrument, strategyData, 
         {/* Price Settings Modal */}
         {showPriceSettingsModal && (
           <PriceSettingsModal
-            onClose={() => setShowPriceSettingsModal(false)}
+            initialValue={
+              priceModalTarget
+                ? (statements[priceModalTarget.statementIndex]?.strategy[priceModalTarget.conditionIndex]?.[
+                    priceModalTarget.inputType
+                  ] as any)?.input?.toLowerCase()
+                : undefined
+            }
+            onClose={() => {
+              setShowPriceSettingsModal(false)
+              setPriceModalTarget(null)
+            }}
             onSave={(priceType: string) => {
               setShowPriceSettingsModal(false)
               handlePriceSelection(priceType)
