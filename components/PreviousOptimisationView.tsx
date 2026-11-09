@@ -165,7 +165,6 @@ export const PreviousOptimisationView: React.FC<PreviousOptimisationViewProps> =
                       <th className="px-2 py-2 text-left"># Trades</th>
                       <th className="px-2 py-2 text-left">Generation</th>
                       <th className="px-2 py-2 text-left">Inputs</th>
-                      <th className="px-2 py-2 text-left"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -197,15 +196,6 @@ export const PreviousOptimisationView: React.FC<PreviousOptimisationViewProps> =
                             .filter(([k]) => k.startsWith('param_'))
                             .map(([k, v]) => `${k}: ${v}`)
                             .join(', ')}
-                        </td>
-                        <td className="px-2 py-2 text-right">
-                          <button className="p-1">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                              <circle cx="12" cy="5" r="1.5" fill="#fff"/>
-                              <circle cx="12" cy="12" r="1.5" fill="#fff"/>
-                              <circle cx="12" cy="19" r="1.5" fill="#fff"/>
-                            </svg>
-                          </button>
                         </td>
                       </tr>
                     ))}
