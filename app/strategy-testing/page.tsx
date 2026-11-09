@@ -4815,7 +4815,7 @@ export default function StrategyTestingPage() {
             <th className="px-4 py-3 text-left">Exposure [%]</th>
             <th className="px-4 py-3 text-left">Generation</th>
             <th className="px-4 py-3 text-left">Inputs</th>
-            <th className="px-4 py-3 text-left"></th>
+            <th className="sticky right-0 z-10 bg-[#000] border-l border-gray-800 px-4 py-3 text-left">Copy</th>
           </tr>
         </thead>
         <tbody>
@@ -4856,13 +4856,15 @@ export default function StrategyTestingPage() {
                     .map(key => `${key}=${formatOptimizationValue(row[key], key)}`)
                     .join(', ')}
               </td>
-              <td className="px-4 py-3 text-right">
+              {/* Pinned, so the copy button shows without scrolling the wide table. */}
+              <td className="sticky right-0 z-10 bg-inherit border-l border-gray-800 px-4 py-3 text-right">
                 <div className="flex items-center justify-end gap-2">
                   {(() => {
                     const pass = startIdx + idx + 1
                     const set = extractParameterSet(row)
                     return (
                       <CopyToDefaultsButton
+                        label="Copy"
                         title={`Copy pass #${pass} to the Properties tab's Value column`}
                         onCopy={() => copyParameterSetToProperties(set, `optimisation pass #${pass}`, OPTIMISATION_COPY_NOTE)}
                         disabledReason={parameterCopyBlocker(set, optimisationResult, copyForm)}

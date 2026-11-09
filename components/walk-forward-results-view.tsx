@@ -467,7 +467,9 @@ export function WalkForwardResultsView({ result, section, onCopyParameters, copy
                       <th className="px-2 py-2 text-left">Training Trades</th>
                       <th className="px-2 py-2 text-left">Validation Trades</th>
                       <th className="px-2 py-2 text-left">Parameters</th>
-                      <th className="px-2 py-2 text-left"></th>
+                      <th className={`px-2 py-2 text-left ${onCopyParameters ? 'sticky right-0 z-10 bg-[#000] border-l border-gray-800' : ''}`}>
+                        {onCopyParameters && 'Copy'}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -503,7 +505,8 @@ export function WalkForwardResultsView({ result, section, onCopyParameters, copy
                             .map(([k, v]) => `${k}: ${v}`)
                             .join(', ')}
                         </td>
-                        <td className="px-2 py-2 text-right">
+                        {/* Pinned, so the copy button shows without scrolling the wide table. */}
+                        <td className={`px-2 py-2 text-right ${onCopyParameters ? 'sticky right-0 z-10 bg-inherit border-l border-gray-800' : ''}`}>
                           <div className="flex items-center justify-end gap-2">
                             {onCopyParameters && (
                               <>
@@ -515,7 +518,7 @@ export function WalkForwardResultsView({ result, section, onCopyParameters, copy
                                     OOS {fold.validation_return > 0 ? 'pass' : 'fail'}
                                   </span>
                                 )}
-                                {copyButton(fold, idx)}
+                                {copyButton(fold, idx, 'Copy')}
                               </>
                             )}
                             <button className="p-1">
