@@ -54,6 +54,8 @@ import {
   getSimulationStatus,
   cancelSimulation,
   getSimulationResult,
+  // Market simulation V2 (robust optimisation)
+  runRobustOptimisation,
 } from "../AllApiCalls" // Import new functions
 import { X, ArrowLeft, Layout, Maximize2 } from "lucide-react"
 import AuthGuard from "@/hooks/useAuthGuard"
@@ -74,6 +76,7 @@ import { OptimisationTab } from "@/components/optimisation-tab"
 import { PropertiesTab, type PendingParameterCopy } from "@/components/properties-tab"
 import { CopyToDefaultsButton } from "@/components/copy-to-defaults-button"
 import {
+  ROBUST_SCORE_COLUMNS,
   STANDARD_STAT_COLUMNS,
   applyParameterSetToForm,
   devModeBacktestParams,
@@ -116,7 +119,8 @@ import { MetaAPIDebugModal } from "@/components/metaapi-debug-modal"
 // Custom strategy backtest results
 import { CustomStrategyBacktestResults } from "@/components/custom-strategy-backtest-results"
 import { RunCostSummary } from "@/components/run-cost-summary"
-import { SimulationResultsView } from "@/components/simulation-results-view"
+import { RobustOptimisationView, SimulationResultsView } from "@/components/simulation-results-view"
+import { ROBUST_BUDGET_MAX, ROBUST_BUDGET_MIN, type RobustOptimisationSettings } from "@/lib/robust-optimisation"
 import { SimulationHistoryList } from "@/components/simulation-history-list"
 import { WalkForwardResultsView } from "@/components/walk-forward-results-view"
 import { runCostTimingFromJob, runCostTimingFromLocal } from "@/lib/run-cost-timing"
@@ -133,7 +137,8 @@ const ACTIVE_OPTIMISATION_KEY = 'anyquant_active_optimisation'
 
 type ActiveOptimisationRecord = {
   runId: string
-  kind: 'regular' | 'walk_forward'
+  // 'robust': a Market Simulation V2 cloud job, followed by its run_id.
+  kind: 'regular' | 'walk_forward' | 'robust'
   strategyId: string | null
   startedAt: number
 }
@@ -967,6 +972,8 @@ export default function StrategyTestingPage() {
     showToast("Reconnected to an optimisation already in progress", 'success')
     if (record.kind === 'walk_forward') {
       resumeWalkForwardRun(record.runId)
+    } else if (record.kind === 'robust') {
+      followRobustOptimisationRun(record.runId, { resumed: true })
     } else {
       resumeOptimisationRun(record.runId)
     }
@@ -3122,6 +3129,19 @@ export default function StrategyTestingPage() {
     pollSimulation(runId)
   }
 
+  // A dev-mode simulation's `statement`: settings overrides, layered on the
+  // saved settings as a dev-mode backtest does. The code itself always comes
+  // from the saved strategy. Shared by V1 and V2.
+  const devModeSimulationOverrides = () => {
+    const overrides: Record<string, any> = {}
+    for (const key of [...DEV_MODE_SAVED_SETTINGS, "side"]) {
+      if (parsedStatement?.[key] != null) overrides[key] = parsedStatement[key]
+    }
+    const mapping = normalizeDataMapping(parsedStatement?.data_mapping)
+    if (mapping.length > 0) overrides.data_mapping = mapping
+    return overrides
+  }
+
   const handleRunMarketSimulation = () => {
     if (!parsedStatement) {
       showToast("Strategy statement is missing or not parsed!", 'error')
@@ -3154,15 +3174,7 @@ export default function StrategyTestingPage() {
       const params: any = { strategy_type: simulationStrategyType }
       if (isDevModeStrategy) {
         params.custom_strategy_id = simulationStrategyId
-        // Settings overrides, layered on the saved settings as a dev-mode
-        // backtest does. The code itself always comes from the saved strategy.
-        const overrides: Record<string, any> = {}
-        for (const key of [...DEV_MODE_SAVED_SETTINGS, "side"]) {
-          if (parsedStatement[key] != null) overrides[key] = parsedStatement[key]
-        }
-        const mapping = normalizeDataMapping(parsedStatement?.data_mapping)
-        if (mapping.length > 0) overrides.data_mapping = mapping
-        params.statement = overrides
+        params.statement = devModeSimulationOverrides()
       } else {
         params.strategy_statement_id = simulationStrategyId
         // Carries unsaved edits; overrides the saved statement.
@@ -3206,6 +3218,215 @@ export default function StrategyTestingPage() {
         .catch((e: any) => console.error("❌ cancel-simulation failed:", e))
     }
     showToast("Market simulation cancelled", 'warning')
+  }
+
+  // -------------------------------------------------------------------------
+  // Market Simulation V2 (robust optimisation). Always a cloud job. It runs as
+  // an optimisation: job-status polling through pollJobStatus, cancel through
+  // cancelOptimisation, the same run refs, progress panel and resume record,
+  // and the finished job opens like a cloud run from history.
+  // -------------------------------------------------------------------------
+
+  // The settings the open cost dialog will start the run with.
+  const [robustSettings, setRobustSettings] = useState<RobustOptimisationSettings | null>(null)
+  const [showRobustCostDialog, setShowRobustCostDialog] = useState(false)
+  // isLoading2 is shared with the other optimisations; this says the run is V2.
+  const [isRobustRunActive, setIsRobustRunActive] = useState(false)
+
+  /** Why V2 can't run now, or null. Mirrors the backend's 400s, so nothing billed starts. */
+  const robustOptimisationBlocker = (settings: RobustOptimisationSettings): string | null => {
+    if (!parsedStatement) return "Strategy statement is missing or not parsed!"
+    if (isOptimisationRunActive || isLoading3) return "Another optimisation is running. Wait for it or cancel it first."
+    if (parsedStatement.entry_at === "tick" || parsedStatement.exit_at === "tick") {
+      return "Robust optimisation needs bar-close execution: synthetic markets have no ticks"
+    }
+    if (detectStrategyType(parsedStatement) === "hybrid") {
+      return "This strategy uses Developer-Mode components, which market simulation doesn't support yet"
+    }
+    if (!Number.isFinite(simulationStrategyId) || simulationStrategyId <= 0) {
+      return "Save the strategy before running a robust optimisation"
+    }
+    if (isDevModeStrategy) {
+      const devStatus = parsedStatement?.status
+      if (typeof devStatus === "string" && !["compiled", "active"].includes(devStatus)) {
+        return `Compile and save the strategy in Developer Mode first (status: ${devStatus})`
+      }
+      // Synthetic paths are made on the primary series (the row named `data`,
+      // else the first) and can't be rebuilt finer.
+      const mapping = normalizeDataMapping(parsedStatement?.data_mapping)
+      const primary = mapping.find((row) => row.name === "data") ?? mapping[0]
+      const primaryMinutes = primary ? timeframeToMinutes(primary.timeframe) : null
+      const finer = primaryMinutes == null ? undefined : mapping.find((row) => {
+        const minutes = timeframeToMinutes(row.timeframe)
+        return minutes != null && minutes < primaryMinutes
+      })
+      if (primary && finer) {
+        return `Series '${finer.name}' is on ${finer.timeframe}, finer than the primary ${primary.timeframe} series: synthetic markets can't be rebuilt at a finer timeframe`
+      }
+    }
+    const form = readStoredOptimisationForm()
+    const rows: any[] = Array.isArray(form?.parameters) ? form.parameters : []
+    const searchRows = isDevModeStrategy
+      ? rows.filter((p: any) => typeof p?.encoding === "string" && p.encoding.startsWith(`custom:strategy:${simulationStrategyId}:`))
+      : rows
+    if (!searchRows.some((p: any) => p?.optimise)) {
+      return "Mark at least one parameter as Optimise in the Properties tab"
+    }
+    if (!Number.isInteger(settings.time_budget_seconds)
+      || settings.time_budget_seconds < ROBUST_BUDGET_MIN || settings.time_budget_seconds > ROBUST_BUDGET_MAX) {
+      return `Time budget must be between ${ROBUST_BUDGET_MIN} and ${ROBUST_BUDGET_MAX.toLocaleString()} seconds`
+    }
+    if (!useMetaAPI && requiredTimeframes.length > uploadedFiles.length) {
+      return "Not enough files uploaded for the required timeframes"
+    }
+    return null
+  }
+
+  const handleRunRobustOptimisation = (settings: RobustOptimisationSettings) => {
+    const blocker = robustOptimisationBlocker(settings)
+    if (blocker) {
+      showToast(blocker, 'error')
+      return
+    }
+    // Incomplete ranges toast their own message.
+    const form = readStoredOptimisationForm()
+    const rows: any[] = Array.isArray(form?.parameters) ? form.parameters : []
+    const checkedRows = isDevModeStrategy
+      ? rows.filter((p: any) => typeof p?.encoding === "string" && p.encoding.startsWith(`custom:strategy:${simulationStrategyId}:`))
+      : undefined
+    if (!hasCompleteOptimisationRanges(checkedRows)) return
+    setRobustSettings(settings)
+    setShowRobustCostDialog(true)
+  }
+
+  /** Show a finished cloud optimisation job in the Results tab, as history opens one. */
+  const showCloudOptimisationJob = (job: any) => {
+    setOptimisationResult({
+      ...normalizeOptimisationResult(job.results),
+      job_id: job.id,
+      runTiming: runCostTimingFromJob(job),
+    })
+    setShowOptimisationResults(true)
+    setOptimisationTab('results')
+  }
+
+  /**
+   * Follow a V2 run to its end through job-status, then open its job. Used on
+   * start and to re-attach after navigation (`resumed`).
+   */
+  const followRobustOptimisationRun = async (runId: string, { resumed = false } = {}) => {
+    setIsLoading2(true)
+    setIsRobustRunActive(true)
+    setActiveTab("optimisation")
+    setOptimisationTab('results')
+    optimisationRunIdRef.current = runId
+    if (!resumed) rememberActiveOptimisation({ runId, kind: 'robust', strategyId: strategy_id })
+
+    // The cloud results page polls a droplet job every 5s; so does this.
+    const { promise, stop } = (pollJobStatus as any)(runId, {
+      intervalMs: 5000,
+      onStatus: captureOptimisationProgress,
+    })
+    optimisationPollerRef.current = stop
+
+    try {
+      const data = await promise
+      optimisationPollerRef.current = null
+      forgetActiveOptimisation()
+      // The job record carries the cost and timing the poll leaves out.
+      let job: any = null
+      if (data?.job_id != null) {
+        try {
+          job = await getOptimizationJob(data.job_id)
+        } catch (err) {
+          console.warn("Could not load the robust optimisation job record:", err)
+        }
+      }
+      showCloudOptimisationJob(job?.results ? job : { ...data, id: data?.job_id ?? null })
+      const runWarnings = (job?.results ?? data?.results)?.warnings
+      if (Array.isArray(runWarnings) && runWarnings.length > 0) {
+        showToast(`Robust optimisation completed with ${runWarnings.length} warning${runWarnings.length === 1 ? '' : 's'}: see the Results tab`, 'warning')
+      } else {
+        showToast(resumed ? "Robust optimisation finished while you were away" : "Robust optimisation completed!", 'success')
+      }
+    } catch (e: any) {
+      optimisationPollerRef.current = null
+      // A user cancel already cleared the record; an unmount keeps it to resume.
+      if (e?.message === 'cancelled') return
+      forgetActiveOptimisation()
+      console.error("Robust optimisation failed:", e)
+      showToast(
+        e?.message === 'Not Found'
+          ? "That robust optimisation is no longer being tracked by the server"
+          : `Robust optimisation ended: ${e?.message || 'unknown error'}`,
+        'error',
+      )
+    } finally {
+      setIsLoading2(false)
+      setIsRobustRunActive(false)
+      if (optimisationRunIdRef.current === runId) optimisationRunIdRef.current = null
+    }
+  }
+
+  const handleRobustCostConfirmation = async () => {
+    setShowRobustCostDialog(false)
+    const settings = robustSettings
+    if (!settings) return
+    // Re-checked: state may have changed while the dialog was open.
+    const blocker = robustOptimisationBlocker(settings)
+    if (blocker) {
+      showToast(blocker, 'error')
+      return
+    }
+
+    try {
+      const hyperParameters = {
+        population_size: Number(populationSize),
+        generations: Number(generations),
+        mutation_rate: Number(mutationRate),
+        tournament_size: Number(tournamentSize),
+      }
+      const storedForm = readStoredOptimisationForm()
+      const params: any = {
+        strategy_type: simulationStrategyType,
+        ...settings,
+        // The search, as a GA cloud job sends it.
+        optimisation_form: storedForm ? optimisationFormPayload(storedForm, isDevModeStrategy, hyperParameters) : null,
+      }
+      if (isDevModeStrategy) {
+        params.custom_strategy_id = simulationStrategyId
+        params.statement = devModeSimulationOverrides()
+        params.params = devModeBacktestParams(storedForm, resolveCustomStrategyId(parsedStatement) ?? simulationStrategyId)
+      } else {
+        // No statement: the droplet reads the saved strategy.
+        params.strategy_statement_id = simulationStrategyId
+      }
+
+      if (useMetaAPI) {
+        const token = process.env.NEXT_PUBLIC_METAAPI_ACCESS_TOKEN || ""
+        const accountId = process.env.NEXT_PUBLIC_METAAPI_ACCOUNT_ID || ""
+        if (!token || !accountId) {
+          throw new Error("MetaAPI credentials not configured. Please check environment variables.")
+        }
+        params.metaapi_token = token
+        params.metaapi_account_id = accountId
+        params.symbol = metaAPIConfig?.symbol || "XAUUSD"
+        const isoRange = toIsoDateRange(dateRange)
+        if (isoRange) Object.assign(params, isoRange)
+      } else {
+        params.files = buildTimeframeFiles()
+      }
+
+      const start = await runRobustOptimisation(params)
+      if (!start?.run_id) throw new Error("The backend did not return a run id")
+      followRobustOptimisationRun(start.run_id)
+    } catch (error: any) {
+      console.error("Robust optimisation error:", error)
+      const message = error?.message === "Not Found"
+        ? "Strategy not found, or it isn't yours"
+        : error?.message || "Unknown error"
+      showToast("Robust Optimisation Error: " + message, 'error')
+    }
   }
 
   // Add function to start status polling
@@ -4560,7 +4781,7 @@ export default function StrategyTestingPage() {
     // the rows down to their parameter columns plus the two scored metrics.
     const heatmapRows = firstArray(src, ['optimization_heatmap_data']) || (() => {
       const paramKeys = rows.length
-        ? Object.keys(rows[0]).filter((key) => !STANDARD_STAT_COLUMNS.has(key))
+        ? Object.keys(rows[0]).filter((key) => !STANDARD_STAT_COLUMNS.has(key) && !ROBUST_SCORE_COLUMNS.includes(key))
         : []
       if (paramKeys.length === 0) return []
       return rows.map((row: any) => {
@@ -4777,6 +4998,12 @@ export default function StrategyTestingPage() {
     // Read once for every row's copy button.
     const copyForm = readStoredOptimisationForm()
     const bestSet = bestOptimisationSet(optimisationResult)
+    // A robust (V2) search's rows also carry its synthetic-market scores.
+    const robustColumns = ROBUST_SCORE_COLUMNS.filter((key) => rows.some((row: any) => row && key in row))
+    const robustCell = (v: any, key: string) => {
+      if (typeof v !== 'number' || !Number.isFinite(v)) return '—'
+      return key === 'Synthetic Profitable [%]' ? `${formatOptimizationValue(v, key)}%` : formatOptimizationValue(v, key)
+    }
 
     return (
       <>
@@ -4796,6 +5023,9 @@ export default function StrategyTestingPage() {
             <th className="px-4 py-3 text-left">Start</th>
             <th className="px-4 py-3 text-left">End</th>
             <th className="px-4 py-3 text-left">Duration</th>
+            {robustColumns.map((key) => (
+              <th key={key} className="px-4 py-3 text-left text-amber-300 whitespace-nowrap">{key}</th>
+            ))}
             <th className="px-4 py-3 text-left">Equity Final [$]</th>
             <th className="px-4 py-3 text-left">Equity Peak [$]</th>
             <th className="px-4 py-3 text-left">Return [%]</th>
@@ -4829,6 +5059,9 @@ export default function StrategyTestingPage() {
               <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{fmt(row['Start'], '', '', 'Start')}</td>
               <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{fmt(row['End'], '', '', 'End')}</td>
               <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{fmt(row['Duration'], '', '', 'Duration')}</td>
+              {robustColumns.map((key) => (
+                <td key={key} className="px-4 py-3 font-mono text-amber-200">{robustCell(row[key], key)}</td>
+              ))}
               <td className="px-4 py-3 font-mono text-white">{fmt(row['Equity Final [$]'], '$', '', 'Equity Final [$]')}</td>
               <td className="px-4 py-3 font-mono text-white">{fmt(row['Equity Peak [$]'], '$', '', 'Equity Peak [$]')}</td>
               <td className="px-4 py-3 font-mono">{fmt(row['Return [%]'], '', '%', 'Return [%]')}</td>
@@ -4852,7 +5085,7 @@ export default function StrategyTestingPage() {
                   .filter(([k]) => k.startsWith('param_'))
                   .map(([k, v]) => `${k}: ${formatOptimizationValue(v, k)}`)
                   .join(', ') || Object.keys(row)
-                    .filter(key => !STANDARD_STAT_COLUMNS.has(key))
+                    .filter(key => !STANDARD_STAT_COLUMNS.has(key) && !ROBUST_SCORE_COLUMNS.includes(key))
                     .map(key => `${key}=${formatOptimizationValue(row[key], key)}`)
                     .join(', ')}
               </td>
@@ -5021,16 +5254,10 @@ export default function StrategyTestingPage() {
           }}
           onSelectCloudRun={async (jobId) => {
             // A finished cloud run opens here in the Results tab, like a local
-            // one. `job_id` keeps the file downloads on this job.
+            // one. `job_id` keeps the file downloads on this job. A V2 (robust)
+            // job opens the same way; its `results.simulation` adds its panels.
             try {
-              const job = await getOptimizationJob(jobId as any)
-              setOptimisationResult({
-                ...normalizeOptimisationResult(job.results),
-                job_id: job.id,
-                runTiming: runCostTimingFromJob(job),
-              })
-              setShowOptimisationResults(true)
-              setOptimisationTab('results')
+              showCloudOptimisationJob(await getOptimizationJob(jobId as any))
             } catch (err: any) {
               console.error('Failed to load cloud optimisation result:', err)
               showToast(err?.message || 'Failed to load optimisation result', 'error')
@@ -5049,6 +5276,8 @@ export default function StrategyTestingPage() {
             if (record?.runId && !optimisationPollerRef.current && !walkForwardPollerRef.current) {
               if (record.kind === 'walk_forward') {
                 resumeWalkForwardRun(record.runId)
+              } else if (record.kind === 'robust') {
+                followRobustOptimisationRun(record.runId, { resumed: true })
               } else {
                 resumeOptimisationRun(record.runId)
               }
@@ -5164,12 +5393,17 @@ export default function StrategyTestingPage() {
                     {/* Live progress for the run in flight, above the results */}
                     {isOptimisationRunActive && (
                       <div className="px-6 pt-6">
+                        {/* A V2 droplet sits in preparing_data for 5 to 8 min while it
+                            boots, and can report stale meanwhile; that's expected. */}
                         <OptimisationProgressPanel
                           progress={optimisationProgress}
-                          stale={optimisationStale}
+                          stale={optimisationStale && !(isRobustRunActive && optimisationProgress?.phase === 'preparing_data')}
                           percent={progress2}
-                          label="Optimisation in progress"
+                          label={isRobustRunActive ? "Robust optimisation (V2) in progress" : "Optimisation in progress"}
                           onCancel={cancelOptimisation}
+                          hint={isRobustRunActive && optimisationProgress?.phase === 'preparing_data'
+                            ? 'Starting a cloud server (about 5 to 8 min)…'
+                            : null}
                         />
                       </div>
                     )}
@@ -5313,9 +5547,18 @@ export default function StrategyTestingPage() {
                             <div className="space-y-12">
                               {renderOptimisationHistory()}
                               <div className="space-y-8">
-                                <h3 className="text-xs font-black text-gray-500 uppercase tracking-[0.4em]">Current Results</h3>
+                                <h3 className="text-xs font-black text-gray-500 uppercase tracking-[0.4em]">
+                                  Current Results{optimisationResult?.simulation ? ': Robust Optimisation (Market Simulation V2)' : ''}
+                                </h3>
                                 {renderRunCostSummary()}
                                 {renderOptimisationDownloads()}
+                                {optimisationResult?.simulation && (
+                                  <RobustOptimisationView
+                                    simulation={optimisationResult.simulation}
+                                    warnings={optimisationResult.warnings}
+                                    section="results"
+                                  />
+                                )}
                                 <div className="overflow-x-auto">
                                   {renderResultsTable(previewRows)}
                                 </div>
@@ -5323,6 +5566,11 @@ export default function StrategyTestingPage() {
                             </div>
                           )}
 
+                          {optimisationTab === 'graph' && optimisationResult?.simulation && (
+                            <div className="p-6">
+                              <RobustOptimisationView simulation={optimisationResult.simulation} section="graph" />
+                            </div>
+                          )}
                           {optimisationTab === 'graph' && renderOptimisationGraphs()}
 
                           {(optimisationTab === 'chart' || optimisationTab === 'chart_data') && (
@@ -6105,6 +6353,9 @@ export default function StrategyTestingPage() {
                       onRunMarketSimulationV1={handleRunMarketSimulation}
                       onCancelMarketSimulation={cancelMarketSimulation}
                       isMarketSimulationRunning={isSimulationRunning}
+                      onRunRobustOptimisation={handleRunRobustOptimisation}
+                      onCancelRobustOptimisation={cancelOptimisation}
+                      isRobustOptimisationRunning={isRobustRunActive}
                     />
                   </>
                 )}
@@ -6441,6 +6692,17 @@ export default function StrategyTestingPage() {
                 onClose={() => setShowCostDialog(false)}
                 onConfirm={handleCostConfirmation}
                 optimizationType={optimizationType}
+              />
+              <OptimizationCostDialog
+                isOpen={showRobustCostDialog}
+                onClose={() => setShowRobustCostDialog(false)}
+                onConfirm={handleRobustCostConfirmation}
+                optimizationType="robust"
+                timeBudgetSeconds={robustSettings?.time_budget_seconds}
+                notes={[
+                  ...(isDevModeStrategy ? [] : ["Runs the saved strategy: unsaved edits are not included. Save first if you changed it."]),
+                  "The time budget limits the genetic algorithm only. A grid search runs to the end or times out.",
+                ]}
               />
               <OptimizationCostDialog
                 isOpen={showSimulationCostDialog}

@@ -1,15 +1,6 @@
-"use client"
+import { redirect } from "next/navigation"
 
-import { useEffect } from "react"
-
+// The app has no landing page of its own: "/" (logout, logo, "Back to Home") opens the app home.
 export default function Home() {
-  useEffect(() => {
-    window.location.href = "https://anyquant.webflow.io/"
-  }, [])
-
-  return (
-    <div className="min-h-screen bg-black flex justify-center items-center">
-      <div className="text-white text-lg">Redirecting...</div>
-    </div>
-  )
+  redirect("/home")
 }

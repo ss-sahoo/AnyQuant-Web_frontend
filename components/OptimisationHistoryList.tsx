@@ -61,6 +61,8 @@ interface HistoryRow {
   status: string;
   finalEquity: number | null;
   throughDroplet: boolean;
+  // A Market Simulation V2 search: candidates also scored on synthetic markets.
+  robust: boolean;
   // Walk-forward only — the hypothesis test is the headline number there.
   pValue: number | null;
 }
@@ -134,6 +136,7 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
             status: item.status || '-',
             finalEquity: item.final_equity ?? null,
             throughDroplet: Boolean(item.through_droplet),
+            robust: Boolean(item.robust),
             pValue: null,
           }));
 
@@ -147,6 +150,7 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
             // Validation equity is the meaningful "result" for a WFO run.
             finalEquity: item.avg_validation_equity ?? item.final_equity ?? null,
             throughDroplet: Boolean(item.through_droplet),
+            robust: false,
             pValue: item.p_value ?? null,
           }));
 
@@ -253,6 +257,7 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
         status: 'running',
         finalEquity: null,
         throughDroplet: false,
+        robust: false,
         pValue: null,
       },
       ...rows,
@@ -311,6 +316,13 @@ export const OptimisationHistoryList: React.FC<OptimisationHistoryListProps> = (
                     {row.kind === 'walk_forward' ? (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-purple-500/10 text-purple-300 border border-purple-500/40 whitespace-nowrap">
                         Walk Forward
+                      </span>
+                    ) : row.robust ? (
+                      <span
+                        className="inline-flex items-center px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-amber-500/10 text-amber-300 border border-amber-500/40 whitespace-nowrap"
+                        title="Market Simulation V2: candidates also scored on synthetic markets"
+                      >
+                        Robust (V2)
                       </span>
                     ) : (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-[#85e1fe]/10 text-[#85e1fe] border border-[#85e1fe]/30">

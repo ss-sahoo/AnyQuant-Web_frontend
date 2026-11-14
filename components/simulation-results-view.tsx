@@ -507,6 +507,128 @@ function Graphs({ result }: { result: any }) {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Market Simulation V2 (robust optimisation): the `simulation` block of an
+// optimisation's results. Its numbers are in the objective's units; nulls
+// (non-finite) render as "—".
+// ---------------------------------------------------------------------------
+
+const dash = (value: any, digits = 2) =>
+  isNumber(value) ? value.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits }) : "—"
+
+function RobustWinnerTiles({ simulation }: { simulation: any }) {
+  const winner = simulation?.winner || {}
+  const objective = simulation?.objective ?? "objective"
+  const failed = isNumber(winner.failed_paths)
+    ? `${winner.failed_paths}${isNumber(simulation?.n_paths) ? ` of ${simulation.n_paths}` : ""}`
+    : "—"
+  return (
+    <div>
+      <h3 className={sectionHeading}>Winner: {objective}</h3>
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+        <Tile label={simulation?.ranked_by ?? "Robust Score"}><span className="text-[#85e1fe]">{dash(winner.robust_score)}</span></Tile>
+        <Tile label="Real"><span className="text-[#fbbf24]">{dash(winner.real)}</span></Tile>
+        <Tile label="Synthetic Median">{dash(winner.synthetic_median)}</Tile>
+        <Tile label="Synthetic P5">{dash(winner.synthetic_p5)}</Tile>
+        <Tile label="Synthetic Profitable">{isNumber(winner.synthetic_profitable_pct) ? `${winner.synthetic_profitable_pct.toFixed(1)}%` : "—"}</Tile>
+        <Tile label="Failed Paths">{failed}</Tile>
+      </div>
+    </div>
+  )
+}
+
+function RobustRunSettings({ simulation }: { simulation: any }) {
+  const range = simulation?.start && simulation?.end
+    ? `${formatStart(simulation.start)} → ${formatStart(simulation.end)}`
+    : "—"
+  const item = (label: string, value: React.ReactNode) => (
+    <span>{label}: <span className="text-white">{value}</span></span>
+  )
+  return (
+    <div className="flex flex-wrap gap-x-8 gap-y-2 text-[11px] text-gray-400">
+      {item("Objective", simulation?.objective ?? "—")}
+      {item("Ranked by", simulation?.ranked_by ?? "—")}
+      {item("Alpha", dash(simulation?.alpha))}
+      {item("Paths", simulation?.n_paths ?? "—")}
+      {item("Seed", simulation?.seed ?? "—")}
+      {item("Zero drift", simulation?.zero_drift == null ? "—" : simulation.zero_drift ? "Yes" : "No")}
+      {item("Bars", isNumber(simulation?.bars) ? simulation.bars.toLocaleString() : "—")}
+      {item("History", range)}
+      {item("Candidates scored", isNumber(simulation?.candidates_scored) ? simulation.candidates_scored.toLocaleString() : "—")}
+    </div>
+  )
+}
+
+function RobustScoreHistogram({ simulation }: { simulation: any }) {
+  const winner = simulation?.winner || {}
+  const rawValues = winner.values
+  const values: any[] = useMemo(() => (Array.isArray(rawValues) ? rawValues : []), [rawValues])
+  const { rows, binOf } = useMemo(() => histogram(values), [values])
+  const skipped = values.length - values.filter(isNumber).length
+  if (rows.length === 0) {
+    return (
+      <div className="min-h-[300px] flex items-center justify-center text-gray-500 text-[10px] font-black uppercase tracking-[0.4em] text-center">
+        No synthetic path produced a finite objective
+      </div>
+    )
+  }
+  const label = (bin: number) => dash(rows[bin]?.mid)
+  const marker = (value: any) => (isNumber(value) ? binOf(value) : -1)
+  const objective = simulation?.objective ?? "Objective"
+
+  return (
+    <div>
+      <h3 className={sectionHeading}>Winner on Synthetic Markets: {objective}</h3>
+      <p className="text-[11px] text-gray-500 mb-3">
+        {objective} of the winning parameters on each synthetic path.
+        {skipped > 0 ? ` ${skipped} failed path${skipped === 1 ? "" : "s"} left out.` : ""}
+      </p>
+      <div className="bg-[#080A10] rounded-lg p-4 h-[360px]">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={rows} margin={{ top: 20, right: 10, bottom: 0, left: 0 }} barCategoryGap={1}>
+            <CartesianGrid stroke="#1f2335" strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="bin" tickFormatter={label} stroke="#6b7280" fontSize={9} interval="preserveStartEnd" />
+            <YAxis stroke="#6b7280" fontSize={9} allowDecimals={false} width={30} />
+            <Tooltip {...tooltipStyle} labelFormatter={(bin) => `≈ ${label(Number(bin))}`} formatter={(v: any) => [v, "Paths"]} />
+            <Bar dataKey="paths" fill="#85e1fe" fillOpacity={0.7} isAnimationActive={false} />
+            {marker(winner.synthetic_median) >= 0 && (
+              <ReferenceLine x={marker(winner.synthetic_median)} stroke="#e5e7eb" strokeDasharray="4 3" strokeWidth={2} label={{ value: "Synthetic Median", fill: "#e5e7eb", fontSize: 9, position: "top" }} />
+            )}
+            {marker(winner.real) >= 0 && (
+              <ReferenceLine x={marker(winner.real)} stroke="#fbbf24" strokeWidth={2} label={{ value: "Real", fill: "#fbbf24", fontSize: 9, position: "insideTopRight" }} />
+            )}
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="flex flex-wrap gap-x-8 gap-y-2 mt-3 text-[11px] text-gray-400">
+        <span>Real: <span className="text-[#fbbf24] font-mono">{dash(winner.real)}</span></span>
+        <span>Synthetic median: <span className="text-white font-mono">{dash(winner.synthetic_median)}</span></span>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Robust optimisation (V2) panels for the Results or Graph tab. The caller
+ * renders the candidate table (the standard optimisation rows plus the
+ * synthetic columns) itself.
+ */
+export function RobustOptimisationView({ simulation, warnings, section }: {
+  simulation: any
+  warnings?: any
+  section: "results" | "graph"
+}) {
+  if (section === "graph") return <RobustScoreHistogram simulation={simulation} />
+  return (
+    <div className="space-y-8">
+      <Warnings warnings={warnings} />
+      <RobustWinnerTiles simulation={simulation} />
+      <RobustRunSettings simulation={simulation} />
+      <CalibrationPanel calibration={simulation?.calibration} />
+    </div>
+  )
+}
+
 /** Results or Graph tab content for one market simulation. */
 export function SimulationResultsView({ result, section }: SimulationResultsViewProps) {
   const status = String(result?.status || "").toLowerCase()

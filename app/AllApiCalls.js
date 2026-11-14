@@ -679,7 +679,8 @@ export const pollJobStatus = (runId, { intervalMs = 3000, onStatus } = {}) => {
           resolve(data)
         } else if (data.status === "failed") {
           clearInterval(intervalId)
-          reject(new Error(data.error || data.message || "Job failed"))
+          // A cloud job reports its failure as error_message.
+          reject(new Error(data.error || data.error_message || data.message || "Job failed"))
         } else if (data.status === "cancelled") {
           clearInterval(intervalId)
           reject(new Error("cancelled"))
@@ -758,6 +759,71 @@ export const runSimulation = async ({
 
   const response = await Fetch("/api/run-simulation/", { method: "POST", body: formData })
   if (!response.ok) throw await simulationError(response, "Failed to start market simulation")
+  return response.json()
+}
+
+/**
+ * POST /api/run-robust-optimisation/ (multipart): Market Simulation V2. A GA /
+ * grid search that ranks every candidate on the real data plus GARCH synthetic
+ * paths. Data travels as runSimulation sends it. `statement` is the dev-mode
+ * settings overrides only: a no-code cloud run reads the saved strategy and
+ * answers 400 to a statement. `optimisation_form` is the search, in the shape
+ * a GA cloud job sends.
+ * Resolves with 202 { status, run_id, execution, strategy_kind, objective, simulation, poll_url };
+ * poll GET /api/job-status/<run_id>/, cancel with cancelOptimisationRun.
+ */
+export const runRobustOptimisation = async ({
+  strategy_type,
+  strategy_statement_id = null,
+  custom_strategy_id = null,
+  statement = null,
+  params = null,
+  optimisation_form = null,
+  files = null,
+  metaapi_token = null,
+  metaapi_account_id = null,
+  symbol = null,
+  start_date = null,
+  end_date = null,
+  alpha = null,
+  n_paths = null,
+  seed = null,
+  zero_drift = null,
+  time_budget_seconds = null,
+}) => {
+  const formData = new FormData()
+  formData.append("strategy_type", strategy_type)
+  // Always a droplet, as for runSimulation: hard-coded, not a parameter.
+  formData.append("execution", "cloud")
+  if (strategy_statement_id != null) formData.append("strategy_statement_id", String(strategy_statement_id))
+  if (custom_strategy_id != null) formData.append("custom_strategy_id", String(custom_strategy_id))
+  if (strategy_type === "dev_mode") {
+    if (statement) formData.append("statement", JSON.stringify(statement))
+    if (params && Object.keys(params).length > 0) formData.append("params", JSON.stringify(params))
+  }
+  if (optimisation_form) formData.append("optimisation_form", JSON.stringify(optimisation_form))
+  if (metaapi_token && metaapi_account_id) {
+    formData.append("metaapi_token", metaapi_token)
+    formData.append("metaapi_account_id", metaapi_account_id)
+    if (symbol) formData.append("symbol", symbol)
+    if (start_date && end_date) {
+      formData.append("start_date", start_date)
+      formData.append("end_date", end_date)
+    }
+  }
+  if (alpha != null) formData.append("alpha", String(alpha))
+  if (n_paths != null) formData.append("n_paths", String(n_paths))
+  if (seed != null) formData.append("seed", String(seed))
+  if (zero_drift != null) formData.append("zero_drift", zero_drift ? "true" : "false")
+  if (time_budget_seconds != null) formData.append("time_budget_seconds", String(time_budget_seconds))
+  if (files) {
+    for (const [timeframe, file] of Object.entries(files)) {
+      formData.append(timeframe, file)
+    }
+  }
+
+  const response = await Fetch("/api/run-robust-optimisation/", { method: "POST", body: formData })
+  if (!response.ok) throw await simulationError(response, "Failed to start robust optimisation")
   return response.json()
 }
 
@@ -1600,9 +1666,14 @@ export const getStrategyWalkForwardOptimizationResults = async (strategyStatemen
  * Purpose: Show user estimated costs before starting optimization
  * Headers: Authorization: Bearer {token}
  * Response: Cost estimates for regular vs walk-forward optimization
+ * `time_budget_seconds` (60–10,000) prices the `robust` quote for that budget.
+ * @param {{ time_budget_seconds?: number|null }} [options]
  */
-export const getOptimizationCosts = async () => {
-  const response = await Fetch("/api/optimization-costs/", {
+export const getOptimizationCosts = async ({ time_budget_seconds = null } = {}) => {
+  const query = time_budget_seconds != null
+    ? `?time_budget_seconds=${encodeURIComponent(String(time_budget_seconds))}`
+    : ""
+  const response = await Fetch(`/api/optimization-costs/${query}`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",

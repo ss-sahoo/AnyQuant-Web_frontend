@@ -8,7 +8,11 @@ interface OptimizationCostDialogProps {
   isOpen: boolean
   onClose: () => void
   onConfirm: () => void
-  optimizationType: 'regular' | 'walk_forward' | 'simulation'
+  optimizationType: 'regular' | 'walk_forward' | 'simulation' | 'robust'
+  /** Robust only: prices the quote for this search budget. */
+  timeBudgetSeconds?: number
+  /** Shown under the quote, e.g. what the run does and doesn't include. */
+  notes?: string[]
 }
 
 interface CostInfo {
@@ -24,6 +28,7 @@ interface CostEstimate {
     walk_forward: CostInfo
     // Missing from backends that predate cloud market simulations.
     simulation?: CostInfo
+    robust?: CostInfo
   }
   pricing_info: {
     currency: string
@@ -37,7 +42,9 @@ export const OptimizationCostDialog: React.FC<OptimizationCostDialogProps> = ({
   isOpen,
   onClose,
   onConfirm,
-  optimizationType
+  optimizationType,
+  timeBudgetSeconds,
+  notes,
 }) => {
   const [costs, setCosts] = useState<CostEstimate | null>(null)
   const [loading, setLoading] = useState(false)
@@ -47,13 +54,18 @@ export const OptimizationCostDialog: React.FC<OptimizationCostDialogProps> = ({
     if (isOpen) {
       loadCosts()
     }
-  }, [isOpen])
+  }, [isOpen, timeBudgetSeconds])
 
   const loadCosts = async () => {
     try {
       setLoading(true)
       setError('')
-      const costData = await getOptimizationCosts()
+      setCosts(null)
+      const costData = await getOptimizationCosts(
+        optimizationType === 'robust' && timeBudgetSeconds != null
+          ? { time_budget_seconds: timeBudgetSeconds }
+          : undefined,
+      )
       console.log(' Cost data received:', costData)
       setCosts(costData)
     } catch (err: any) {
@@ -69,6 +81,7 @@ export const OptimizationCostDialog: React.FC<OptimizationCostDialogProps> = ({
   const currentCostInfo = costs?.cost_estimates?.[optimizationType]
   const runTitle = optimizationType === 'regular' ? 'Regular Optimization'
     : optimizationType === 'walk_forward' ? 'Walk Forward Optimization'
+    : optimizationType === 'robust' ? 'Robust Optimisation (Market Simulation V2)'
     : 'Market Simulation'
 
   return (
@@ -76,7 +89,9 @@ export const OptimizationCostDialog: React.FC<OptimizationCostDialogProps> = ({
       <div className="bg-[#1A1D2D] rounded-lg shadow-lg w-full max-w-md p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-2xl font-bold text-white">
-            {optimizationType === 'simulation' ? 'Market Simulation Cost Estimate' : 'Optimization Cost Estimate'}
+            {optimizationType === 'simulation' ? 'Market Simulation Cost Estimate'
+              : optimizationType === 'robust' ? 'Robust Optimisation Cost Estimate'
+              : 'Optimization Cost Estimate'}
           </h2>
           <button 
             onClick={onClose}
@@ -144,11 +159,26 @@ export const OptimizationCostDialog: React.FC<OptimizationCostDialogProps> = ({
                   </span>
                 </div>
                 
+                {optimizationType === 'robust' && timeBudgetSeconds != null && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Time Budget:</span>
+                    <span className="text-white font-semibold">
+                      {timeBudgetSeconds.toLocaleString()} s
+                    </span>
+                  </div>
+                )}
+
                 <div className="text-sm text-gray-300 mt-2">
                   {currentCostInfo.description}
                 </div>
               </div>
             </div>
+            )}
+
+            {notes && notes.length > 0 && (
+              <ul className="bg-[#141721] rounded-lg p-3 space-y-1 text-sm text-gray-300 list-disc list-inside">
+                {notes.map((note) => <li key={note}>{note}</li>)}
+              </ul>
             )}
 
             <div className="bg-yellow-900 border border-yellow-700 rounded-lg p-3">

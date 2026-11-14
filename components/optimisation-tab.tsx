@@ -3,6 +3,16 @@
 import type React from "react"
 import { useState, useEffect } from "react"
 import { WalkForwardSettingsModalContent } from "./walk-forward-settings-modal-content"
+import {
+  ROBUST_BUDGET_MAX,
+  ROBUST_BUDGET_MIN,
+  ROBUST_DEFAULT_INPUTS,
+  ROBUST_PATHS_MAX,
+  ROBUST_PATHS_MIN,
+  parseRobustInputs,
+  type RobustOptimisationInputs,
+  type RobustOptimisationSettings,
+} from "@/lib/robust-optimisation"
 
 interface OptimisationTabProps {
   isLimitationsCollapsed: boolean
@@ -29,6 +39,10 @@ interface OptimisationTabProps {
   onRunMarketSimulationV1?: () => void // Callback to run optimisation with market simulation v1
   onCancelMarketSimulation?: () => void // Callback to cancel the market simulation in flight
   isMarketSimulationRunning?: boolean // Loading state for market simulation
+  // Market Simulation V2 (robust optimisation), on a droplet
+  onRunRobustOptimisation?: (settings: RobustOptimisationSettings) => void
+  onCancelRobustOptimisation?: () => void
+  isRobustOptimisationRunning?: boolean
 }
 
 interface OptimisationForm {
@@ -70,7 +84,14 @@ export function OptimisationTab({
   onRunMarketSimulationV1, // Callback to run optimisation with market simulation v1
   onCancelMarketSimulation, // Callback to cancel the market simulation in flight
   isMarketSimulationRunning, // Loading state for market simulation
+  onRunRobustOptimisation,
+  onCancelRobustOptimisation,
+  isRobustOptimisationRunning,
 }: OptimisationTabProps) {
+  const [robustInputs, setRobustInputs] = useState<RobustOptimisationInputs>(ROBUST_DEFAULT_INPUTS)
+  const robustParse = parseRobustInputs(robustInputs)
+  const setRobustInput = (key: keyof RobustOptimisationInputs, value: string | boolean) =>
+    setRobustInputs((prev) => ({ ...prev, [key]: value }))
   // Remove local states for selectedMaximiseOption and selectedAlgorithm
   // const [selectedMaximiseOption, setSelectedMaximiseOption] = useState<string>("")
   // const [selectedAlgorithm, setSelectedAlgorithm] = useState<string>("")
@@ -506,7 +527,46 @@ export function OptimisationTab({
           </div>
         )}
 
-        {/* Market Simulation Optimisation Buttons (v2 is coming soon) */}
+        {/* Market Simulation V2 settings: the robust score's inputs and the search budget */}
+        <div className="mt-6">
+          <h3 className="text-white text-base font-medium mb-1">Market Simulation V2 (Robust Optimisation)</h3>
+          <p className="text-gray-400 text-xs mb-3">
+            Robust Score = alpha × objective on real data + (1 − alpha) × median objective on synthetic paths.
+            The budget limits the genetic algorithm only; a grid search runs to the end or times out.
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 items-end">
+            {([
+              ["alpha", "Alpha (0–1)", "0.05"],
+              ["n_paths", `Paths (${ROBUST_PATHS_MIN}–${ROBUST_PATHS_MAX})`, "1"],
+              ["seed", "Seed", "1"],
+              ["time_budget_seconds", `Time budget, s (${ROBUST_BUDGET_MIN}–${ROBUST_BUDGET_MAX.toLocaleString()})`, "60"],
+            ] as const).map(([key, label, step]) => (
+              <label key={key} className="flex flex-col text-xs text-gray-400 gap-1">
+                {label}
+                <input
+                  type="number"
+                  step={step}
+                  value={robustInputs[key]}
+                  onChange={(e) => setRobustInput(key, e.target.value)}
+                  disabled={isRobustOptimisationRunning}
+                  className="bg-[#141721] text-white rounded-md px-3 py-2 focus:outline-none disabled:opacity-50"
+                />
+              </label>
+            ))}
+            <label className="flex items-center gap-2 text-xs text-gray-400 py-2" title="Removes the history's trend from the synthetic paths">
+              <input
+                type="checkbox"
+                checked={robustInputs.zero_drift}
+                onChange={(e) => setRobustInput("zero_drift", e.target.checked)}
+                disabled={isRobustOptimisationRunning}
+              />
+              Zero drift
+            </label>
+          </div>
+          {robustParse.error && <p className="text-red-400 text-xs mt-2">{robustParse.error}</p>}
+        </div>
+
+        {/* Market Simulation Buttons: V1 checks one parameter set, V2 optimises */}
         <div className="mt-3 flex gap-3">
           <button
             className={`flex-1 py-3 rounded-full font-medium disabled:opacity-50 disabled:cursor-not-allowed ${isMarketSimulationRunning
@@ -519,11 +579,23 @@ export function OptimisationTab({
             {isMarketSimulationRunning ? "Cancel Market Simulation" : "Run Market Simulation (Droplets)"}
           </button>
           <button
-            className="flex-1 py-3 rounded-full font-medium bg-[#141721] text-gray-500 cursor-not-allowed"
-            disabled
-            title="Coming soon"
+            className={`flex-1 py-3 rounded-full font-medium disabled:opacity-50 disabled:cursor-not-allowed ${isRobustOptimisationRunning
+              ? 'bg-red-600 hover:bg-red-700 text-white'
+              : 'bg-[#85e1fe] text-black hover:bg-[#6bcae2]'
+            }`}
+            onClick={() => {
+              if (isRobustOptimisationRunning) {
+                onCancelRobustOptimisation?.()
+              } else if (robustParse.settings) {
+                onRunRobustOptimisation?.(robustParse.settings)
+              }
+            }}
+            disabled={!onRunRobustOptimisation || (!isRobustOptimisationRunning && !robustParse.settings)}
+            title={robustParse.error}
           >
-            Run Optimisation with Market Simulation (V2) · Coming Soon
+            {isRobustOptimisationRunning
+              ? "Cancel Robust Optimisation"
+              : "Run Optimisation with Market Simulation (V2, Droplets)"}
           </button>
         </div>
       </div>
