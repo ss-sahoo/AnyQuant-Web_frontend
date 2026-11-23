@@ -65,6 +65,17 @@ self.rsi = self._rsi(closes, 14)`,
     supported: true,
   },
   {
+    title: "Higher-Timeframe Indicators",
+    description: "Use self.resample_apply() for every higher-timeframe indicator. It builds candles from the broker's session open, as TradingView does. Don't floor the index or call df.resample(): both count from midnight UTC, so values won't match TradingView.",
+    example: `def bands(c):
+    basis = c.rolling(20).mean()
+    sigma = c.rolling(20).std(ddof=0)   # ddof=0 = TradingView ta.stdev
+    return basis, basis + 2 * sigma, basis - 2 * sigma
+
+basis, upper, lower = self.resample_apply('180min', bands)`,
+    supported: true,
+  },
+  {
     title: "Order Methods",
     description: "Place and manage orders: buy(), sell(), close()",
     example: `self.buy(size=1.0, sl_pips=50, tp_pips=100, comment="Entry")

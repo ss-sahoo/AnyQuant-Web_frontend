@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { ArrowLeft, Code, FileCode, AlertCircle, CheckCircle, Loader2, Save, Play, ChevronDown, FlaskConical, Trash2, Edit3, List, Maximize2 } from "lucide-react"
 import dynamic from "next/dynamic"
 import { UnsavedChangesModal } from "./modals/unsaved-changes-modal"
+import { getCustomStrategyTemplate } from "@/app/AllApiCalls"
 import {
   ParameterSchema,
   ParameterType,
@@ -555,145 +556,132 @@ class MyTradeManagement(CustomBehaviorBase):
 # ============================================================================
 `
 
-const PYTHON_STRATEGY_TEMPLATE = `# ============================================================================
-# CUSTOM STRATEGY TEMPLATE - Complete Trading Strategy
+// Offline fallback for the backend template (GET /api/custom-strategies/template/).
+// Copied verbatim from AnyQuantDiracAI/helper/dev_mode_template.py (DEV_MODE_TEMPLATE).
+const FALLBACK_PYTHON_STRATEGY_TEMPLATE = `# ============================================================================
+# ANYQUANT DEVELOPER-MODE STRATEGY TEMPLATE
 # ============================================================================
-# 
-# REQUIREMENTS:
-# 1. Must inherit from CustomStrategyBase
-# 2. Must implement init() method - called once before backtest starts
-# 3. Must implement on_bar() method - called on each bar during backtest
-# 4. Use self.data to access OHLCV data
-# 5. Use self.buy(), self.sell(), self.position.close() for orders
+# Describe your strategy in plain words here (or ask an AI assistant to turn
+# your description into code that follows the RULES below):
 #
-# AVAILABLE LIBRARIES: numpy, pandas, math, talib
-# NOT ALLOWED: File I/O, network requests, external libraries, system commands
+#   Base timeframe : 36 min (the timeframe of the loaded data)
+#   Entry long     : fast SMA crosses above slow SMA, and Close is above the
+#                    180m SMA (higher-timeframe trend filter)
+#   Entry short    : fast SMA crosses below slow SMA, and Close is below the
+#                    180m SMA
+#   Exits          : stop loss / take profit in pips, or the opposite cross
+#
+# ============================================================================
+# RULES (for you and for any AI assistant writing AnyQuant code)
+# ============================================================================
+#  1. One class that inherits CustomStrategyBase, with init() and on_bar().
+#  2. Parameters are class attributes (int / float / bool). They show in the
+#     Strategy Tester properties table and the optimiser can search them.
+#  3. Nothing at module level except imports: AnyQuant drops module-level
+#     names at run time. Put helpers in methods of the class.
+#  4. Available inside methods: np, pd, math, talib. No other libraries, no
+#     file, network or system access.
+#  5. init() runs once: compute every indicator over the full history with
+#     df = self.data._get_full_df() (UTC DatetimeIndex; Open, High, Low,
+#     Close, Volume). on_bar() runs per bar: the current bar is
+#     bar_idx = len(self.data.Close) - 1, and self.data.Close[-1] its close.
+#  6. HIGHER TIMEFRAMES: always use
+#         values = self.resample_apply(rule, func, series='Close')
+#     - rule: '180min', '4h', '1D' ...  func gets the higher-timeframe series
+#       (one value per candle) and returns a Series, or a tuple of Series.
+#     - series: a column name, or several columns, e.g.
+#       df[['High', 'Low', 'Close']] for an ATR. Columns aggregate as
+#       Open=first, High=max, Low=min, Close=last, Volume=sum.
+#     - Returns one value per base bar (a tuple of arrays for a tuple).
+#     - Candles are the BROKER's: anchored at each session open (IC Markets:
+#       00:00 server time = 22:00 UTC winter / 21:00 UTC summer), DST-aware,
+#       exactly as TradingView draws them.
+#     - A candle's value appears on the base bar that CLOSES it and is held
+#       until the next candle closes: no look-ahead, no repainting, and the
+#       value TradingView plots at that bar. Do not shift it again.
+#     NEVER build higher-timeframe candles yourself: no index.floor(),
+#     df.resample(), groupby on the clock, or blocks of N base bars. Those
+#     count from midnight UTC, cut different candles from the broker's, and
+#     every indicator value then differs from TradingView.
+#  7. TradingView parity: ta.stdev is the population stdev, use
+#     .std(ddof=0) (pandas defaults to ddof=1). ta.sma = .rolling(n).mean().
+#  8. Orders: self.buy() / self.sell() with sl= / tp= prices or sl_pips= /
+#     tp_pips=. size is in lots; omit it to trade the configured position
+#     size. self.position.close() exits; self.position.is_long / is_short.
+#  9. Indicators are NaN during warm-up: check before trading on them.
+# 10. Plot every indicator the logic reads with self.register_indicator(),
+#     so the chart shows what the strategy saw.
 # ============================================================================
 
 import numpy as np
+import pandas as pd
 from custom_strategy_base import CustomStrategyBase
 
+
 class MyStrategy(CustomStrategyBase):
-    """
-    Your custom trading strategy.
-    
-    Define class attributes as parameters that can be optimized:
-    - int: fast_period = 10
-    - float: threshold = 0.02
-    - bool: use_trailing_stop = True
-    """
-    
-    # Strategy Parameters (these can be optimized)
-    fast_period = 10
-    slow_period = 30
-    rsi_period = 14
-    stop_loss_pips = 50
-    take_profit_pips = 100
-    
+    """SMA cross on the base timeframe, filtered by a higher-timeframe SMA."""
+
+    # ---- Parameters (shown in the properties table, optimisable) ----------
+    fast_period = 10        # base-timeframe fast SMA
+    slow_period = 30        # base-timeframe slow SMA
+    htf_minutes = 180       # higher timeframe of the trend filter
+    htf_period = 20         # SMA length, in higher-timeframe candles
+    stop_loss_pips = 500
+    take_profit_pips = 1000
+    exit_on_opposite_cross = True
+
     def init(self):
-        """
-        Called once before backtest starts.
-        Pre-calculate all indicators here for better performance.
-        
-        Available methods:
-        - self.data._get_full_df() - Get full historical DataFrame
-        - self._sma(data, period) - Simple Moving Average
-        - self._ema(data, period) - Exponential Moving Average
-        - self._rsi(data, period) - Relative Strength Index
-        - self.register_indicator(name, values, overlay=True, color='blue')
-        """
-        
-        # Get full historical data
         df = self.data._get_full_df()
-        closes = df['Close'].values
-        
-        # Calculate indicators
-        self.fast_sma = self._sma(closes, self.fast_period)
-        self.slow_sma = self._sma(closes, self.slow_period)
-        self.rsi = self._rsi(closes, self.rsi_period)
-        
-        # Register indicators for plotting (optional)
+        close = df['Close']
+
+        # Base-timeframe indicators: plain pandas / numpy / talib on df.
+        self.fast_sma = close.rolling(int(self.fast_period)).mean().to_numpy()
+        self.slow_sma = close.rolling(int(self.slow_period)).mean().to_numpy()
+
+        # Higher-timeframe indicator: ALWAYS through self.resample_apply.
+        rule = str(int(self.htf_minutes)) + 'min'
+        period = int(self.htf_period)
+        self.htf_sma = self.resample_apply(rule, lambda c: c.rolling(period).mean())
+
+        # Several values from one func come back as a tuple, e.g.
+        #   def bands(c):
+        #       basis = c.rolling(20).mean()
+        #       sigma = c.rolling(20).std(ddof=0)
+        #       return basis, basis + 2 * sigma, basis - 2 * sigma
+        #   basis, upper, lower = self.resample_apply(rule, bands)
+        #
+        # Several columns in, e.g. a higher-timeframe ATR:
+        #   def atr(h):
+        #       return pd.Series(talib.ATR(h['High'].values, h['Low'].values,
+        #                                  h['Close'].values, 14), index=h.index)
+        #   self.htf_atr = self.resample_apply(rule, atr, df[['High', 'Low', 'Close']])
+
         self.register_indicator('Fast SMA', self.fast_sma, overlay=True, color='blue')
         self.register_indicator('Slow SMA', self.slow_sma, overlay=True, color='orange')
-        self.register_indicator('RSI', self.rsi, overlay=False, subplot='RSI', color='purple')
-    
+        self.register_indicator('HTF SMA', self.htf_sma, overlay=True, color='purple')
+
     def on_bar(self):
-        """
-        Called on each bar during backtest.
-        Implement your main trading logic here.
-        
-        Available data access:
-        - self.data.Close[-1] - Current close price
-        - self.data.High[-1] - Current high price
-        - self.data.Low[-1] - Current low price
-        - self.data.Open[-1] - Current open price
-        - self.data.Volume[-1] - Current volume
-        - self.data.index[-1] - Current timestamp
-        
-        Available position methods:
-        - self.position - Current position object (None if no position)
-        - self.position.is_long - Boolean, True if long position
-        - self.position.is_short - Boolean, True if short position
-        - self.position.size - Position size
-        - self.position.entry_price - Entry price
-        - self.position.pl - Profit/Loss in currency
-        - self.position.pl_pct - Profit/Loss in percentage
-        
-        Available order methods:
-        - self.buy(size=1.0, sl_pips=50, tp_pips=100, comment="Entry")
-        - self.sell(size=1.0, sl_pips=50, tp_pips=100, comment="Entry")
-        - self.position.close() - Close current position
-        - self.close_all() - Close all positions
-        
-        Available properties:
-        - self.equity - Current account equity
-        """
-        
-        # Get current bar index
-        bar_idx = len(self.data.Close) - 1
-        
-        # Skip if not enough data for indicators
-        if bar_idx < self.slow_period:
+        i = len(self.data.Close) - 1
+        if i < 1:
             return
-        
-        # Get current values
+
         price = self.data.Close[-1]
-        fast_ma = self.fast_sma[bar_idx]
-        slow_ma = self.slow_sma[bar_idx]
-        rsi = self.rsi[bar_idx]
-        
-        # Skip if NaN values (not enough data yet)
-        if np.isnan(fast_ma) or np.isnan(slow_ma) or np.isnan(rsi):
-            return
-        
-        # ENTRY LOGIC
-        if not self.position:  # No position open
-            # Buy signal: Fast MA crosses above Slow MA + RSI confirmation
-            if fast_ma > slow_ma and rsi < 70:
-                self.buy(
-                    size=1.0,
-                    sl_pips=self.stop_loss_pips,
-                    tp_pips=self.take_profit_pips,
-                    comment="MA Golden Cross"
-                )
-            
-            # Sell signal: Fast MA crosses below Slow MA + RSI confirmation
-            elif fast_ma < slow_ma and rsi > 30:
-                self.sell(
-                    size=1.0,
-                    sl_pips=self.stop_loss_pips,
-                    tp_pips=self.take_profit_pips,
-                    comment="MA Death Cross"
-                )
-        
-        # EXIT LOGIC
-        else:  # Position is open
-            # Close long position if MA crossover reverses
-            if self.position.is_long and fast_ma < slow_ma:
-                self.position.close()
-            
-            # Close short position if MA crossover reverses
-            elif self.position.is_short and fast_ma > slow_ma:
+        fast, slow, trend = self.fast_sma[i], self.slow_sma[i], self.htf_sma[i]
+        if np.isnan(fast) or np.isnan(slow) or np.isnan(trend):
+            return                                   # still warming up
+
+        crossed_up = fast > slow and self.fast_sma[i - 1] <= self.slow_sma[i - 1]
+        crossed_down = fast < slow and self.fast_sma[i - 1] >= self.slow_sma[i - 1]
+
+        if not self.position:
+            if crossed_up and price > trend:
+                self.buy(sl_pips=self.stop_loss_pips, tp_pips=self.take_profit_pips,
+                         comment='SMA cross up, HTF uptrend')
+            elif crossed_down and price < trend:
+                self.sell(sl_pips=self.stop_loss_pips, tp_pips=self.take_profit_pips,
+                          comment='SMA cross down, HTF downtrend')
+        elif self.exit_on_opposite_cross:
+            if (self.position.is_long and crossed_down) or (self.position.is_short and crossed_up):
                 self.position.close()
 `
 
@@ -800,6 +788,26 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
   const [showStrategiesList, setShowStrategiesList] = useState(false)
   const [editingStrategyId, setEditingStrategyId] = useState<number | null>(null)
 
+  // Python strategy template served by the backend; the fallback covers a
+  // failed fetch. A ref, so callbacks captured before the fetch still see it.
+  const strategyTemplateRef = useRef(FALLBACK_PYTHON_STRATEGY_TEMPLATE)
+  const [templateInstructions, setTemplateInstructions] = useState<string[]>([])
+  useEffect(() => {
+    getCustomStrategyTemplate()
+      .then((data: { template?: unknown; instructions?: unknown }) => {
+        if (typeof data?.template === "string" && data.template.trim()) {
+          const template = data.template
+          strategyTemplateRef.current = template
+          // Swap it in only if the editor still holds the untouched fallback.
+          setCode((prev) => (prev === FALLBACK_PYTHON_STRATEGY_TEMPLATE ? template : prev))
+        }
+        if (Array.isArray(data?.instructions)) {
+          setTemplateInstructions(data.instructions.filter((s): s is string => typeof s === "string"))
+        }
+      })
+      .catch((error) => console.error("Failed to load strategy template, using fallback:", error))
+  }, [])
+
   // Load custom strategies when strategy type is selected
   useEffect(() => {
     if (codeType === "strategy" && onLoadStrategies) {
@@ -843,7 +851,7 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
       // Deep links / restored sessions can point at a deleted strategy — fall
       // back to a fresh template instead of leaving stale editor state.
       setCodeType("strategy")
-      setCode(PYTHON_STRATEGY_TEMPLATE)
+      setCode(strategyTemplateRef.current)
       setStrategyName("")
       setDataMapping(defaultDataMapping())
       setDataMappingRowErrors({})
@@ -885,7 +893,7 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
       if (editingStrategyId === strategyId) {
         setEditingStrategyId(null)
         setCompiledStrategyId(null)
-        setCode(PYTHON_STRATEGY_TEMPLATE)
+        setCode(strategyTemplateRef.current)
         setStrategyName("")
         setDataMapping(defaultDataMapping())
         setDataMappingRowErrors({})
@@ -951,7 +959,7 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
       !initialStrategyPendingRef.current
     ) {
       if (language === "python") {
-        setCode(PYTHON_STRATEGY_TEMPLATE)
+        setCode(strategyTemplateRef.current)
       } else {
         setCode(PINESCRIPT_STRATEGY_TEMPLATE)
       }
@@ -1915,6 +1923,15 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
               }}
             />
           </div>
+
+          {/* Backend template rules, Python strategies only */}
+          {codeType === "strategy" && language === "python" && templateInstructions.length > 0 && (
+            <ul className="border-t border-gray-700 px-6 py-3 list-disc text-xs text-gray-400 space-y-1 max-h-40 overflow-y-auto">
+              {templateInstructions.map((instruction, i) => (
+                <li key={i}>{instruction}</li>
+              ))}
+            </ul>
+          )}
 
           {/* Compilation Feedback */}
           {compileResult && (
