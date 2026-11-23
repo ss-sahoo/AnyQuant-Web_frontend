@@ -791,18 +791,14 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
   // Python strategy template served by the backend; the fallback covers a
   // failed fetch. A ref, so callbacks captured before the fetch still see it.
   const strategyTemplateRef = useRef(FALLBACK_PYTHON_STRATEGY_TEMPLATE)
-  const [templateInstructions, setTemplateInstructions] = useState<string[]>([])
   useEffect(() => {
     getCustomStrategyTemplate()
-      .then((data: { template?: unknown; instructions?: unknown }) => {
+      .then((data: { template?: unknown }) => {
         if (typeof data?.template === "string" && data.template.trim()) {
           const template = data.template
           strategyTemplateRef.current = template
           // Swap it in only if the editor still holds the untouched fallback.
           setCode((prev) => (prev === FALLBACK_PYTHON_STRATEGY_TEMPLATE ? template : prev))
-        }
-        if (Array.isArray(data?.instructions)) {
-          setTemplateInstructions(data.instructions.filter((s): s is string => typeof s === "string"))
         }
       })
       .catch((error) => console.error("Failed to load strategy template, using fallback:", error))
@@ -1923,15 +1919,6 @@ export function DeveloperModePage({ onBack, onCompile, onSave, onGoToBacktest, o
               }}
             />
           </div>
-
-          {/* Backend template rules, Python strategies only */}
-          {codeType === "strategy" && language === "python" && templateInstructions.length > 0 && (
-            <ul className="border-t border-gray-700 px-6 py-3 list-disc text-xs text-gray-400 space-y-1 max-h-40 overflow-y-auto">
-              {templateInstructions.map((instruction, i) => (
-                <li key={i}>{instruction}</li>
-              ))}
-            </ul>
-          )}
 
           {/* Compilation Feedback */}
           {compileResult && (
